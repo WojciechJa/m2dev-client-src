@@ -2166,6 +2166,14 @@ PyObject* playerSendDragonSoulRefine(PyObject* poSelf, PyObject* poArgs)
 	
 	return Py_BuildNone();
 }
+
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+PyObject* playerGetGMLevel(PyObject* poSelf, PyObject* poArgs)
+{
+	return Py_BuildValue("b", CPythonPlayer::Instance().GetStatus(POINT_GM_LEVEL));
+}
+#endif
+
 void initPlayer()
 {
 	static PyMethodDef s_methods[] =
@@ -2330,6 +2338,9 @@ void initPlayer()
 		{ "GetItemLink",				playerGetItemLink,					METH_VARARGS },
 		{ "SlotTypeToInvenType",		playerSlotTypeToInvenType,			METH_VARARGS },
 		{ "SendDragonSoulRefine",		playerSendDragonSoulRefine,			METH_VARARGS },
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+		{ "GetGMLevel",					playerGetGMLevel,					METH_VARARGS },
+#endif
 
 		{ NULL,							NULL,								NULL },
 	};

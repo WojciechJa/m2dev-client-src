@@ -3,9 +3,9 @@
 
 #include <windows.h>
 
-#if defined(_DEBUG) && !defined(_PACKETDUMP)
+/*#if defined(_DEBUG) && !defined(_PACKETDUMP)
 #define _PACKETDUMP
-#endif
+#endif*/
 
 extern void SetLogLevel(UINT uLevel);
 extern void Log(UINT uLevel, const char* c_szMsg);

@@ -152,6 +152,9 @@ namespace UI
 			virtual BOOL	OnMouseRightButtonDoubleClick();
 			virtual BOOL	OnMouseMiddleButtonDown();
 			virtual BOOL	OnMouseMiddleButtonUp();
+#ifdef ENABLE_MOUSEWHEEL_EVENT
+			virtual BOOL	RunMouseWheelEvent(long nLen);
+#endif
 
 			virtual BOOL	OnKeyDown(int ikey);
 			virtual BOOL	OnKeyUp(int ikey);
@@ -402,6 +405,9 @@ namespace UI
 			void SetRotation(float fRotation);
 			void SetRenderingRect(float fLeft, float fTop, float fRight, float fBottom);
 			void SetRenderingMode(int iMode);
+#ifdef ENABLE_CLIP_RECT
+			void SetImageClipRect(float fLeft, float fTop, float fRight, float fBottom, bool bIsVertical = false);
+#endif
 
 		protected:
 			void OnCreateInstance();

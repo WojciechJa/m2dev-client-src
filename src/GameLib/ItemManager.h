@@ -27,7 +27,15 @@ class CItemManager : public CSingleton<CItemManager>
 		BOOL			SelectItemData(DWORD dwIndex);
 		CItemData *		GetSelectedItemDataPointer();
 
-		BOOL			GetItemDataPointer(DWORD dwItemID, CItemData ** ppItemData);
+	BOOL			GetItemDataPointer(DWORD dwItemID, CItemData ** ppItemData);
+
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+		TItemMap* GetAllItemVnums();
+		bool IsAdminPanelItemBlackList(DWORD dwVnum);
+		bool IsRefineble(DWORD dwVnum);
+		DWORD GetItemStartRefineVnum(DWORD dwVnum);
+		std::string GetItemBaseRefineName(DWORD dwVnum);
+#endif
 		
 		/////
 		bool			LoadItemDesc(const char* c_szFileName);

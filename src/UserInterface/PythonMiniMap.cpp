@@ -1117,6 +1117,11 @@ bool CPythonMiniMap::GetAtlasInfo(float fScreenX, float fScreenY, std::string & 
 	
 	float fRealX, fRealY;
 	__AtlasPositionToGlobalPosition(fLocalX, fLocalY, &fRealX, &fRealY);
+
+#ifdef ENABLE_MINIMAP_TELEPORT_CLICK
+	*pReturnPosX = fRealX;
+	*pReturnPosY = fRealY;
+#endif
 	
 	float fReverseScale = 1.0f / GetAtlasUniformScale();
 	float fCheckWidth = fReverseScale * 5.0f;

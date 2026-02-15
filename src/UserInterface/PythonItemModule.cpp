@@ -535,6 +535,41 @@ PyObject* itemLoadItemTable(PyObject* poSelf, PyObject* poArgs)
 	return Py_BuildNone();
 }
 
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+PyObject* itemAdminPanelGetItemList(PyObject* poSelf, PyObject* poArgs)
+{
+	CItemManager::TItemMap* ptr = CItemManager::Instance().GetAllItemVnums();
+
+	PyObject* poList = PyList_New(0);
+	for (CItemManager::TItemMap::iterator it = ptr->begin(); it != ptr->end(); ++it)
+	{
+		if (it->first < 10)
+			continue;
+
+		CItemData* pItemData = nullptr;
+		if (!CItemManager::Instance().GetItemDataPointer(it->first, &pItemData))
+			continue;
+
+		if (!CItemManager::Instance().IsAdminPanelItemBlackList(it->first))
+		{
+			if (pItemData->GetType() == CItemData::ITEM_TYPE_WEAPON ||
+				pItemData->GetType() == CItemData::ITEM_TYPE_ARMOR ||
+				pItemData->GetType() == CItemData::ITEM_TYPE_BELT)
+			{
+				if (CItemManager::Instance().IsRefineble(it->first))
+					PyList_Append(poList, Py_BuildValue("i", it->first));
+			}
+			else
+			{
+				PyList_Append(poList, Py_BuildValue("i", it->first));
+			}
+		}
+	}
+
+	return poList;
+}
+#endif
+
 void initItem()
 {
 	static PyMethodDef s_methods[] =
@@ -580,6 +615,10 @@ void initItem()
 		{ "Pick",							itemPick,								METH_VARARGS },
 
 		{ "LoadItemTable",					itemLoadItemTable,						METH_VARARGS },
+
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+		{ "AdminPanelGetItemList",			itemAdminPanelGetItemList,				METH_VARARGS },
+#endif
 
 		{ NULL,								NULL,									NULL		 },
 	};

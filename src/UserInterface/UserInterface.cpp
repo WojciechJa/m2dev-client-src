@@ -144,7 +144,7 @@ bool PackInitialize(const char * c_pszFolder)
 		"sound2",
 		// "bgm", // BGM files are loaded directly from disk, not from pack
 		"locale",
-		"uiscript",
+		//"uiscript", // Moved to "root" directory for better working directory handling in PyCharm
 		"ETC",
 		"uiloading",
 	};

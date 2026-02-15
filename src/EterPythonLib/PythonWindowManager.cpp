@@ -1042,6 +1042,24 @@ namespace UI
 		m_pMiddleCaptureWindow = NULL;
 	}
 
+#ifdef ENABLE_MOUSEWHEEL_EVENT
+	bool CWindowManager::RunMouseWheelEvent(long nLen)
+	{
+		CWindow* pWin;
+		if (pWin = GetPointWindow())
+		{
+			if (pWin->IsRendering() || pWin->IsShow())
+			{
+				if (pWin->RunMouseWheelEvent(nLen))
+					return true;
+				else if (pWin->GetRoot()->RunMouseWheelEvent(nLen))
+					return true;
+			}
+		}
+		return false;
+	}
+#endif
+
 	// IME
 	void CWindowManager::RunIMEUpdate()
 	{

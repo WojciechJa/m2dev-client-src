@@ -2455,6 +2455,35 @@ PyObject* wndMgrIsScissorRectEnabled(PyObject* poSelf, PyObject* poArgs)
 	return Py_BuildValue("b", pWindow->IsScissorRectEnabled());
 }
 
+#ifdef ENABLE_CLIP_RECT
+PyObject* wndSetClipRect(PyObject* poSelf, PyObject* poArgs)
+{
+	UI::CWindow* pWindow;
+	if (!PyTuple_GetWindow(poArgs, 0, &pWindow))
+		return Py_BuildException();
+	float fLeft;
+	if (!PyTuple_GetFloat(poArgs, 1, &fLeft))
+		return Py_BuildException();
+	float fTop;
+	if (!PyTuple_GetFloat(poArgs, 2, &fTop))
+		return Py_BuildException();
+	float fRight;
+	if (!PyTuple_GetFloat(poArgs, 3, &fRight))
+		return Py_BuildException();
+	float fBottom;
+	if (!PyTuple_GetFloat(poArgs, 4, &fBottom))
+		return Py_BuildException();
+	int isVertical;
+	if (!PyTuple_GetInteger(poArgs, 5, &isVertical))
+		return Py_BuildException();
+
+	if (pWindow->IsType(UI::CExpandedImageBox::Type()))
+		((UI::CExpandedImageBox*)pWindow)->SetImageClipRect(fLeft, fTop, fRight, fBottom, isVertical ? true : false);
+
+	return Py_BuildNone();
+}
+#endif
+
 void initwndMgr()
 {
 	static PyMethodDef s_methods[] =
@@ -2661,6 +2690,9 @@ void initwndMgr()
 		{ "EnableScissorRect",			wndMgrEnableScissorRect,			METH_VARARGS },
 		{ "DisableScissorRect",			wndMgrDisableScissorRect,			METH_VARARGS },
 		{ "IsScissorRectEnabled",		wndMgrIsScissorRectEnabled,			METH_VARARGS },
+#ifdef ENABLE_CLIP_RECT
+		{ "SetClipRect",				wndSetClipRect,						METH_VARARGS },
+#endif
 
 		{ NULL,							NULL,								NULL },
 	};

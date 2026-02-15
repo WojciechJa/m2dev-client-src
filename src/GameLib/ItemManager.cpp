@@ -379,6 +379,97 @@ void CItemManager::Destroy()
 	m_ItemMap.clear();
 }
 
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+CItemManager::TItemMap* CItemManager::GetAllItemVnums()
+{
+	return &m_ItemMap;
+}
+
+enum
+{
+	SHOW_DRAGONSOUL_ITEMS = false,
+	SHOW_COSTUMES = false,
+	MAX_STONE_REFINE = 4,
+};
+
+bool CItemManager::IsAdminPanelItemBlackList(DWORD dwVnum)
+{
+	CItemData* pItemData = nullptr;
+	if (!CItemManager::Instance().GetItemDataPointer(dwVnum, &pItemData))
+		return true;
+
+	if (!SHOW_DRAGONSOUL_ITEMS)
+	{
+		// Dragon Soul ranges
+		if (dwVnum >= 51501 && dwVnum <= 51638)
+			return true;
+
+		if (dwVnum >= 100000 && dwVnum <= 165400)
+			return true;
+	}
+
+	if (!SHOW_COSTUMES)
+	{
+		if (pItemData->GetType() == CItemData::ITEM_TYPE_COSTUME)
+			return true;
+	}
+
+	// Stones: allow base range + refine
+	if (dwVnum >= 28000 && dwVnum <= 28945)
+	{
+		if (dwVnum >= 28000 && dwVnum <= (28045 + MAX_STONE_REFINE * 100))
+			return false;
+		return true;
+	}
+
+	return false;
+}
+
+bool CItemManager::IsRefineble(DWORD dwVnum)
+{
+	DWORD StartRefineVnum = GetItemStartRefineVnum(dwVnum);
+
+	if (StartRefineVnum != dwVnum)
+		return false;
+
+	if (StartRefineVnum % 10 != 0)
+		return false;
+
+	CItemData* tbl = nullptr;
+	if (!GetItemDataPointer(StartRefineVnum, &tbl))
+		return false;
+
+	return true;
+}
+
+DWORD CItemManager::GetItemStartRefineVnum(DWORD dwVnum)
+{
+	std::string baseItemName = GetItemBaseRefineName(dwVnum);
+	if (baseItemName.empty())
+		return 0;
+
+	DWORD manage_vnum = dwVnum;
+	while (!(strcmp(baseItemName.c_str(), GetItemBaseRefineName(manage_vnum).c_str())))
+		--manage_vnum;
+
+	return (manage_vnum + 1);
+}
+
+std::string CItemManager::GetItemBaseRefineName(DWORD dwVnum)
+{
+	CItemData* tbl = nullptr;
+	if (!GetItemDataPointer(dwVnum, &tbl))
+		return "";
+
+	char* p = const_cast<char*>(strrchr(tbl->GetName(), '+'));
+	if (!p)
+		return "";
+
+	std::string sFirstItemName(tbl->GetName(), (tbl->GetName() + (p - tbl->GetName())));
+	return sFirstItemName;
+}
+#endif
+
 CItemManager::CItemManager() : m_pSelectedItemData(NULL)
 {
 }

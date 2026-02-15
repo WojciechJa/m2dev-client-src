@@ -1490,4 +1490,21 @@ void initapp()
 #else
 	PyModule_AddIntConstant(poModule, "ENABLE_ATLAS_SCALE",	0);
 #endif
+
+#ifdef ENABLE_ASLAN_MODULAR_ADMIN_PANEL
+	PyModule_AddIntConstant(poModule, "ENABLE_ASLAN_MODULAR_ADMIN_PANEL", 1);
+	PyModule_AddIntConstant(poModule, "ADMINPANEL_MOD_CREATE_ITEM_ASLAN", 1);
+	PyModule_AddIntConstant(poModule, "ADMINPANEL_MOD_MANAGE_FAKE_PLAYER", 1);
+	//- Modules
+#else
+	PyModule_AddIntConstant(poModule, "ENABLE_ASLAN_MODULAR_ADMIN_PANEL", 0);
+	PyModule_AddIntConstant(poModule, "ADMINPANEL_MOD_CREATE_ITEM_ASLAN", 0);
+	PyModule_AddIntConstant(poModule, "ADMINPANEL_MOD_MANAGE_FAKE_PLAYER", 0);
+	//- Modules
+#endif
+#ifdef ENABLE_EXTENDED_SLIDERBAR
+	PyModule_AddIntConstant(poModule, "ENABLE_EXTENDED_SLIDERBAR", true);
+#else
+	PyModule_AddIntConstant(poModule, "ENABLE_EXTENDED_SLIDERBAR", false);
+#endif
 }
