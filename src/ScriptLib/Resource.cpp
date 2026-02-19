@@ -92,6 +92,7 @@ CPythonResource::CPythonResource()
 	m_resManager.RegisterResourceNewFunctionPointer("sub", NewSubImage);
 	m_resManager.RegisterResourceNewFunctionPointer("dds", NewImage);
 	m_resManager.RegisterResourceNewFunctionPointer("jpg", NewImage);
+	m_resManager.RegisterResourceNewFunctionPointer("png", NewImage);
 	m_resManager.RegisterResourceNewFunctionPointer("tga", NewImage);
 	m_resManager.RegisterResourceNewFunctionPointer("bmp", NewImage);
 	m_resManager.RegisterResourceNewFunctionPointer("fnt", NewText);
