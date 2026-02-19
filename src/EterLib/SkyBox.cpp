@@ -270,6 +270,8 @@ void CSkyBox::SetCloudTexture(const char * c_szFileName)
 
 	m_FaceCloud.m_strfacename = c_szFileName;
 	CGraphicImageInstance * pGraphicImageInstance = GenerateTexture(c_szFileName);
+	if (!pGraphicImageInstance)
+		TraceError("CSkyBox::SetCloudTexture - Failed to load cloud texture: %s", c_szFileName);
 	m_GraphicImageInstanceMap.insert(TGraphicImageInstanceMap::value_type(m_FaceCloud.m_strfacename, pGraphicImageInstance));
 
 	// 이거 안쓰는거 같은데요? [cronan]
@@ -868,6 +870,9 @@ void CSkyBox::Render()
 
 void CSkyBox::RenderCloud()
 {
+	if (m_FaceCloud.m_strfacename.empty())
+		return;
+
 	CGraphicImageInstance * pCloudGraphicImageInstance = m_GraphicImageInstanceMap[m_FaceCloud.m_strfacename];
 	if (!pCloudGraphicImageInstance)
 		return;

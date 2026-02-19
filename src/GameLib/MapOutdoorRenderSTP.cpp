@@ -30,6 +30,9 @@ void CMapOutdoor::__RenderTerrain_RenderSoftwareTransformPatch()
 	std::pair<float, long> fog_far(kTPRS.m_fFogFarDistance+800.0f, 0);
 	std::pair<float, long> fog_near(kTPRS.m_fFogNearDistance-3200.0f, 0);
 
+	if (mc_pEnvironmentData && mc_pEnvironmentData->bDensityFog)
+		fog_far.first = 1e10f;
+
 	std::vector<std::pair<float ,long> >::iterator far_it = std::upper_bound(m_PatchVector.begin(),m_PatchVector.end(),fog_far);
 	std::vector<std::pair<float ,long> >::iterator near_it = std::upper_bound(m_PatchVector.begin(),m_PatchVector.end(),fog_near);
 

@@ -240,10 +240,6 @@ void CMapOutdoor::OnBeginEnvironment()
 		return;
 
 	CSpeedTreeForestDirectX& rkForest=CSpeedTreeForestDirectX::Instance();
-	rkForest.SetFog(
-		mc_pEnvironmentData->GetFogNearDistance(), 
-		mc_pEnvironmentData->GetFogFarDistance()
-	);
 
 	const D3DLIGHT9& c_rkLight = mc_pEnvironmentData->DirLights[ENV_DIRLIGHT_CHARACTER];
 	rkForest.SetLight(
