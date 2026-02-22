@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "PythonSystem.h"
+#include "PythonApplication.h"
 
 PyObject * systemGetWidth(PyObject* poSelf, PyObject* poArgs)
 {
@@ -155,6 +156,42 @@ PyObject * systemSetSoundVolume(PyObject * poSelf, PyObject * poArgs)
 
 	CPythonSystem::Instance().SetSoundVolume(fVolume);
 	return Py_BuildNone();
+}
+
+PyObject * systemGetRenderFPSLimit(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetRenderFPSLimit());
+}
+
+PyObject * systemSetRenderFPSLimit(PyObject * poSelf, PyObject * poArgs)
+{
+	int iFPSLimit;
+	if (!PyTuple_GetInteger(poArgs, 0, &iFPSLimit))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetRenderFPSLimit(iFPSLimit);
+	CPythonApplication::Instance().SetFPS(CPythonSystem::Instance().GetRenderFPSLimit());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetVSync(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsVSyncEnabled() ? 1 : 0);
+}
+
+PyObject * systemSetVSync(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	const bool isEnabled = iEnabled ? true : false;
+	const bool oldState = CPythonSystem::Instance().IsVSyncEnabled();
+	CPythonSystem::Instance().SetVSyncEnabled(isEnabled);
+	const bool applied = CPythonApplication::Instance().SetVSync(isEnabled);
+	if (!applied)
+		CPythonSystem::Instance().SetVSyncEnabled(oldState);
+	return Py_BuildValue("i", applied ? 1 : 0);
 }
 
 PyObject * systemIsSoftwareCursor(PyObject * poSelf, PyObject * poArgs)
@@ -428,9 +465,13 @@ void initsystem()
 
 		{ "GetMusicVolume",				systemGetMusicVolume,			METH_VARARGS },
 		{ "GetSoundVolume",				systemGetSoundVolume,			METH_VARARGS },
+		{ "GetRenderFPSLimit",			systemGetRenderFPSLimit,		METH_VARARGS },
+		{ "GetVSync",					systemGetVSync,					METH_VARARGS },
 
 		{ "SetMusicVolume",				systemSetMusicVolume,			METH_VARARGS },
 		{ "SetSoundVolume",				systemSetSoundVolume,			METH_VARARGS },
+		{ "SetRenderFPSLimit",			systemSetRenderFPSLimit,		METH_VARARGS },
+		{ "SetVSync",					systemSetVSync,					METH_VARARGS },
 		{ "IsSoftwareCursor",			systemIsSoftwareCursor,			METH_VARARGS },
 
 		{ "SetViewChatFlag",			systemSetViewChatFlag,			METH_VARARGS },

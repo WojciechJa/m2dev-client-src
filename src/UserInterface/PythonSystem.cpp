@@ -4,6 +4,22 @@
 
 #define DEFAULT_VALUE_ALWAYS_SHOW_NAME		true
 
+namespace {
+	int NormalizeRenderFPSLimit(int iFPSLimit)
+	{
+		switch (iFPSLimit)
+		{
+			case 0:
+			case 60:
+			case 90:
+			case 120:
+				return iFPSLimit;
+			default:
+				return 60;
+		}
+	}
+}
+
 void CPythonSystem::SetInterfaceHandler(PyObject * poHandler)
 {
 // NOTE : 레퍼런스 카운트는 바꾸지 않는다. 레퍼런스가 남아 있어 Python에서 완전히 지워지지 않기 때문.
@@ -198,6 +214,26 @@ DWORD CPythonSystem::GetFrequency()
 	return m_Config.frequency;
 }
 
+int CPythonSystem::GetRenderFPSLimit()
+{
+	return NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit);
+}
+
+void CPythonSystem::SetRenderFPSLimit(int iFPSLimit)
+{
+	m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(iFPSLimit);
+}
+
+bool CPythonSystem::IsVSyncEnabled()
+{
+	return m_Config.bVSync;
+}
+
+void CPythonSystem::SetVSyncEnabled(bool isEnabled)
+{
+	m_Config.bVSync = isEnabled;
+}
+
 bool CPythonSystem::IsNoSoundCard()
 {
 	return m_Config.bNoSoundCard;
@@ -299,6 +335,8 @@ void CPythonSystem::SetDefaultConfig()
 	m_Config.bpp				= 32;
 
 	m_Config.bWindowed			= false;
+	m_Config.iRenderFPSLimit	= 60;
+	m_Config.bVSync				= true;
 
 	m_Config.is_software_cursor	= false;
 	m_Config.is_object_culling	= true;
@@ -462,7 +500,13 @@ bool CPythonSystem::LoadConfig()
 			m_Config.bShowDamage = atoi(value) == 1 ? true : false;
 		else if (!stricmp(command, "SHOW_SALESTEXT"))
 			m_Config.bShowSalesText = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "RENDER_FPS_LIMIT"))
+			m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(atoi(value));
+		else if (!stricmp(command, "VSYNC"))
+			m_Config.bVSync = atoi(value) == 1 ? true : false;
 	}
+
+	m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit);
 
 	if (m_Config.bWindowed)
 	{
@@ -555,6 +599,8 @@ bool CPythonSystem::SaveConfig()
 	// MR-14: Fog update by Alaric
 	fprintf(fp, "FOG_LEVEL				%d\n", m_Config.iFogLevel);
 	// MR-14: -- END OF -- Fog update by Alaric
+	fprintf(fp, "RENDER_FPS_LIMIT		%d\n", NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit));
+	fprintf(fp, "VSYNC					%d\n", m_Config.bVSync ? 1 : 0);
 	fprintf(fp, "\n");
 
 	fclose(fp);
@@ -630,6 +676,12 @@ void CPythonSystem::ApplyConfig() // 이전 설정과 현재 설정을 비교해
 		else
 			CPythonApplication::Instance().SetCursorMode(CPythonApplication::CURSOR_MODE_HARDWARE);
 	}
+
+	if (m_OldConfig.iRenderFPSLimit != m_Config.iRenderFPSLimit)
+		CPythonApplication::Instance().SetFPS(m_Config.iRenderFPSLimit);
+
+	if (m_OldConfig.bVSync != m_Config.bVSync)
+		CPythonApplication::Instance().SetVSync(m_Config.bVSync);
 
 	m_OldConfig = m_Config;
 

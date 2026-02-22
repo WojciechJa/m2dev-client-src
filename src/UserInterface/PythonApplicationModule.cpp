@@ -566,6 +566,25 @@ PyObject * appSetFPS(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildNone();
 }
 
+PyObject * appGetFPSLimit(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetFPSLimit());
+}
+
+PyObject * appSetVSync(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	return Py_BuildValue("i", CPythonApplication::Instance().SetVSync(iEnabled ? true : false) ? 1 : 0);
+}
+
+PyObject * appGetVSync(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetVSync());
+}
+
 PyObject * appSetGlobalCenterPosition(PyObject * poSelf, PyObject * poArgs)
 {
 	int x;
@@ -1226,6 +1245,9 @@ void initapp()
 		{ "GetFaceSpeed",				appGetFaceSpeed,				METH_VARARGS },
 		{ "GetFaceCount",				appGetFaceCount,				METH_VARARGS },
 		{ "SetFPS",						appSetFPS,						METH_VARARGS },
+		{ "GetFPSLimit",				appGetFPSLimit,					METH_VARARGS },
+		{ "SetVSync",					appSetVSync,					METH_VARARGS },
+		{ "GetVSync",					appGetVSync,					METH_VARARGS },
 		{ "SetGlobalCenterPosition",	appSetGlobalCenterPosition,		METH_VARARGS },
 		{ "SetCenterPosition",			appSetCenterPosition,			METH_VARARGS },
 		{ "GetCursorPosition",			appGetCursorPosition,			METH_VARARGS },

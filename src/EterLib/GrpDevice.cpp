@@ -19,6 +19,7 @@ RECT g_rcBrowser;
 
 CGraphicDevice::CGraphicDevice()
 : m_uBackBufferCount(0)
+, m_isVSyncEnabled(true)
 {
 	__Initialize();
 }
@@ -60,6 +61,14 @@ void CGraphicDevice::__WarningMessage(HWND hWnd, UINT uiMsg)
 	std::wstring wCaption = L"Warning"; // static wide literal is fine
 
 	MessageBoxW(hWnd, wMsg.c_str(), wCaption.c_str(), MB_OK | MB_TOPMOST);
+}
+
+void CGraphicDevice::__UpdatePresentationInterval(D3DPRESENT_PARAMETERS& rkD3DPP)
+{
+	if (rkD3DPP.Windowed)
+		rkD3DPP.PresentationInterval = m_isVSyncEnabled ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
+	else
+		rkD3DPP.PresentationInterval = m_isVSyncEnabled ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
 }
 
 void CGraphicDevice::MoveWebBrowserRect(const RECT& c_rcWebPage)
@@ -269,6 +278,38 @@ bool CGraphicDevice::Reset()
 	return true;
 }
 
+bool CGraphicDevice::SetVSyncEnabled(bool isEnabled)
+{
+	if (m_isVSyncEnabled == isEnabled)
+		return true;
+
+	const bool oldVSyncState = m_isVSyncEnabled;
+	D3DPRESENT_PARAMETERS oldParams = ms_d3dPresentParameter;
+
+	m_isVSyncEnabled = isEnabled;
+
+	if (!ms_lpd3dDevice)
+		return true;
+
+	if (D3DSWAPEFFECT_COPY == ms_d3dPresentParameter.SwapEffect)
+	{
+		__UpdatePresentationInterval(g_kD3DPP);
+		return true;
+	}
+
+	__UpdatePresentationInterval(ms_d3dPresentParameter);
+
+	if (FAILED(ms_lpd3dDevice->Reset(&ms_d3dPresentParameter)))
+	{
+		m_isVSyncEnabled = oldVSyncState;
+		ms_d3dPresentParameter = oldParams;
+		return false;
+	}
+
+	STATEMANAGER.SetDefaultState();
+	return true;
+}
+
 static LPDIRECT3DSURFACE9 s_lpStencil;
 static DWORD   s_MaxTextureWidth, s_MaxTextureHeight;
 
@@ -385,16 +426,11 @@ RETRY:
 	ms_d3dPresentParameter.SwapEffect						= D3DSWAPEFFECT_DISCARD;
 	ms_d3dPresentParameter.MultiSampleType					= D3DMULTISAMPLE_NONE;
 
+	__UpdatePresentationInterval(ms_d3dPresentParameter);
 	if (Windowed)
-	{
-		ms_d3dPresentParameter.PresentationInterval			= D3DPRESENT_INTERVAL_DEFAULT;
 		ms_d3dPresentParameter.FullScreen_RefreshRateInHz	= 0;
-	}
 	else
-	{
-		ms_d3dPresentParameter.PresentationInterval			= D3DPRESENT_INTERVAL_ONE;
 		ms_d3dPresentParameter.FullScreen_RefreshRateInHz	= D3DPRESENT_RATE_DEFAULT;
-	}
 
 	ms_d3dPresentParameter.EnableAutoDepthStencil			= TRUE;
 	ms_d3dPresentParameter.AutoDepthStencilFormat			= D3DFMT_D24S8;

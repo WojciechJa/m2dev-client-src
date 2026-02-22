@@ -52,6 +52,8 @@ class CPythonSystem : public CSingleton<CPythonSystem>
 			DWORD			height;
 			DWORD			bpp;
 			DWORD			frequency;
+			int				iRenderFPSLimit;
+			bool			bVSync;
 
 			bool			is_software_cursor;
 			bool			is_object_culling;
@@ -107,6 +109,10 @@ class CPythonSystem : public CSingleton<CPythonSystem>
 		DWORD							GetHeight();
 		DWORD							GetBPP();
 		DWORD							GetFrequency();
+		int								GetRenderFPSLimit();
+		void							SetRenderFPSLimit(int iFPSLimit);
+		bool							IsVSyncEnabled();
+		void							SetVSyncEnabled(bool isEnabled);
 		bool							IsSoftwareCursor();
 		bool							IsWindowed();
 		bool							IsViewChat();

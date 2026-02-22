@@ -206,6 +206,9 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		float GetPitch();
 
 		void SetFPS(int iFPS);
+		int GetFPSLimit() const { return m_iFPS; }
+		bool SetVSync(bool isEnabled);
+		int GetVSync() const { return m_isVSyncEnabled ? 1 : 0; }
 		void SetServerTime(time_t tTime);
 		time_t GetServerTime();
 		time_t GetServerTimeStamp();
@@ -306,6 +309,11 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 
 		void __SetFullScreenWindow(HWND hWnd, DWORD dwWidth, DWORD dwHeight, DWORD dwBPP);
 		void __MinimizeFullScreenWindow(HWND hWnd, DWORD dwWidth, DWORD dwHeight);
+		int __NormalizeFPSLimit(int iFPS) const;
+		void __UpdateRenderFrameInterval();
+		void __RunUpdateStep(DWORD& rUpdateFrameCount);
+		void __RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceCount);
+		void __SleepFrame(DWORD dwNow, DWORD dwNextUpdateTime);
 
 
 	protected:
@@ -359,6 +367,10 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		D3DXVECTOR3					m_v3CenterPosition;
 
 		unsigned int				m_iFPS;
+		float						m_fRenderFrameIntervalMS;
+		double						m_dNextRenderTimeMS;
+		DWORD						m_dwNextUpdateTime;
+		bool						m_isVSyncEnabled;
 		float						m_fAveRenderTime;
 		DWORD						m_dwCurRenderTime;
 		DWORD						m_dwCurUpdateTime;

@@ -41,6 +41,8 @@ public:
 
 	EDeviceState	GetDeviceState();
 	bool			Reset();
+	bool			SetVSyncEnabled(bool isEnabled);
+	bool			IsVSyncEnabled() const { return m_isVSyncEnabled; }
 
 	void			EnableWebBrowserMode(const RECT& c_rcWebPage);		
 	void			DisableWebBrowserMode();
@@ -52,6 +54,7 @@ public:
 protected:
 	void __Initialize();
 	void __WarningMessage(HWND hWnd, UINT uiMsg);
+	void __UpdatePresentationInterval(D3DPRESENT_PARAMETERS& rkD3DPP);
 
 	void __InitializeDefaultIndexBufferList();
 	void __DestroyDefaultIndexBufferList();	
@@ -69,6 +72,7 @@ protected:
 
 protected:
 	DWORD						m_uBackBufferCount;
+	bool						m_isVSyncEnabled;
 	std::map<UINT, std::string>	m_kMap_strWarningMessage;
 	CStateManager*				m_pStateManager;
 };
