@@ -6,6 +6,22 @@
 #include "ParticleInstance.h"
 
 CDynamicPool<CParticleSystemInstance>	CParticleSystemInstance::ms_kPool;
+float CParticleSystemInstance::ms_fGlobalEmissionScale = 1.0f;
+
+void CParticleSystemInstance::SetGlobalEmissionScale(float fScale)
+{
+	if (fScale < 0.1f)
+		fScale = 0.1f;
+	else if (fScale > 1.0f)
+		fScale = 1.0f;
+
+	ms_fGlobalEmissionScale = fScale;
+}
+
+float CParticleSystemInstance::GetGlobalEmissionScale()
+{
+	return ms_fGlobalEmissionScale;
+}
 
 void CParticleSystemInstance::DestroySystem()
 {
@@ -38,7 +54,7 @@ void CParticleSystemInstance::CreateParticles(float fElapsedTime)
 	float fEmissionCount;
 	m_pEmitterProperty->GetEmissionCountPerSecond(m_fLocalTime, &fEmissionCount);
 
-	float fCreatingValue = fEmissionCount * (fElapsedTime / 1.0f) + m_fEmissionResidue;
+	float fCreatingValue = fEmissionCount * ms_fGlobalEmissionScale * (fElapsedTime / 1.0f) + m_fEmissionResidue;
 	int iCreatingCount = int(fCreatingValue);
 	m_fEmissionResidue = fCreatingValue - iCreatingCount;
 

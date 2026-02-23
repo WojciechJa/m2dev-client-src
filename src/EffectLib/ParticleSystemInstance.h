@@ -12,11 +12,14 @@ class CParticleSystemInstance : public CEffectElementBaseInstance
 {
 	public:
 		static void DestroySystem();
+		static void SetGlobalEmissionScale(float fScale);
+		static float GetGlobalEmissionScale();
 
 		static CParticleSystemInstance* New();
 		static void Delete(CParticleSystemInstance* pkData);
 
 		static CDynamicPool<CParticleSystemInstance>	ms_kPool;
+		static float								ms_fGlobalEmissionScale;
 
 	public:
 		template <typename T>

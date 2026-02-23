@@ -40,6 +40,7 @@ class CEffectInstance : public CGraphicObjectInstance
 		virtual ~CEffectInstance();
 		
 		bool LessRenderOrder(CEffectInstance* pkEftInst);
+		DWORD GetActiveParticleCount() const;
 
 		void SetEffectDataPointer(CEffectData * pEffectData);
 		

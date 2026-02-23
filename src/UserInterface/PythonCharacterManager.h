@@ -59,6 +59,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		void								Update();
 		void								Deform();
 		void								Render();
+		void								SetAnimationLODSettings(bool bEnable, int iProfile);
 		void								RenderShadowMainInstance();
 		void								RenderShadowAllInstances();
 		void								RenderCollision();
@@ -110,6 +111,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 
 		void __RenderSortedAliveActorList();
 		void __RenderSortedDeadActorList();
+		bool __ShouldThrottleAnimation(CInstanceBase* pInstance, CInstanceBase* pMainInstance, DWORD dwTargetVID) const;
 
 	protected:
 		CInstanceBase *						m_pkInstMain;
@@ -121,6 +123,9 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		TCharacterInstanceList				m_kDeadInstList;
 
 		std::vector<CInstanceBase*>			m_kVct_pkInstPicked;
+		bool								m_bAnimLODEnabled;
+		int									m_iAnimLODProfile;
+		DWORD								m_dwAnimLODFrameCounter;
 
 		DWORD								m_adwPointEffect[POINT_MAX_NUM];
 

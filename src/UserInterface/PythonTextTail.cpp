@@ -6,6 +6,7 @@
 #include "resource.h"
 #include "PythonTextTail.h"
 #include "PythonCharacterManager.h"
+#include "PythonPlayer.h"
 #include "PythonGuild.h"
 #include "Locale.h"
 #include "MarkManager.h"
@@ -53,6 +54,54 @@ void CPythonTextTail::GetInfo(std::string* pstInfo)
 		m_TextTailPool.GetCapacity());
 
 	pstInfo->append(szInfo);
+}
+
+void CPythonTextTail::SetOptimizationSettings(bool bEnable, int iProfile)
+{
+	m_bOptimizationEnabled = bEnable ? true : false;
+	m_iOptimizationProfile = iProfile;
+	if (m_iOptimizationProfile < 0)
+		m_iOptimizationProfile = 0;
+	else if (m_iOptimizationProfile > 2)
+		m_iOptimizationProfile = 2;
+
+	if (!m_bOptimizationEnabled || m_iOptimizationProfile <= 0)
+	{
+		m_dwArrangeIntervalMS = 0;
+		m_iMaxRenderCount = 1000000;
+	}
+	else if (m_iOptimizationProfile == 1)
+	{
+		m_dwArrangeIntervalMS = 100;
+		m_iMaxRenderCount = 80;
+	}
+	else
+	{
+		m_dwArrangeIntervalMS = 130;
+		m_iMaxRenderCount = 50;
+	}
+
+	m_dwLastArrangeTime = 0;
+}
+
+void CPythonTextTail::SetOptimizationRange(float fMaxDistance)
+{
+	if (fMaxDistance < 1500.0f)
+		fMaxDistance = 1500.0f;
+	else if (fMaxDistance > 9000.0f)
+		fMaxDistance = 9000.0f;
+
+	m_fOptimizationMaxDistance = fMaxDistance;
+}
+
+float CPythonTextTail::GetOptimizationRange() const
+{
+	return m_fOptimizationMaxDistance;
+}
+
+DWORD CPythonTextTail::GetVisibleTextTailCount() const
+{
+	return static_cast<DWORD>(m_CharacterTextTailList.size() + m_ItemTextTailList.size() + m_ChatTailMap.size());
 }
 
 void CPythonTextTail::UpdateAllTextTail()
@@ -160,6 +209,87 @@ void CPythonTextTail::ArrangeTextTail()
 	TTextTailList::iterator itorCompare;
 
 	DWORD dwTime = CTimer::Instance().GetCurrentMillisecond();
+	if (m_bOptimizationEnabled && m_dwArrangeIntervalMS > 0 && dwTime - m_dwLastArrangeTime < m_dwArrangeIntervalMS)
+	{
+		for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
+		{
+			TTextTail* pTextTail = *itor;
+			if (pTextTail->pOwnerTextInstance)
+			{
+				pTextTail->pOwnerTextInstance->SetPosition(pTextTail->x, pTextTail->y, pTextTail->z);
+				pTextTail->pOwnerTextInstance->Update();
+				pTextTail->pTextInstance->SetColor(pTextTail->Color.r, pTextTail->Color.g, pTextTail->Color.b);
+				pTextTail->pTextInstance->SetPosition(pTextTail->x, pTextTail->y + 15.0f, pTextTail->z);
+				pTextTail->pTextInstance->Update();
+			}
+			else
+			{
+				pTextTail->pTextInstance->SetColor(pTextTail->Color.r, pTextTail->Color.g, pTextTail->Color.b);
+				pTextTail->pTextInstance->SetPosition(pTextTail->x, pTextTail->y, pTextTail->z);
+				pTextTail->pTextInstance->Update();
+			}
+		}
+
+		for (itor = m_CharacterTextTailList.begin(); itor != m_CharacterTextTailList.end(); ++itor)
+		{
+			TTextTail* pTextTail = *itor;
+
+			CGraphicMarkInstance* pMarkInstance = pTextTail->pMarkInstance;
+			CGraphicTextInstance* pGuildNameInstance = pTextTail->pGuildNameTextInstance;
+			if (pMarkInstance && pGuildNameInstance)
+			{
+				int iWidth, iHeight;
+				int iImageHalfSize = pMarkInstance->GetWidth() / 2 + c_fxMarkPosition;
+				pGuildNameInstance->GetTextSize(&iWidth, &iHeight);
+
+				pMarkInstance->SetPosition(pTextTail->x - iWidth / 2 - iImageHalfSize, pTextTail->y - c_fyMarkPosition);
+				pGuildNameInstance->SetPosition(pTextTail->x + iImageHalfSize, pTextTail->y - c_fyGuildNamePosition, pTextTail->z);
+				pGuildNameInstance->Update();
+			}
+
+			int iNameWidth = 0;
+			int iNameHeight = 0;
+			pTextTail->pTextInstance->GetTextSize(&iNameWidth, &iNameHeight);
+
+			const float fxAdd = 4.0f;
+			float nameShift = 0.0f;
+			if (pTextTail->pTitleTextInstance)
+				nameShift = 1.0f;
+			else if (pTextTail->pLevelTextInstance)
+				nameShift = 5.0f;
+
+			const float nameX = floorf((pTextTail->x + nameShift) + 0.5f);
+			const float nameY = floorf(pTextTail->y + 0.5f);
+			const float nameLeftEdge = pTextTail->x - (iNameWidth / 2.0f);
+			float cursor = nameLeftEdge - fxAdd;
+
+			cursor = TextTailBiDi(pTextTail->pTitleTextInstance, cursor, nameY, pTextTail->z, fxAdd, EPlaceDir::Left);
+			cursor = TextTailBiDi(pTextTail->pLevelTextInstance, cursor, nameY, pTextTail->z, fxAdd, EPlaceDir::Left);
+
+			pTextTail->pTextInstance->SetColor(pTextTail->Color.r, pTextTail->Color.g, pTextTail->Color.b);
+			pTextTail->pTextInstance->SetPosition(nameX, nameY, pTextTail->z);
+			pTextTail->pTextInstance->Update();
+		}
+
+		for (TChatTailMap::iterator itorChat = m_ChatTailMap.begin(); itorChat != m_ChatTailMap.end();)
+		{
+			TTextTail* pTextTail = itorChat->second;
+			if (pTextTail->LivingTime < dwTime)
+			{
+				DeleteTextTail(pTextTail);
+				itorChat = m_ChatTailMap.erase(itorChat);
+				continue;
+			}
+
+			pTextTail->pTextInstance->SetColor(pTextTail->Color);
+			pTextTail->pTextInstance->SetPosition(pTextTail->x, pTextTail->y, pTextTail->z);
+			pTextTail->pTextInstance->Update();
+
+			++itorChat;
+		}
+		return;
+	}
+	m_dwLastArrangeTime = dwTime;
 
 	for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
 	{
@@ -279,11 +409,63 @@ void CPythonTextTail::ArrangeTextTail()
 
 void CPythonTextTail::Render()
 {
-	TTextTailList::iterator itor;
+	const int iRenderLimit = m_bOptimizationEnabled ? m_iMaxRenderCount : 1000000;
+	int iRendered = 0;
+	const DWORD dwTargetVID = CPythonPlayer::Instance().GetTargetVID();
 
-	for (itor = m_CharacterTextTailList.begin(); itor != m_CharacterTextTailList.end(); ++itor)
+	std::vector<TTextTail*> kCharacterRenderList;
+	kCharacterRenderList.reserve(m_CharacterTextTailList.size());
+	for (TTextTailList::iterator itor = m_CharacterTextTailList.begin(); itor != m_CharacterTextTailList.end(); ++itor)
+		kCharacterRenderList.push_back(*itor);
+
+	if (m_bOptimizationEnabled)
 	{
-		TTextTail * pTextTail = *itor;
+		struct FTextTailPriority
+		{
+			DWORD dwTargetVID;
+			bool operator() (TTextTail* pkLeft, TTextTail* pkRight) const
+			{
+				int iLeftPriority = 2;
+				int iRightPriority = 2;
+
+				if (pkLeft->dwVirtualID == dwTargetVID)
+					iLeftPriority = 0;
+				else
+				{
+					CInstanceBase* pLeftInstance = CPythonCharacterManager::Instance().GetInstancePtr(pkLeft->dwVirtualID);
+					if (pLeftInstance && pLeftInstance->IsPartyMember())
+						iLeftPriority = 1;
+				}
+
+				if (pkRight->dwVirtualID == dwTargetVID)
+					iRightPriority = 0;
+				else
+				{
+					CInstanceBase* pRightInstance = CPythonCharacterManager::Instance().GetInstancePtr(pkRight->dwVirtualID);
+					if (pRightInstance && pRightInstance->IsPartyMember())
+						iRightPriority = 1;
+				}
+
+				if (iLeftPriority != iRightPriority)
+					return iLeftPriority < iRightPriority;
+
+				return pkLeft->fDistanceFromPlayer < pkRight->fDistanceFromPlayer;
+			}
+		};
+
+		FTextTailPriority kSorter;
+		kSorter.dwTargetVID = dwTargetVID;
+		std::stable_sort(kCharacterRenderList.begin(), kCharacterRenderList.end(), kSorter);
+	}
+
+	for (std::vector<TTextTail*>::iterator it = kCharacterRenderList.begin(); it != kCharacterRenderList.end(); ++it)
+	{
+		if (iRendered >= iRenderLimit)
+			break;
+
+		TTextTail* pTextTail = *it;
+		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+			continue;
 		pTextTail->pTextInstance->Render();
 		if (pTextTail->pMarkInstance && pTextTail->pGuildNameTextInstance)
 		{
@@ -291,30 +473,60 @@ void CPythonTextTail::Render()
 			pTextTail->pGuildNameTextInstance->Render();
 		}
 		if (pTextTail->pTitleTextInstance)
-		{
 			pTextTail->pTitleTextInstance->Render();
-		}
 		if (pTextTail->pLevelTextInstance)
-		{
 			pTextTail->pLevelTextInstance->Render();
-		}
+
+		++iRendered;
 	}
 
-	for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
-	{
-		TTextTail * pTextTail = *itor;
+	std::vector<TTextTail*> kItemRenderList;
+	kItemRenderList.reserve(m_ItemTextTailList.size());
+	for (TTextTailList::iterator itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
+		kItemRenderList.push_back(*itor);
 
+	if (m_bOptimizationEnabled)
+	{
+		struct FItemTextTailDistance
+		{
+			bool operator() (TTextTail* pkLeft, TTextTail* pkRight) const
+			{
+				return pkLeft->fDistanceFromPlayer < pkRight->fDistanceFromPlayer;
+			}
+		};
+
+		std::stable_sort(kItemRenderList.begin(), kItemRenderList.end(), FItemTextTailDistance());
+	}
+
+	for (std::vector<TTextTail*>::iterator it = kItemRenderList.begin(); it != kItemRenderList.end(); ++it)
+	{
+		if (iRendered >= iRenderLimit)
+			break;
+
+		TTextTail* pTextTail = *it;
+		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+			continue;
 		RenderTextTailBox(pTextTail);
 		pTextTail->pTextInstance->Render();
 		if (pTextTail->pOwnerTextInstance)
 			pTextTail->pOwnerTextInstance->Render();
+
+		++iRendered;
 	}
 
-	for (TChatTailMap::iterator itorChat = m_ChatTailMap.begin(); itorChat!=m_ChatTailMap.end(); ++itorChat)
+	for (TChatTailMap::iterator itorChat = m_ChatTailMap.begin(); itorChat != m_ChatTailMap.end(); ++itorChat)
 	{
-		TTextTail * pTextTail = itorChat->second;
+		if (iRendered >= iRenderLimit)
+			break;
+
+		TTextTail* pTextTail = itorChat->second;
+		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+			continue;
 		if (pTextTail->pOwner->isShow())
+		{
 			RenderTextTailName(pTextTail);
+			++iRendered;
+		}
 	}
 }
 
@@ -359,17 +571,19 @@ void CPythonTextTail::UpdateDistance(const TPixelPosition & c_rCenterPosition, T
 
 void CPythonTextTail::ShowAllTextTail()
 {
+	const float fShowDistance = (m_bOptimizationEnabled ? m_fOptimizationMaxDistance : 3500.0f);
+
 	TTextTailMap::iterator itor;
 	for (itor = m_CharacterTextTailMap.begin(); itor != m_CharacterTextTailMap.end(); ++itor)
 	{
 		TTextTail * pTextTail = itor->second;
-		if (pTextTail->fDistanceFromPlayer < 3500.0f)
+		if (pTextTail->fDistanceFromPlayer < fShowDistance)
 			ShowCharacterTextTail(itor->first);
 	}
 	for (itor = m_ItemTextTailMap.begin(); itor != m_ItemTextTailMap.end(); ++itor)
 	{
 		TTextTail * pTextTail = itor->second;
-		if (pTextTail->fDistanceFromPlayer < 3500.0f)
+		if (pTextTail->fDistanceFromPlayer < fShowDistance)
 			ShowItemTextTail(itor->first);
 	}
 }
@@ -969,6 +1183,12 @@ void CPythonTextTail::Clear()
 
 CPythonTextTail::CPythonTextTail()
 {
+	m_bOptimizationEnabled = true;
+	m_iOptimizationProfile = 1;
+	m_dwLastArrangeTime = 0;
+	m_dwArrangeIntervalMS = 100;
+	m_iMaxRenderCount = 80;
+	m_fOptimizationMaxDistance = 3500.0f;
 	Clear();
 }
 

@@ -18,6 +18,65 @@ namespace {
 				return 60;
 		}
 	}
+
+	int NormalizePerfProfile(int iProfile)
+	{
+		if (iProfile < 0)
+			return 1;
+		if (iProfile > 2)
+			return 1;
+
+		return iProfile;
+	}
+
+	int ParsePerfProfile(const char* c_szValue)
+	{
+		if (!c_szValue || !c_szValue[0])
+			return 1;
+
+		if (!stricmp(c_szValue, "QUALITY"))
+			return 0;
+		if (!stricmp(c_szValue, "BALANCED"))
+			return 1;
+		if (!stricmp(c_szValue, "PERFORMANCE"))
+			return 2;
+
+		return NormalizePerfProfile(atoi(c_szValue));
+	}
+
+	const char* PerfProfileToString(int iProfile)
+	{
+		switch (NormalizePerfProfile(iProfile))
+		{
+			case 0:
+				return "QUALITY";
+			case 2:
+				return "PERFORMANCE";
+			case 1:
+			default:
+				return "BALANCED";
+		}
+	}
+
+	int NormalizeShadowCadence(int iCadence)
+	{
+		if (iCadence < 1)
+			return 1;
+		if (iCadence > 3)
+			return 3;
+
+		return iCadence;
+	}
+
+	int NormalizeTextTailOptRange(int iRange)
+	{
+		if (iRange < 1500)
+			iRange = 1500;
+		else if (iRange > 9000)
+			iRange = 9000;
+
+		return ((iRange + 50) / 100) * 100;
+	}
 }
 
 void CPythonSystem::SetInterfaceHandler(PyObject * poHandler)
@@ -234,6 +293,66 @@ void CPythonSystem::SetVSyncEnabled(bool isEnabled)
 	m_Config.bVSync = isEnabled;
 }
 
+int CPythonSystem::GetPerfProfile()
+{
+	return NormalizePerfProfile(m_Config.iPerfProfile);
+}
+
+void CPythonSystem::SetPerfProfile(int iProfile)
+{
+	m_Config.iPerfProfile = NormalizePerfProfile(iProfile);
+}
+
+bool CPythonSystem::IsFXAdaptiveEnabled()
+{
+	return m_Config.bFXAdaptive;
+}
+
+void CPythonSystem::SetFXAdaptiveEnabled(bool isEnabled)
+{
+	m_Config.bFXAdaptive = isEnabled;
+}
+
+bool CPythonSystem::IsAnimLODEnabled()
+{
+	return m_Config.bAnimLOD;
+}
+
+void CPythonSystem::SetAnimLODEnabled(bool isEnabled)
+{
+	m_Config.bAnimLOD = isEnabled;
+}
+
+bool CPythonSystem::IsTextTailOptEnabled()
+{
+	return m_Config.bTextTailOpt;
+}
+
+void CPythonSystem::SetTextTailOptEnabled(bool isEnabled)
+{
+	m_Config.bTextTailOpt = isEnabled;
+}
+
+int CPythonSystem::GetShadowCadence()
+{
+	return NormalizeShadowCadence(m_Config.iShadowCadence);
+}
+
+void CPythonSystem::SetShadowCadence(int iCadence)
+{
+	m_Config.iShadowCadence = NormalizeShadowCadence(iCadence);
+}
+
+int CPythonSystem::GetTextTailOptRange()
+{
+	return NormalizeTextTailOptRange(m_Config.iTextTailOptRange);
+}
+
+void CPythonSystem::SetTextTailOptRange(int iRange)
+{
+	m_Config.iTextTailOptRange = NormalizeTextTailOptRange(iRange);
+}
+
 bool CPythonSystem::IsNoSoundCard()
 {
 	return m_Config.bNoSoundCard;
@@ -337,6 +456,12 @@ void CPythonSystem::SetDefaultConfig()
 	m_Config.bWindowed			= false;
 	m_Config.iRenderFPSLimit	= 60;
 	m_Config.bVSync				= true;
+	m_Config.iPerfProfile		= 1;
+	m_Config.bFXAdaptive		= true;
+	m_Config.bAnimLOD			= true;
+	m_Config.bTextTailOpt		= true;
+	m_Config.iShadowCadence		= 2;
+	m_Config.iTextTailOptRange	= 3500;
 
 	m_Config.is_software_cursor	= false;
 	m_Config.is_object_culling	= true;
@@ -504,9 +629,24 @@ bool CPythonSystem::LoadConfig()
 			m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(atoi(value));
 		else if (!stricmp(command, "VSYNC"))
 			m_Config.bVSync = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "PERF_PROFILE"))
+			m_Config.iPerfProfile = ParsePerfProfile(value);
+		else if (!stricmp(command, "FX_ADAPTIVE"))
+			m_Config.bFXAdaptive = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "ANIM_LOD"))
+			m_Config.bAnimLOD = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "TEXTTAIL_OPT"))
+			m_Config.bTextTailOpt = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "SHADOW_CADENCE"))
+			m_Config.iShadowCadence = NormalizeShadowCadence(atoi(value));
+		else if (!stricmp(command, "TEXTTAIL_OPT_RANGE"))
+			m_Config.iTextTailOptRange = NormalizeTextTailOptRange(atoi(value));
 	}
 
 	m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit);
+	m_Config.iPerfProfile = NormalizePerfProfile(m_Config.iPerfProfile);
+	m_Config.iShadowCadence = NormalizeShadowCadence(m_Config.iShadowCadence);
+	m_Config.iTextTailOptRange = NormalizeTextTailOptRange(m_Config.iTextTailOptRange);
 
 	if (m_Config.bWindowed)
 	{
@@ -601,6 +741,12 @@ bool CPythonSystem::SaveConfig()
 	// MR-14: -- END OF -- Fog update by Alaric
 	fprintf(fp, "RENDER_FPS_LIMIT		%d\n", NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit));
 	fprintf(fp, "VSYNC					%d\n", m_Config.bVSync ? 1 : 0);
+	fprintf(fp, "PERF_PROFILE			%s\n", PerfProfileToString(m_Config.iPerfProfile));
+	fprintf(fp, "FX_ADAPTIVE			%d\n", m_Config.bFXAdaptive ? 1 : 0);
+	fprintf(fp, "ANIM_LOD				%d\n", m_Config.bAnimLOD ? 1 : 0);
+	fprintf(fp, "TEXTTAIL_OPT			%d\n", m_Config.bTextTailOpt ? 1 : 0);
+	fprintf(fp, "SHADOW_CADENCE			%d\n", NormalizeShadowCadence(m_Config.iShadowCadence));
+	fprintf(fp, "TEXTTAIL_OPT_RANGE		%d\n", NormalizeTextTailOptRange(m_Config.iTextTailOptRange));
 	fprintf(fp, "\n");
 
 	fclose(fp);
@@ -682,6 +828,23 @@ void CPythonSystem::ApplyConfig() // 이전 설정과 현재 설정을 비교해
 
 	if (m_OldConfig.bVSync != m_Config.bVSync)
 		CPythonApplication::Instance().SetVSync(m_Config.bVSync);
+
+	if (m_OldConfig.iPerfProfile != m_Config.iPerfProfile ||
+		m_OldConfig.bFXAdaptive != m_Config.bFXAdaptive ||
+		m_OldConfig.bAnimLOD != m_Config.bAnimLOD ||
+		m_OldConfig.bTextTailOpt != m_Config.bTextTailOpt ||
+		m_OldConfig.iShadowCadence != m_Config.iShadowCadence)
+	{
+		CPythonApplication::Instance().ApplyPerformanceConfig(
+			NormalizePerfProfile(m_Config.iPerfProfile),
+			m_Config.bFXAdaptive,
+			m_Config.bAnimLOD,
+			m_Config.bTextTailOpt,
+			NormalizeShadowCadence(m_Config.iShadowCadence));
+	}
+
+	if (m_OldConfig.iTextTailOptRange != m_Config.iTextTailOptRange)
+		CPythonApplication::Instance().SetTextTailOptRange(NormalizeTextTailOptRange(m_Config.iTextTailOptRange));
 
 	m_OldConfig = m_Config;
 

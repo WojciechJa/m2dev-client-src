@@ -585,6 +585,24 @@ PyObject * appGetVSync(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildValue("i", CPythonApplication::Instance().GetVSync());
 }
 
+PyObject * appGetPerfStats(PyObject * poSelf, PyObject * poArgs)
+{
+	DWORD dwRenderMS = 0;
+	DWORD dwUpdateMS = 0;
+	DWORD dwActiveEffects = 0;
+	DWORD dwActiveParticles = 0;
+	DWORD dwVisibleTextTails = 0;
+	CPythonApplication::Instance().GetPerfStats(dwRenderMS, dwUpdateMS, dwActiveEffects, dwActiveParticles, dwVisibleTextTails);
+
+	return Py_BuildValue(
+		"{s:i,s:i,s:i,s:i,s:i}",
+		"render_ms", dwRenderMS,
+		"update_ms", dwUpdateMS,
+		"active_effects", dwActiveEffects,
+		"active_particles", dwActiveParticles,
+		"visible_texttails", dwVisibleTextTails);
+}
+
 PyObject * appSetGlobalCenterPosition(PyObject * poSelf, PyObject * poArgs)
 {
 	int x;
@@ -1248,6 +1266,7 @@ void initapp()
 		{ "GetFPSLimit",				appGetFPSLimit,					METH_VARARGS },
 		{ "SetVSync",					appSetVSync,					METH_VARARGS },
 		{ "GetVSync",					appGetVSync,					METH_VARARGS },
+		{ "GetPerfStats",				appGetPerfStats,				METH_VARARGS },
 		{ "SetGlobalCenterPosition",	appSetGlobalCenterPosition,		METH_VARARGS },
 		{ "SetCenterPosition",			appSetCenterPosition,			METH_VARARGS },
 		{ "GetCursorPosition",			appGetCursorPosition,			METH_VARARGS },

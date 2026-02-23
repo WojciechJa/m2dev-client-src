@@ -194,6 +194,127 @@ PyObject * systemSetVSync(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildValue("i", applied ? 1 : 0);
 }
 
+PyObject * systemGetPerfProfile(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetPerfProfile());
+}
+
+PyObject * systemSetPerfProfile(PyObject * poSelf, PyObject * poArgs)
+{
+	int iProfile;
+	if (!PyTuple_GetInteger(poArgs, 0, &iProfile))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetPerfProfile(iProfile);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetFXAdaptive(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsFXAdaptiveEnabled() ? 1 : 0);
+}
+
+PyObject * systemSetFXAdaptive(PyObject * poSelf, PyObject * poArgs)
+{
+	int iFlag;
+	if (!PyTuple_GetInteger(poArgs, 0, &iFlag))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetFXAdaptiveEnabled(iFlag ? true : false);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetAnimLOD(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsAnimLODEnabled() ? 1 : 0);
+}
+
+PyObject * systemSetAnimLOD(PyObject * poSelf, PyObject * poArgs)
+{
+	int iFlag;
+	if (!PyTuple_GetInteger(poArgs, 0, &iFlag))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetAnimLODEnabled(iFlag ? true : false);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetTextTailOpt(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsTextTailOptEnabled() ? 1 : 0);
+}
+
+PyObject * systemSetTextTailOpt(PyObject * poSelf, PyObject * poArgs)
+{
+	int iFlag;
+	if (!PyTuple_GetInteger(poArgs, 0, &iFlag))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetTextTailOptEnabled(iFlag ? true : false);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetShadowCadence(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetShadowCadence());
+}
+
+PyObject * systemSetShadowCadence(PyObject * poSelf, PyObject * poArgs)
+{
+	int iCadence;
+	if (!PyTuple_GetInteger(poArgs, 0, &iCadence))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetShadowCadence(iCadence);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetTextTailOptRange(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetTextTailOptRange());
+}
+
+PyObject * systemSetTextTailOptRange(PyObject * poSelf, PyObject * poArgs)
+{
+	int iRange;
+	if (!PyTuple_GetInteger(poArgs, 0, &iRange))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetTextTailOptRange(iRange);
+	CPythonApplication::Instance().SetTextTailOptRange(CPythonSystem::Instance().GetTextTailOptRange());
+	return Py_BuildNone();
+}
+
 PyObject * systemIsSoftwareCursor(PyObject * poSelf, PyObject * poArgs)
 {
 	return Py_BuildValue("i", CPythonSystem::Instance().IsSoftwareCursor());
@@ -467,11 +588,23 @@ void initsystem()
 		{ "GetSoundVolume",				systemGetSoundVolume,			METH_VARARGS },
 		{ "GetRenderFPSLimit",			systemGetRenderFPSLimit,		METH_VARARGS },
 		{ "GetVSync",					systemGetVSync,					METH_VARARGS },
+		{ "GetPerfProfile",				systemGetPerfProfile,			METH_VARARGS },
+		{ "GetFXAdaptive",				systemGetFXAdaptive,			METH_VARARGS },
+		{ "GetAnimLOD",					systemGetAnimLOD,				METH_VARARGS },
+		{ "GetTextTailOpt",				systemGetTextTailOpt,			METH_VARARGS },
+		{ "GetShadowCadence",			systemGetShadowCadence,			METH_VARARGS },
+		{ "GetTextTailOptRange",		systemGetTextTailOptRange,		METH_VARARGS },
 
 		{ "SetMusicVolume",				systemSetMusicVolume,			METH_VARARGS },
 		{ "SetSoundVolume",				systemSetSoundVolume,			METH_VARARGS },
 		{ "SetRenderFPSLimit",			systemSetRenderFPSLimit,		METH_VARARGS },
 		{ "SetVSync",					systemSetVSync,					METH_VARARGS },
+		{ "SetPerfProfile",				systemSetPerfProfile,			METH_VARARGS },
+		{ "SetFXAdaptive",				systemSetFXAdaptive,			METH_VARARGS },
+		{ "SetAnimLOD",					systemSetAnimLOD,				METH_VARARGS },
+		{ "SetTextTailOpt",				systemSetTextTailOpt,			METH_VARARGS },
+		{ "SetShadowCadence",			systemSetShadowCadence,			METH_VARARGS },
+		{ "SetTextTailOptRange",		systemSetTextTailOptRange,		METH_VARARGS },
 		{ "IsSoftwareCursor",			systemIsSoftwareCursor,			METH_VARARGS },
 
 		{ "SetViewChatFlag",			systemSetViewChatFlag,			METH_VARARGS },

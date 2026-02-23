@@ -29,6 +29,9 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		void UpdateSound();
 		void Update();
 		void Render();
+		void SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool bOverBudgetReduced);
+		DWORD GetActiveEffectCount() const;
+		DWORD GetActiveParticleCount() const;
 
 		void GetInfo(std::string* pstInfo);
 
@@ -85,6 +88,14 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 
 	protected:
 		bool m_isDisableSortRendering;
+		int m_iPerfProfile;
+		bool m_bAdaptiveFX;
+		bool m_bOverBudgetReduced;
+		DWORD m_dwUpdateFrame;
+		DWORD m_dwRenderFrame;
+		DWORD m_dwSortInterval;
+		bool m_bSortDirty;
+		std::vector<CEffectInstance*> m_kVctSortedCache;
 		TEffectDataMap					m_kEftDataMap;
 		TEffectInstanceMap				m_kEftInstMap;
 		TEffectInstanceMap				m_kEftCacheMap;

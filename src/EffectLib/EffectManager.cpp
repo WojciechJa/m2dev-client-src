@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "EterBase/Random.h"
 #include "Eterlib/StateManager.h"
+#include "EterLib/Camera.h"
 #include "EffectManager.h"
 
 void CEffectManager::GetInfo(std::string* pstInfo)
@@ -45,6 +46,12 @@ bool CEffectManager::IsAliveEffect(DWORD dwInstanceIndex)
 
 void CEffectManager::Update()
 {
+	++m_dwUpdateFrame;
+
+	D3DXVECTOR3 v3CameraEye(0.0f, 0.0f, 0.0f);
+	CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
+	if (pCamera)
+		v3CameraEye = pCamera->GetEye();
 
 	// 2004. 3. 1. myevan. 이펙트 모니터링 하는 코드
 	/*
@@ -65,7 +72,25 @@ void CEffectManager::Update()
 	{
 		CEffectInstance * pEffectInstance = itor->second;
 
-		pEffectInstance->Update(/*fElapsedTime*/);
+		DWORD dwUpdateStride = 1;
+		if (m_bAdaptiveFX && pCamera && (m_iPerfProfile >= 2 || m_bOverBudgetReduced))
+		{
+			D3DXVECTOR3 v3Center;
+			float fRadius = 0.0f;
+			if (pEffectInstance->GetBoundingSphere(v3Center, fRadius))
+			{
+				D3DXVECTOR3 v3Diff = v3Center - v3CameraEye;
+				const float fDistSq = D3DXVec3Dot(&v3Diff, &v3Diff);
+
+				if (fDistSq > (9000.0f * 9000.0f))
+					dwUpdateStride = m_bOverBudgetReduced ? 4 : 3;
+				else if (fDistSq > (5000.0f * 5000.0f))
+					dwUpdateStride = 2;
+			}
+		}
+
+		if (dwUpdateStride <= 1 || (m_dwUpdateFrame % dwUpdateStride) == 0)
+			pEffectInstance->Update(/*fElapsedTime*/);
 
 		if (pEffectInstance->isAlive()) [[likely]] {
 			++itor;
@@ -74,6 +99,7 @@ void CEffectManager::Update()
 
 		itor = m_kEftInstMap.erase(itor);
 		CEffectInstance::Delete(pEffectInstance);
+		m_bSortDirty = true;
 	}
 }
 
@@ -96,6 +122,8 @@ struct CEffectManager_FEffectInstanceRender
 
 void CEffectManager::Render()
 {
+	++m_dwRenderFrame;
+
 	STATEMANAGER.SetTexture(0, NULL);
 	STATEMANAGER.SetTexture(1, NULL);
 	
@@ -110,17 +138,78 @@ void CEffectManager::Render()
 	}
 	else
 	{
-		static std::vector<CEffectInstance*> s_kVct_pkEftInstSort;
-		s_kVct_pkEftInstSort.clear();
+		const bool bCanReuseSort =
+			!m_bSortDirty &&
+			m_dwSortInterval > 1 &&
+			(m_dwRenderFrame % m_dwSortInterval) != 0 &&
+			m_kVctSortedCache.size() == m_kEftInstMap.size();
 
-		TEffectInstanceMap& rkMap_pkEftInstSrc=m_kEftInstMap;
-		TEffectInstanceMap::iterator i;
-		for (i=rkMap_pkEftInstSrc.begin(); i!=rkMap_pkEftInstSrc.end(); ++i)
-			s_kVct_pkEftInstSort.push_back(i->second);
+		if (!bCanReuseSort)
+		{
+			m_kVctSortedCache.clear();
+			m_kVctSortedCache.reserve(m_kEftInstMap.size());
 
-		std::sort(s_kVct_pkEftInstSort.begin(), s_kVct_pkEftInstSort.end(), CEffectManager_LessEffectInstancePtrRenderOrder());
-		std::for_each(s_kVct_pkEftInstSort.begin(), s_kVct_pkEftInstSort.end(), CEffectManager_FEffectInstanceRender());
+			TEffectInstanceMap::iterator i;
+			for (i = m_kEftInstMap.begin(); i != m_kEftInstMap.end(); ++i)
+				m_kVctSortedCache.push_back(i->second);
+
+			std::sort(m_kVctSortedCache.begin(), m_kVctSortedCache.end(), CEffectManager_LessEffectInstancePtrRenderOrder());
+			m_bSortDirty = false;
+		}
+
+		std::for_each(m_kVctSortedCache.begin(), m_kVctSortedCache.end(), CEffectManager_FEffectInstanceRender());
 	}
+}
+
+void CEffectManager::SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool bOverBudgetReduced)
+{
+	m_iPerfProfile = iProfile;
+	if (m_iPerfProfile < 0)
+		m_iPerfProfile = 0;
+	else if (m_iPerfProfile > 2)
+		m_iPerfProfile = 2;
+
+	m_bAdaptiveFX = bAdaptiveFX;
+	m_bOverBudgetReduced = bOverBudgetReduced;
+
+	if (m_iPerfProfile <= 0)
+		m_dwSortInterval = 1;
+	else if (m_iPerfProfile == 1)
+		m_dwSortInterval = 2;
+	else
+		m_dwSortInterval = 3;
+
+	if (!m_bAdaptiveFX)
+		CParticleSystemInstance::SetGlobalEmissionScale(1.0f);
+	else
+	{
+		float fScale = 1.0f;
+		if (m_iPerfProfile == 1)
+			fScale = 0.85f;
+		else if (m_iPerfProfile >= 2)
+			fScale = 0.65f;
+
+		if (m_bOverBudgetReduced)
+			fScale *= 0.8f;
+
+		CParticleSystemInstance::SetGlobalEmissionScale(fScale);
+	}
+}
+
+DWORD CEffectManager::GetActiveEffectCount() const
+{
+	return static_cast<DWORD>(m_kEftInstMap.size());
+}
+
+DWORD CEffectManager::GetActiveParticleCount() const
+{
+	DWORD dwParticleCount = 0;
+	for (TEffectInstanceMap::const_iterator it = m_kEftInstMap.begin(); it != m_kEftInstMap.end(); ++it)
+	{
+		dwParticleCount += it->second->GetActiveParticleCount();
+	}
+
+	return dwParticleCount;
 }
 
 BOOL CEffectManager::RegisterEffect(const char * c_szFileName,bool isExistDelete,bool isNeedCache)
@@ -218,6 +307,7 @@ void CEffectManager::CreateEffectInstance(DWORD dwInstanceIndex, DWORD dwID)
 	pEffectInstance->SetEffectDataPointer(pEffect);
 
 	m_kEftInstMap.insert(TEffectInstanceMap::value_type(dwInstanceIndex, pEffectInstance));
+	m_bSortDirty = true;
 }
 
 bool CEffectManager::DestroyEffectInstance(DWORD dwInstanceIndex)
@@ -232,6 +322,7 @@ bool CEffectManager::DestroyEffectInstance(DWORD dwInstanceIndex)
 	m_kEftInstMap.erase(itor);
 
 	CEffectInstance::Delete(pEffectInstance);
+	m_bSortDirty = true;
 
 	return true;
 }
@@ -426,6 +517,8 @@ void CEffectManager::__DestroyEffectInstanceMap()
 	}
 
 	m_kEftInstMap.clear();
+	m_bSortDirty = true;
+	m_kVctSortedCache.clear();
 }
 
 void CEffectManager::__DestroyEffectCacheMap()
@@ -463,6 +556,14 @@ void CEffectManager::__Initialize()
 {
 	m_pSelectedEffectInstance = NULL;
 	m_isDisableSortRendering = false;
+	m_iPerfProfile = 1;
+	m_bAdaptiveFX = true;
+	m_bOverBudgetReduced = false;
+	m_dwUpdateFrame = 0;
+	m_dwRenderFrame = 0;
+	m_dwSortInterval = 2;
+	m_bSortDirty = true;
+	m_kVctSortedCache.clear();
 }
 
 CEffectManager::CEffectManager()

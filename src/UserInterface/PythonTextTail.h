@@ -59,6 +59,10 @@ class CPythonTextTail : public CSingleton<CPythonTextTail>
 		void UpdateAllTextTail();
 		void UpdateShowingTextTail();
 		void Render();
+		void SetOptimizationSettings(bool bEnable, int iProfile);
+		void SetOptimizationRange(float fMaxDistance);
+		float GetOptimizationRange() const;
+		DWORD GetVisibleTextTailCount() const;
 
 		void ArrangeTextTail();
 		void HideAllTextTail();
@@ -108,6 +112,12 @@ class CPythonTextTail : public CSingleton<CPythonTextTail>
 
 		TTextTailList				m_CharacterTextTailList;
 		TTextTailList				m_ItemTextTailList;
+		bool						m_bOptimizationEnabled;
+		int							m_iOptimizationProfile;
+		DWORD						m_dwLastArrangeTime;
+		DWORD						m_dwArrangeIntervalMS;
+		int							m_iMaxRenderCount;
+		float						m_fOptimizationMaxDistance;
 
 	private:
 		CDynamicPool<STextTail>		m_TextTailPool;

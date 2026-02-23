@@ -209,6 +209,15 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		int GetFPSLimit() const { return m_iFPS; }
 		bool SetVSync(bool isEnabled);
 		int GetVSync() const { return m_isVSyncEnabled ? 1 : 0; }
+		void ApplyPerformanceConfig(int iProfile, bool bFXAdaptive, bool bAnimLOD, bool bTextTailOpt, int iShadowCadence);
+		int GetPerfProfile() const { return m_iPerfProfile; }
+		int GetFXAdaptive() const { return m_bFXAdaptive ? 1 : 0; }
+		int GetAnimLOD() const { return m_bAnimLOD ? 1 : 0; }
+		int GetTextTailOpt() const { return m_bTextTailOpt ? 1 : 0; }
+		int GetShadowCadence() const { return m_iShadowCadence; }
+		void SetTextTailOptRange(int iRange);
+		int GetTextTailOptRange() const { return m_iTextTailOptRange; }
+		void GetPerfStats(DWORD& rRenderMS, DWORD& rUpdateMS, DWORD& rActiveEffects, DWORD& rActiveParticles, DWORD& rVisibleTextTails) const;
 		void SetServerTime(time_t tTime);
 		time_t GetServerTime();
 		time_t GetServerTimeStamp();
@@ -310,10 +319,14 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		void __SetFullScreenWindow(HWND hWnd, DWORD dwWidth, DWORD dwHeight, DWORD dwBPP);
 		void __MinimizeFullScreenWindow(HWND hWnd, DWORD dwWidth, DWORD dwHeight);
 		int __NormalizeFPSLimit(int iFPS) const;
+		int __NormalizePerfProfile(int iProfile) const;
+		int __NormalizeShadowCadence(int iCadence) const;
 		void __UpdateRenderFrameInterval();
 		void __RunUpdateStep(DWORD& rUpdateFrameCount);
 		void __RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceCount);
 		void __SleepFrame(DWORD dwNow, DWORD dwNextUpdateTime);
+		void __ApplyPerformanceSettings();
+		void __UpdatePerfAutoAdjustment();
 
 
 	protected:
@@ -371,6 +384,19 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		double						m_dNextRenderTimeMS;
 		DWORD						m_dwNextUpdateTime;
 		bool						m_isVSyncEnabled;
+		int							m_iPerfProfile;
+		bool						m_bFXAdaptive;
+		bool						m_bAnimLOD;
+		bool						m_bTextTailOpt;
+		int							m_iShadowCadence;
+		int							m_iTextTailOptRange;
+		bool						m_bPerfAutoReduced;
+		DWORD						m_dwPerfOverBudgetFrames;
+		DWORD						m_dwPerfUnderBudgetFrames;
+		DWORD						m_dwPerfRenderFrameCounter;
+		DWORD						m_dwPerfActiveEffects;
+		DWORD						m_dwPerfActiveParticles;
+		DWORD						m_dwPerfVisibleTextTails;
 		float						m_fAveRenderTime;
 		DWORD						m_dwCurRenderTime;
 		DWORD						m_dwCurUpdateTime;

@@ -2,6 +2,7 @@
 #include "pythoncharactermanager.h"
 #include "PythonBackground.h"
 #include "PythonNonPlayer.h"
+#include "PythonPlayer.h"
 #include "AbstractPlayer.h"
 #include "packet.h"
 
@@ -148,6 +149,55 @@ bool CPythonCharacterManager::IsCacheMode()
 	return isCacheMode;
 }
 
+void CPythonCharacterManager::SetAnimationLODSettings(bool bEnable, int iProfile)
+{
+	m_bAnimLODEnabled = bEnable ? true : false;
+	m_iAnimLODProfile = iProfile;
+	if (m_iAnimLODProfile < 0)
+		m_iAnimLODProfile = 0;
+	else if (m_iAnimLODProfile > 2)
+		m_iAnimLODProfile = 2;
+
+	m_dwAnimLODFrameCounter = 0;
+}
+
+bool CPythonCharacterManager::__ShouldThrottleAnimation(CInstanceBase* pInstance, CInstanceBase* pMainInstance, DWORD dwTargetVID) const
+{
+	if (!m_bAnimLODEnabled)
+		return false;
+
+	if (!pMainInstance || !pInstance)
+		return false;
+
+	if (pInstance == pMainInstance)
+		return false;
+
+	if (pInstance->GetVirtualID() == dwTargetVID)
+		return false;
+
+	if (pInstance->IsPartyMember())
+		return false;
+
+	if (pInstance->IsForceVisible())
+		return false;
+
+	if (pInstance->IsDead())
+		return false;
+
+	float fDistanceSq = pInstance->NEW_GetDistanceFromDestInstanceSquared(*pMainInstance);
+	DWORD dwStride = 1;
+
+	if (fDistanceSq > (7000.0f * 7000.0f))
+		dwStride = (m_iAnimLODProfile >= 2) ? 5 : 4;
+	else if (fDistanceSq > (2500.0f * 2500.0f))
+		dwStride = (m_iAnimLODProfile >= 2) ? 3 : 2;
+
+	if (dwStride <= 1)
+		return false;
+
+	return (m_dwAnimLODFrameCounter % dwStride) != 0;
+}
+
 void CPythonCharacterManager::Update()
 {
 #ifdef __PERFORMANCE_CHECKER__
@@ -156,6 +206,8 @@ void CPythonCharacterManager::Update()
 	CInstanceBase::ResetPerformanceCounter();
 
 	CInstanceBase* pkInstMain=GetMainInstancePtr();
+	++m_dwAnimLODFrameCounter;
+	const DWORD dwTargetVID = CPythonPlayer::Instance().GetTargetVID();
 #ifdef __PERFORMANCE_CHECKER__
 	DWORD t2=timeGetTime();
 #endif
@@ -168,7 +220,8 @@ void CPythonCharacterManager::Update()
 		TCharacterInstanceMap::iterator c=i++;
 
 		CInstanceBase* pkInstEach=c->second;
-		pkInstEach->Update();
+		if (!__ShouldThrottleAnimation(pkInstEach, pkInstMain, dwTargetVID))
+			pkInstEach->Update();
 
 		if (pkInstMain)
 		{
@@ -976,6 +1029,9 @@ void CPythonCharacterManager::__Initialize()
 	m_pkInstBind = NULL;
 	m_pkInstPick = NULL;
 	m_v2PickedInstProjPos = D3DXVECTOR2(0.0f, 0.0f);
+	m_bAnimLODEnabled = true;
+	m_iAnimLODProfile = 1;
+	m_dwAnimLODFrameCounter = 0;
 }
 
 

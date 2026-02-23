@@ -15,6 +15,17 @@ bool CEffectInstance::LessRenderOrder(CEffectInstance* pkEftInst)
 	return (m_pkEftData<pkEftInst->m_pkEftData);	
 }
 
+DWORD CEffectInstance::GetActiveParticleCount() const
+{
+	DWORD dwCount = 0;
+	for (std::vector<CParticleSystemInstance*>::const_iterator it = m_ParticleInstanceVector.begin(); it != m_ParticleInstanceVector.end(); ++it)
+	{
+		dwCount += (*it)->GetEmissionCount();
+	}
+
+	return dwCount;
+}
+
 void CEffectInstance::ResetRenderingEffectCount()
 {
 	ms_iRenderingEffectCount = 0;

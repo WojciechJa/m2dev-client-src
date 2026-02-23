@@ -54,6 +54,12 @@ class CPythonSystem : public CSingleton<CPythonSystem>
 			DWORD			frequency;
 			int				iRenderFPSLimit;
 			bool			bVSync;
+			int				iPerfProfile;
+			bool			bFXAdaptive;
+			bool			bAnimLOD;
+			bool			bTextTailOpt;
+			int				iShadowCadence;
+			int				iTextTailOptRange;
 
 			bool			is_software_cursor;
 			bool			is_object_culling;
@@ -113,6 +119,18 @@ class CPythonSystem : public CSingleton<CPythonSystem>
 		void							SetRenderFPSLimit(int iFPSLimit);
 		bool							IsVSyncEnabled();
 		void							SetVSyncEnabled(bool isEnabled);
+		int								GetPerfProfile();
+		void							SetPerfProfile(int iProfile);
+		bool							IsFXAdaptiveEnabled();
+		void							SetFXAdaptiveEnabled(bool isEnabled);
+		bool							IsAnimLODEnabled();
+		void							SetAnimLODEnabled(bool isEnabled);
+		bool							IsTextTailOptEnabled();
+		void							SetTextTailOptEnabled(bool isEnabled);
+		int								GetShadowCadence();
+		void							SetShadowCadence(int iCadence);
+		int								GetTextTailOptRange();
+		void							SetTextTailOptRange(int iRange);
 		bool							IsSoftwareCursor();
 		bool							IsWindowed();
 		bool							IsViewChat();
