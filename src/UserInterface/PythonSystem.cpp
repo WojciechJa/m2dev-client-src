@@ -68,6 +68,16 @@ namespace {
 		return iCadence;
 	}
 
+	int NormalizeFXStrideBias(int iBias)
+	{
+		if (iBias < 0)
+			return 0;
+		if (iBias > 2)
+			return 2;
+
+		return iBias;
+	}
+
 	int NormalizeTextTailOptRange(int iRange)
 	{
 		if (iRange < 1500)
@@ -343,6 +353,36 @@ void CPythonSystem::SetShadowCadence(int iCadence)
 	m_Config.iShadowCadence = NormalizeShadowCadence(iCadence);
 }
 
+int CPythonSystem::GetFXStrideBias()
+{
+	return NormalizeFXStrideBias(m_Config.iFXStrideBias);
+}
+
+void CPythonSystem::SetFXStrideBias(int iBias)
+{
+	m_Config.iFXStrideBias = NormalizeFXStrideBias(iBias);
+}
+
+bool CPythonSystem::IsShadowDynamicBoostEnabled()
+{
+	return m_Config.bShadowDynamicBoost;
+}
+
+void CPythonSystem::SetShadowDynamicBoostEnabled(bool isEnabled)
+{
+	m_Config.bShadowDynamicBoost = isEnabled;
+}
+
+bool CPythonSystem::IsTextTailGridOptEnabled()
+{
+	return m_Config.bTextTailGridOpt;
+}
+
+void CPythonSystem::SetTextTailGridOptEnabled(bool isEnabled)
+{
+	m_Config.bTextTailGridOpt = isEnabled;
+}
+
 int CPythonSystem::GetTextTailOptRange()
 {
 	return NormalizeTextTailOptRange(m_Config.iTextTailOptRange);
@@ -461,6 +501,9 @@ void CPythonSystem::SetDefaultConfig()
 	m_Config.bAnimLOD			= true;
 	m_Config.bTextTailOpt		= true;
 	m_Config.iShadowCadence		= 2;
+	m_Config.iFXStrideBias		= 1;
+	m_Config.bShadowDynamicBoost = true;
+	m_Config.bTextTailGridOpt	= true;
 	m_Config.iTextTailOptRange	= 3500;
 
 	m_Config.is_software_cursor	= false;
@@ -639,6 +682,12 @@ bool CPythonSystem::LoadConfig()
 			m_Config.bTextTailOpt = atoi(value) == 1 ? true : false;
 		else if (!stricmp(command, "SHADOW_CADENCE"))
 			m_Config.iShadowCadence = NormalizeShadowCadence(atoi(value));
+		else if (!stricmp(command, "FX_STRIDE_BIAS"))
+			m_Config.iFXStrideBias = NormalizeFXStrideBias(atoi(value));
+		else if (!stricmp(command, "SHADOW_DYNAMIC_BOOST"))
+			m_Config.bShadowDynamicBoost = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "TEXTTAIL_GRID_OPT"))
+			m_Config.bTextTailGridOpt = atoi(value) == 1 ? true : false;
 		else if (!stricmp(command, "TEXTTAIL_OPT_RANGE"))
 			m_Config.iTextTailOptRange = NormalizeTextTailOptRange(atoi(value));
 	}
@@ -646,6 +695,7 @@ bool CPythonSystem::LoadConfig()
 	m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit);
 	m_Config.iPerfProfile = NormalizePerfProfile(m_Config.iPerfProfile);
 	m_Config.iShadowCadence = NormalizeShadowCadence(m_Config.iShadowCadence);
+	m_Config.iFXStrideBias = NormalizeFXStrideBias(m_Config.iFXStrideBias);
 	m_Config.iTextTailOptRange = NormalizeTextTailOptRange(m_Config.iTextTailOptRange);
 
 	if (m_Config.bWindowed)
@@ -746,6 +796,9 @@ bool CPythonSystem::SaveConfig()
 	fprintf(fp, "ANIM_LOD				%d\n", m_Config.bAnimLOD ? 1 : 0);
 	fprintf(fp, "TEXTTAIL_OPT			%d\n", m_Config.bTextTailOpt ? 1 : 0);
 	fprintf(fp, "SHADOW_CADENCE			%d\n", NormalizeShadowCadence(m_Config.iShadowCadence));
+	fprintf(fp, "FX_STRIDE_BIAS			%d\n", NormalizeFXStrideBias(m_Config.iFXStrideBias));
+	fprintf(fp, "SHADOW_DYNAMIC_BOOST		%d\n", m_Config.bShadowDynamicBoost ? 1 : 0);
+	fprintf(fp, "TEXTTAIL_GRID_OPT		%d\n", m_Config.bTextTailGridOpt ? 1 : 0);
 	fprintf(fp, "TEXTTAIL_OPT_RANGE		%d\n", NormalizeTextTailOptRange(m_Config.iTextTailOptRange));
 	fprintf(fp, "\n");
 
@@ -833,14 +886,20 @@ void CPythonSystem::ApplyConfig() // 이전 설정과 현재 설정을 비교해
 		m_OldConfig.bFXAdaptive != m_Config.bFXAdaptive ||
 		m_OldConfig.bAnimLOD != m_Config.bAnimLOD ||
 		m_OldConfig.bTextTailOpt != m_Config.bTextTailOpt ||
-		m_OldConfig.iShadowCadence != m_Config.iShadowCadence)
+		m_OldConfig.iShadowCadence != m_Config.iShadowCadence ||
+		m_OldConfig.iFXStrideBias != m_Config.iFXStrideBias ||
+		m_OldConfig.bShadowDynamicBoost != m_Config.bShadowDynamicBoost ||
+		m_OldConfig.bTextTailGridOpt != m_Config.bTextTailGridOpt)
 	{
 		CPythonApplication::Instance().ApplyPerformanceConfig(
 			NormalizePerfProfile(m_Config.iPerfProfile),
 			m_Config.bFXAdaptive,
 			m_Config.bAnimLOD,
 			m_Config.bTextTailOpt,
-			NormalizeShadowCadence(m_Config.iShadowCadence));
+			NormalizeShadowCadence(m_Config.iShadowCadence),
+			NormalizeFXStrideBias(m_Config.iFXStrideBias),
+			m_Config.bShadowDynamicBoost,
+			m_Config.bTextTailGridOpt);
 	}
 
 	if (m_OldConfig.iTextTailOptRange != m_Config.iTextTailOptRange)

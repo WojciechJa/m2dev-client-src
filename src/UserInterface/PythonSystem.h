@@ -59,6 +59,9 @@ class CPythonSystem : public CSingleton<CPythonSystem>
 			bool			bAnimLOD;
 			bool			bTextTailOpt;
 			int				iShadowCadence;
+			int				iFXStrideBias;
+			bool			bShadowDynamicBoost;
+			bool			bTextTailGridOpt;
 			int				iTextTailOptRange;
 
 			bool			is_software_cursor;
@@ -129,6 +132,12 @@ class CPythonSystem : public CSingleton<CPythonSystem>
 		void							SetTextTailOptEnabled(bool isEnabled);
 		int								GetShadowCadence();
 		void							SetShadowCadence(int iCadence);
+		int								GetFXStrideBias();
+		void							SetFXStrideBias(int iBias);
+		bool							IsShadowDynamicBoostEnabled();
+		void							SetShadowDynamicBoostEnabled(bool isEnabled);
+		bool							IsTextTailGridOptEnabled();
+		void							SetTextTailGridOptEnabled(bool isEnabled);
 		int								GetTextTailOptRange();
 		void							SetTextTailOptRange(int iRange);
 		bool							IsSoftwareCursor();

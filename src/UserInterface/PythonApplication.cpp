@@ -42,6 +42,9 @@ m_bFXAdaptive(true),
 m_bAnimLOD(true),
 m_bTextTailOpt(true),
 m_iShadowCadence(2),
+m_iFXStrideBias(1),
+m_bShadowDynamicBoost(true),
+m_bTextTailGridOpt(true),
 m_iTextTailOptRange(3500),
 m_bPerfAutoReduced(false),
 m_dwPerfOverBudgetFrames(0),
@@ -50,6 +53,13 @@ m_dwPerfRenderFrameCounter(0),
 m_dwPerfActiveEffects(0),
 m_dwPerfActiveParticles(0),
 m_dwPerfVisibleTextTails(0),
+m_dwPerfShadowMS(0),
+m_dwPerfCharacterMS(0),
+m_dwPerfMapMS(0),
+m_dwPerfEffectUpdateMS(0),
+m_dwPerfEffectRenderMS(0),
+m_dwPerfTextTailMS(0),
+m_dwPerfTextTailCollisionChecks(0),
 m_dwUpdateFPS(0),
 m_dwRenderFPS(0),
 m_fAveRenderTime(0.0f),
@@ -58,7 +68,9 @@ m_fGlobalTime(0.0f),
 m_fGlobalElapsedTime(0.0f),
 m_dwLButtonDownTime(0),
 m_dwLastIdleTime(0),
-m_IsMovingMainWindow(false)
+m_IsMovingMainWindow(false),
+m_bHasLastShadowCameraEye(false),
+m_v3LastShadowCameraEye(0.0f, 0.0f, 0.0f)
 {
 #ifndef _DEBUG
 	SetEterExceptionHandler();
@@ -190,6 +202,7 @@ void CPythonApplication::RenderGame()
 
 	m_kChrMgr.Deform();
 
+	const DWORD dwShadowStart = ELTimer_GetMSec();
 	bool bRenderShadow = true;
 	if (m_iShadowCadence > 1)
 	{
@@ -197,6 +210,32 @@ void CPythonApplication::RenderGame()
 		CInstanceBase* pkMainInstance = m_kChrMgr.GetMainInstancePtr();
 		if (pkMainInstance && pkMainInstance->IsWalking())
 			bForceShadowPerFrame = true;
+
+		if (m_bShadowDynamicBoost)
+		{
+			CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
+			if (pCamera)
+			{
+				const D3DXVECTOR3 v3CameraEye = pCamera->GetEye();
+				if (!m_bHasLastShadowCameraEye)
+				{
+					m_bHasLastShadowCameraEye = true;
+					m_v3LastShadowCameraEye = v3CameraEye;
+				}
+				else
+				{
+					const D3DXVECTOR3 v3Diff = v3CameraEye - m_v3LastShadowCameraEye;
+					if (D3DXVec3Dot(&v3Diff, &v3Diff) > (80.0f * 80.0f))
+						bForceShadowPerFrame = true;
+
+					m_v3LastShadowCameraEye = v3CameraEye;
+				}
+			}
+		}
+		else
+		{
+			m_bHasLastShadowCameraEye = false;
+		}
 
 		if (!bForceShadowPerFrame)
 		{
@@ -206,6 +245,7 @@ void CPythonApplication::RenderGame()
 	}
 	if (bRenderShadow)
 		m_pyBackground.RenderCharacterShadowToTexture();
+	m_dwPerfShadowMS = ELTimer_GetMSec() - dwShadowStart;
 
 	m_pyGraphic.SetGameRenderState();
 	m_pyGraphic.PushState();
@@ -216,6 +256,7 @@ void CPythonApplication::RenderGame()
 		m_pyGraphic.SetCursorPosition(lx, ly);
 	}
 
+	DWORD dwMapStart = ELTimer_GetMSec();
 	m_pyBackground.RenderSky();
 
 	m_pyBackground.RenderBeforeLensFlare();
@@ -224,18 +265,27 @@ void CPythonApplication::RenderGame()
 
 	m_pyBackground.BeginEnvironment();
 	m_pyBackground.Render();
+	m_dwPerfMapMS = ELTimer_GetMSec() - dwMapStart;
 
 	m_pyBackground.SetCharacterDirLight();
+	const DWORD dwCharacterStart = ELTimer_GetMSec();
 	m_kChrMgr.Render();
+	m_dwPerfCharacterMS = ELTimer_GetMSec() - dwCharacterStart;
 
+	dwMapStart = ELTimer_GetMSec();
 	m_pyBackground.SetBackgroundDirLight();
 	m_pyBackground.RenderWater();
 	m_pyBackground.RenderSnow();
 	m_pyBackground.RenderEffect();
 
 	m_pyBackground.EndEnvironment();
+	m_dwPerfMapMS += ELTimer_GetMSec() - dwMapStart;
 
+	const DWORD dwEffectRenderStart = ELTimer_GetMSec();
 	m_kEftMgr.Render();
+	m_dwPerfEffectRenderMS = ELTimer_GetMSec() - dwEffectRenderStart;
+
+	dwMapStart = ELTimer_GetMSec();
 	m_pyItem.Render();
 	m_FlyingManager.Render();
 
@@ -244,6 +294,7 @@ void CPythonApplication::RenderGame()
 	m_pyBackground.EndEnvironment();
 
 	m_pyBackground.RenderAfterLensFlare();
+	m_dwPerfMapMS += ELTimer_GetMSec() - dwMapStart;
 }
 
 void CPythonApplication::UpdateGame()
@@ -275,8 +326,10 @@ void CPythonApplication::UpdateGame()
 
 	m_kChrMgr.Update();
 
+	const DWORD dwEffectUpdateStart = ELTimer_GetMSec();
 	m_kEftMgr.Update();
 	m_kEftMgr.UpdateSound();
+	m_dwPerfEffectUpdateMS = ELTimer_GetMSec() - dwEffectUpdateStart;
 	
 	m_FlyingManager.Update();
 	m_pyItem.Update(ptMouse);
@@ -404,11 +457,22 @@ int CPythonApplication::__NormalizeShadowCadence(int iCadence) const
 	return iCadence;
 }
 
+int CPythonApplication::__NormalizeFXStrideBias(int iBias) const
+{
+	if (iBias < 0)
+		return 0;
+	if (iBias > 2)
+		return 2;
+
+	return iBias;
+}
+
 void CPythonApplication::__ApplyPerformanceSettings()
 {
-	m_kEftMgr.SetPerformanceSettings(m_iPerfProfile, m_bFXAdaptive, m_bPerfAutoReduced);
+	m_kEftMgr.SetPerformanceSettings(m_iPerfProfile, m_bFXAdaptive, m_bPerfAutoReduced, m_iFXStrideBias);
 	m_kChrMgr.SetAnimationLODSettings(m_bAnimLOD, m_iPerfProfile);
 	m_pyTextTail.SetOptimizationSettings(m_bTextTailOpt, m_iPerfProfile);
+	m_pyTextTail.SetGridOptimizationEnabled(m_bTextTailGridOpt);
 	m_pyTextTail.SetOptimizationRange(static_cast<float>(m_iTextTailOptRange));
 }
 
@@ -565,6 +629,8 @@ void CPythonApplication::__RunUpdateStep(DWORD& rUpdateFrameCount)
 	m_dwPerfActiveEffects = m_kEftMgr.GetActiveEffectCount();
 	m_dwPerfActiveParticles = m_kEftMgr.GetActiveParticleCount();
 	m_dwPerfVisibleTextTails = m_pyTextTail.GetVisibleTextTailCount();
+	m_dwPerfTextTailMS = m_pyTextTail.GetLastFrameMS();
+	m_dwPerfTextTailCollisionChecks = m_pyTextTail.GetLastCollisionCheckCount();
 	++rUpdateFrameCount;
 }
 
@@ -572,7 +638,19 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 {
 	++m_dwPerfRenderFrameCounter;
 
-	CGrannyMaterial::TranslateSpecularMatrix(g_specularSpd, g_specularSpd, 0.0f);
+	// Keep specular scroll speed stable per-second (not per-frame),
+	// so "Unlimited" FPS does not accelerate armor glow animation.
+	const DWORD dwSpecularNow = ELTimer_GetMSec();
+	static DWORD s_dwLastSpecularMS = dwSpecularNow;
+	DWORD dwSpecularDeltaMS = dwSpecularNow - s_dwLastSpecularMS;
+	s_dwLastSpecularMS = dwSpecularNow;
+
+	if (dwSpecularDeltaMS > 100)
+		dwSpecularDeltaMS = 100;
+
+	const float fSpecularFrameScale = static_cast<float>(dwSpecularDeltaMS) / (1000.0f / 60.0f);
+	const float fSpecularStep = static_cast<float>(g_specularSpd) * fSpecularFrameScale;
+	CGrannyMaterial::TranslateSpecularMatrix(fSpecularStep, fSpecularStep, 0.0f);
 
 	DWORD dwRenderStartTime = ELTimer_GetMSec();
 	bool canRender = true;
@@ -1044,7 +1122,10 @@ bool CPythonApplication::Create(PyObject * poSelf, const char * c_szName, int wi
 			m_pySystem.IsFXAdaptiveEnabled(),
 			m_pySystem.IsAnimLODEnabled(),
 			m_pySystem.IsTextTailOptEnabled(),
-			m_pySystem.GetShadowCadence());
+			m_pySystem.GetShadowCadence(),
+			m_pySystem.GetFXStrideBias(),
+			m_pySystem.IsShadowDynamicBoostEnabled(),
+			m_pySystem.IsTextTailGridOptEnabled());
 
 		GrannyCreateSharedDeformBuffer();
 
@@ -1185,16 +1266,21 @@ void CPythonApplication::SetFPS(int iFPS)
 	m_dNextRenderTimeMS = static_cast<double>(ELTimer_GetMSec());
 }
 
-void CPythonApplication::ApplyPerformanceConfig(int iProfile, bool bFXAdaptive, bool bAnimLOD, bool bTextTailOpt, int iShadowCadence)
+void CPythonApplication::ApplyPerformanceConfig(int iProfile, bool bFXAdaptive, bool bAnimLOD, bool bTextTailOpt, int iShadowCadence, int iFXStrideBias, bool bShadowDynamicBoost, bool bTextTailGridOpt)
 {
 	m_iPerfProfile = __NormalizePerfProfile(iProfile);
 	m_bFXAdaptive = bFXAdaptive ? true : false;
 	m_bAnimLOD = bAnimLOD ? true : false;
 	m_bTextTailOpt = bTextTailOpt ? true : false;
 	m_iShadowCadence = __NormalizeShadowCadence(iShadowCadence);
+	m_iFXStrideBias = __NormalizeFXStrideBias(iFXStrideBias);
+	m_bShadowDynamicBoost = bShadowDynamicBoost ? true : false;
+	m_bTextTailGridOpt = bTextTailGridOpt ? true : false;
 	m_bPerfAutoReduced = false;
 	m_dwPerfOverBudgetFrames = 0;
 	m_dwPerfUnderBudgetFrames = 0;
+	if (!m_bShadowDynamicBoost)
+		m_bHasLastShadowCameraEye = false;
 
 	__ApplyPerformanceSettings();
 }
@@ -1210,13 +1296,20 @@ void CPythonApplication::SetTextTailOptRange(int iRange)
 	m_pyTextTail.SetOptimizationRange(static_cast<float>(m_iTextTailOptRange));
 }
 
-void CPythonApplication::GetPerfStats(DWORD& rRenderMS, DWORD& rUpdateMS, DWORD& rActiveEffects, DWORD& rActiveParticles, DWORD& rVisibleTextTails) const
+void CPythonApplication::GetPerfStats(DWORD& rRenderMS, DWORD& rUpdateMS, DWORD& rActiveEffects, DWORD& rActiveParticles, DWORD& rVisibleTextTails, DWORD& rShadowMS, DWORD& rCharacterMS, DWORD& rMapMS, DWORD& rEffectUpdateMS, DWORD& rEffectRenderMS, DWORD& rTextTailMS, DWORD& rTextTailCollisionChecks) const
 {
 	rRenderMS = m_dwCurRenderTime;
 	rUpdateMS = m_dwCurUpdateTime;
 	rActiveEffects = m_dwPerfActiveEffects;
 	rActiveParticles = m_dwPerfActiveParticles;
 	rVisibleTextTails = m_dwPerfVisibleTextTails;
+	rShadowMS = m_dwPerfShadowMS;
+	rCharacterMS = m_dwPerfCharacterMS;
+	rMapMS = m_dwPerfMapMS;
+	rEffectUpdateMS = m_dwPerfEffectUpdateMS;
+	rEffectRenderMS = m_dwPerfEffectRenderMS;
+	rTextTailMS = m_dwPerfTextTailMS;
+	rTextTailCollisionChecks = m_dwPerfTextTailCollisionChecks;
 }
 
 bool CPythonApplication::SetVSync(bool isEnabled)

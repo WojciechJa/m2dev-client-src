@@ -209,15 +209,18 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		int GetFPSLimit() const { return m_iFPS; }
 		bool SetVSync(bool isEnabled);
 		int GetVSync() const { return m_isVSyncEnabled ? 1 : 0; }
-		void ApplyPerformanceConfig(int iProfile, bool bFXAdaptive, bool bAnimLOD, bool bTextTailOpt, int iShadowCadence);
+		void ApplyPerformanceConfig(int iProfile, bool bFXAdaptive, bool bAnimLOD, bool bTextTailOpt, int iShadowCadence, int iFXStrideBias = 1, bool bShadowDynamicBoost = true, bool bTextTailGridOpt = true);
 		int GetPerfProfile() const { return m_iPerfProfile; }
 		int GetFXAdaptive() const { return m_bFXAdaptive ? 1 : 0; }
 		int GetAnimLOD() const { return m_bAnimLOD ? 1 : 0; }
 		int GetTextTailOpt() const { return m_bTextTailOpt ? 1 : 0; }
 		int GetShadowCadence() const { return m_iShadowCadence; }
+		int GetFXStrideBias() const { return m_iFXStrideBias; }
+		int GetShadowDynamicBoost() const { return m_bShadowDynamicBoost ? 1 : 0; }
+		int GetTextTailGridOpt() const { return m_bTextTailGridOpt ? 1 : 0; }
 		void SetTextTailOptRange(int iRange);
 		int GetTextTailOptRange() const { return m_iTextTailOptRange; }
-		void GetPerfStats(DWORD& rRenderMS, DWORD& rUpdateMS, DWORD& rActiveEffects, DWORD& rActiveParticles, DWORD& rVisibleTextTails) const;
+		void GetPerfStats(DWORD& rRenderMS, DWORD& rUpdateMS, DWORD& rActiveEffects, DWORD& rActiveParticles, DWORD& rVisibleTextTails, DWORD& rShadowMS, DWORD& rCharacterMS, DWORD& rMapMS, DWORD& rEffectUpdateMS, DWORD& rEffectRenderMS, DWORD& rTextTailMS, DWORD& rTextTailCollisionChecks) const;
 		void SetServerTime(time_t tTime);
 		time_t GetServerTime();
 		time_t GetServerTimeStamp();
@@ -321,6 +324,7 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		int __NormalizeFPSLimit(int iFPS) const;
 		int __NormalizePerfProfile(int iProfile) const;
 		int __NormalizeShadowCadence(int iCadence) const;
+		int __NormalizeFXStrideBias(int iBias) const;
 		void __UpdateRenderFrameInterval();
 		void __RunUpdateStep(DWORD& rUpdateFrameCount);
 		void __RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceCount);
@@ -389,6 +393,9 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		bool						m_bAnimLOD;
 		bool						m_bTextTailOpt;
 		int							m_iShadowCadence;
+		int							m_iFXStrideBias;
+		bool						m_bShadowDynamicBoost;
+		bool						m_bTextTailGridOpt;
 		int							m_iTextTailOptRange;
 		bool						m_bPerfAutoReduced;
 		DWORD						m_dwPerfOverBudgetFrames;
@@ -397,6 +404,13 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		DWORD						m_dwPerfActiveEffects;
 		DWORD						m_dwPerfActiveParticles;
 		DWORD						m_dwPerfVisibleTextTails;
+		DWORD						m_dwPerfShadowMS;
+		DWORD						m_dwPerfCharacterMS;
+		DWORD						m_dwPerfMapMS;
+		DWORD						m_dwPerfEffectUpdateMS;
+		DWORD						m_dwPerfEffectRenderMS;
+		DWORD						m_dwPerfTextTailMS;
+		DWORD						m_dwPerfTextTailCollisionChecks;
 		float						m_fAveRenderTime;
 		DWORD						m_dwCurRenderTime;
 		DWORD						m_dwCurUpdateTime;
@@ -470,6 +484,8 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		bool						m_isMinimizedWnd;
 		bool						m_isActivateWnd;
 		BOOL						m_isWindowFullScreenEnable;
+		bool						m_bHasLastShadowCameraEye;
+		D3DXVECTOR3					m_v3LastShadowCameraEye;
 
 		DWORD						m_dwStickyKeysFlag;
 		int							m_iForceSightRange;

@@ -592,15 +592,41 @@ PyObject * appGetPerfStats(PyObject * poSelf, PyObject * poArgs)
 	DWORD dwActiveEffects = 0;
 	DWORD dwActiveParticles = 0;
 	DWORD dwVisibleTextTails = 0;
-	CPythonApplication::Instance().GetPerfStats(dwRenderMS, dwUpdateMS, dwActiveEffects, dwActiveParticles, dwVisibleTextTails);
+	DWORD dwShadowMS = 0;
+	DWORD dwCharacterMS = 0;
+	DWORD dwMapMS = 0;
+	DWORD dwEffectUpdateMS = 0;
+	DWORD dwEffectRenderMS = 0;
+	DWORD dwTextTailMS = 0;
+	DWORD dwTextTailCollisionChecks = 0;
+	CPythonApplication::Instance().GetPerfStats(
+		dwRenderMS,
+		dwUpdateMS,
+		dwActiveEffects,
+		dwActiveParticles,
+		dwVisibleTextTails,
+		dwShadowMS,
+		dwCharacterMS,
+		dwMapMS,
+		dwEffectUpdateMS,
+		dwEffectRenderMS,
+		dwTextTailMS,
+		dwTextTailCollisionChecks);
 
 	return Py_BuildValue(
-		"{s:i,s:i,s:i,s:i,s:i}",
+		"{s:i,s:i,s:i,s:i,s:i,s:i,s:i,s:i,s:i,s:i,s:i,s:i}",
 		"render_ms", dwRenderMS,
 		"update_ms", dwUpdateMS,
 		"active_effects", dwActiveEffects,
 		"active_particles", dwActiveParticles,
-		"visible_texttails", dwVisibleTextTails);
+		"visible_texttails", dwVisibleTextTails,
+		"shadow_ms", dwShadowMS,
+		"character_ms", dwCharacterMS,
+		"map_ms", dwMapMS,
+		"effect_update_ms", dwEffectUpdateMS,
+		"effect_render_ms", dwEffectRenderMS,
+		"texttail_ms", dwTextTailMS,
+		"texttail_collisions_checked", dwTextTailCollisionChecks);
 }
 
 PyObject * appSetGlobalCenterPosition(PyObject * poSelf, PyObject * poArgs)

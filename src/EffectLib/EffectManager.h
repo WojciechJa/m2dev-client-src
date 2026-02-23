@@ -29,7 +29,7 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		void UpdateSound();
 		void Update();
 		void Render();
-		void SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool bOverBudgetReduced);
+		void SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool bOverBudgetReduced, int iStrideBias = 1);
 		DWORD GetActiveEffectCount() const;
 		DWORD GetActiveParticleCount() const;
 
@@ -80,6 +80,9 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		DWORD GetSelectedEffectDataCRC() const;
 
 	protected:
+		bool IsHighPriorityFX(const CEffectInstance* pEffectInstance) const;
+		static std::string NormalizeEffectPath(const char* cszFile);
+
 		void __Initialize();
 
 		void __DestroyEffectInstanceMap();
@@ -91,6 +94,7 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		int m_iPerfProfile;
 		bool m_bAdaptiveFX;
 		bool m_bOverBudgetReduced;
+		int m_iFXStrideBias;
 		DWORD m_dwUpdateFrame;
 		DWORD m_dwRenderFrame;
 		DWORD m_dwSortInterval;

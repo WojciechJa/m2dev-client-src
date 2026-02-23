@@ -84,6 +84,16 @@ void CPythonTextTail::SetOptimizationSettings(bool bEnable, int iProfile)
 	m_dwLastArrangeTime = 0;
 }
 
+void CPythonTextTail::SetGridOptimizationEnabled(bool bEnable)
+{
+	m_bGridOptimizationEnabled = bEnable ? true : false;
+}
+
+bool CPythonTextTail::IsGridOptimizationEnabled() const
+{
+	return m_bGridOptimizationEnabled;
+}
+
 void CPythonTextTail::SetOptimizationRange(float fMaxDistance)
 {
 	if (fMaxDistance < 1500.0f)
@@ -102,6 +112,16 @@ float CPythonTextTail::GetOptimizationRange() const
 DWORD CPythonTextTail::GetVisibleTextTailCount() const
 {
 	return static_cast<DWORD>(m_CharacterTextTailList.size() + m_ItemTextTailList.size() + m_ChatTailMap.size());
+}
+
+DWORD CPythonTextTail::GetLastFrameMS() const
+{
+	return m_dwLastArrangeMS + m_dwLastRenderMS;
+}
+
+DWORD CPythonTextTail::GetLastCollisionCheckCount() const
+{
+	return m_dwLastCollisionChecks;
 }
 
 void CPythonTextTail::UpdateAllTextTail()
@@ -207,6 +227,8 @@ void CPythonTextTail::ArrangeTextTail()
 {
 	TTextTailList::iterator itor;
 	TTextTailList::iterator itorCompare;
+	const DWORD dwArrangeStart = ELTimer_GetMSec();
+	m_dwLastCollisionChecks = 0;
 
 	DWORD dwTime = CTimer::Instance().GetCurrentMillisecond();
 	if (m_bOptimizationEnabled && m_dwArrangeIntervalMS > 0 && dwTime - m_dwLastArrangeTime < m_dwArrangeIntervalMS)
@@ -287,59 +309,158 @@ void CPythonTextTail::ArrangeTextTail()
 
 			++itorChat;
 		}
+		m_dwLastArrangeMS = ELTimer_GetMSec() - dwArrangeStart;
 		return;
 	}
 	m_dwLastArrangeTime = dwTime;
 
-	for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
+	if (m_bGridOptimizationEnabled)
 	{
-		TTextTail * pInsertTextTail = *itor;
+		static const float c_fCellWidth = 160.0f;
+		static const float c_fCellHeight = 28.0f;
+		std::map<unsigned __int64, std::vector<TTextTail*> > kCellMap;
 
-		int yTemp = 5;
-		int LimitCount = 0;
-
-		for (itorCompare = m_ItemTextTailList.begin(); itorCompare != m_ItemTextTailList.end();)
+		for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
 		{
-			TTextTail * pCompareTextTail = *itorCompare;
+			TTextTail* pInsertTextTail = *itor;
+			const int yTemp = 5;
+			int iLimitCount = 0;
 
-			if (*itorCompare == *itor)
+			while (iLimitCount < 20)
 			{
+				const float x1 = pInsertTextTail->x + pInsertTextTail->xStart;
+				const float y1 = pInsertTextTail->y + pInsertTextTail->yStart;
+				const float x2 = pInsertTextTail->x + pInsertTextTail->xEnd;
+				const float y2 = pInsertTextTail->y + pInsertTextTail->yEnd;
+
+				const int iMinCellX = static_cast<int>(floorf(x1 / c_fCellWidth));
+				const int iMaxCellX = static_cast<int>(floorf(x2 / c_fCellWidth));
+				const int iMinCellY = static_cast<int>(floorf(y1 / c_fCellHeight));
+				const int iMaxCellY = static_cast<int>(floorf(y2 / c_fCellHeight));
+
+				bool bAdjusted = false;
+				for (int iCellY = iMinCellY - 1; iCellY <= iMaxCellY + 1 && !bAdjusted; ++iCellY)
+				{
+					for (int iCellX = iMinCellX - 1; iCellX <= iMaxCellX + 1 && !bAdjusted; ++iCellX)
+					{
+						const unsigned __int64 ullKey =
+							(static_cast<unsigned __int64>(static_cast<DWORD>(iCellX)) << 32) |
+							static_cast<DWORD>(iCellY);
+
+						std::map<unsigned __int64, std::vector<TTextTail*> >::iterator itCell = kCellMap.find(ullKey);
+						if (itCell == kCellMap.end())
+							continue;
+
+						std::vector<TTextTail*>& rCellList = itCell->second;
+						for (std::vector<TTextTail*>::iterator itCellTail = rCellList.begin(); itCellTail != rCellList.end(); ++itCellTail)
+						{
+							TTextTail* pCompareTextTail = *itCellTail;
+							if (pCompareTextTail == pInsertTextTail)
+								continue;
+
+							++m_dwLastCollisionChecks;
+							if (isIn(pInsertTextTail, pCompareTextTail))
+							{
+								pInsertTextTail->y = pCompareTextTail->y + pCompareTextTail->yEnd + yTemp;
+								bAdjusted = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!bAdjusted)
+					break;
+
+				++iLimitCount;
+			}
+
+			const float x1 = pInsertTextTail->x + pInsertTextTail->xStart;
+			const float y1 = pInsertTextTail->y + pInsertTextTail->yStart;
+			const float x2 = pInsertTextTail->x + pInsertTextTail->xEnd;
+			const float y2 = pInsertTextTail->y + pInsertTextTail->yEnd;
+			const int iMinCellX = static_cast<int>(floorf(x1 / c_fCellWidth));
+			const int iMaxCellX = static_cast<int>(floorf(x2 / c_fCellWidth));
+			const int iMinCellY = static_cast<int>(floorf(y1 / c_fCellHeight));
+			const int iMaxCellY = static_cast<int>(floorf(y2 / c_fCellHeight));
+
+			for (int iCellY = iMinCellY; iCellY <= iMaxCellY; ++iCellY)
+			{
+				for (int iCellX = iMinCellX; iCellX <= iMaxCellX; ++iCellX)
+				{
+					const unsigned __int64 ullKey =
+						(static_cast<unsigned __int64>(static_cast<DWORD>(iCellX)) << 32) |
+						static_cast<DWORD>(iCellY);
+					kCellMap[ullKey].push_back(pInsertTextTail);
+				}
+			}
+
+			if (pInsertTextTail->pOwnerTextInstance)
+			{
+				pInsertTextTail->pOwnerTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y, pInsertTextTail->z);
+				pInsertTextTail->pOwnerTextInstance->Update();
+
+				pInsertTextTail->pTextInstance->SetColor(pInsertTextTail->Color.r, pInsertTextTail->Color.g, pInsertTextTail->Color.b);
+				pInsertTextTail->pTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y + 15.0f, pInsertTextTail->z);
+				pInsertTextTail->pTextInstance->Update();
+			}
+			else
+			{
+				pInsertTextTail->pTextInstance->SetColor(pInsertTextTail->Color.r, pInsertTextTail->Color.g, pInsertTextTail->Color.b);
+				pInsertTextTail->pTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y, pInsertTextTail->z);
+				pInsertTextTail->pTextInstance->Update();
+			}
+		}
+	}
+	else
+	{
+		for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
+		{
+			TTextTail* pInsertTextTail = *itor;
+
+			const int yTemp = 5;
+			int iLimitCount = 0;
+
+			for (itorCompare = m_ItemTextTailList.begin(); itorCompare != m_ItemTextTailList.end();)
+			{
+				TTextTail* pCompareTextTail = *itorCompare;
+
+				if (*itorCompare == *itor)
+				{
+					++itorCompare;
+					continue;
+				}
+
+				if (iLimitCount >= 20)
+					break;
+
+				++m_dwLastCollisionChecks;
+				if (isIn(pInsertTextTail, pCompareTextTail))
+				{
+					pInsertTextTail->y = pCompareTextTail->y + pCompareTextTail->yEnd + yTemp;
+					itorCompare = m_ItemTextTailList.begin();
+					++iLimitCount;
+					continue;
+				}
+
 				++itorCompare;
-				continue;
 			}
 
-			if (LimitCount >= 20)
-				break;
-
-			if (isIn(pInsertTextTail, pCompareTextTail))
+			if (pInsertTextTail->pOwnerTextInstance)
 			{
-				pInsertTextTail->y = (pCompareTextTail->y + pCompareTextTail->yEnd + yTemp);
+				pInsertTextTail->pOwnerTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y, pInsertTextTail->z);
+				pInsertTextTail->pOwnerTextInstance->Update();
 
-				itorCompare = m_ItemTextTailList.begin();
-				++LimitCount;
-				continue;
+				pInsertTextTail->pTextInstance->SetColor(pInsertTextTail->Color.r, pInsertTextTail->Color.g, pInsertTextTail->Color.b);
+				pInsertTextTail->pTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y + 15.0f, pInsertTextTail->z);
+				pInsertTextTail->pTextInstance->Update();
 			}
-
-			++itorCompare;
-		}
-
-
-		if (pInsertTextTail->pOwnerTextInstance)
-		{
-			pInsertTextTail->pOwnerTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y, pInsertTextTail->z);
-			pInsertTextTail->pOwnerTextInstance->Update();
-
-			pInsertTextTail->pTextInstance->SetColor(pInsertTextTail->Color.r, pInsertTextTail->Color.g, pInsertTextTail->Color.b);
-			pInsertTextTail->pTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y + 15.0f, pInsertTextTail->z);
-			pInsertTextTail->pTextInstance->Update();
-
-		}
-		else
-		{
-			pInsertTextTail->pTextInstance->SetColor(pInsertTextTail->Color.r, pInsertTextTail->Color.g, pInsertTextTail->Color.b);
-			pInsertTextTail->pTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y, pInsertTextTail->z);
-			pInsertTextTail->pTextInstance->Update();
-
+			else
+			{
+				pInsertTextTail->pTextInstance->SetColor(pInsertTextTail->Color.r, pInsertTextTail->Color.g, pInsertTextTail->Color.b);
+				pInsertTextTail->pTextInstance->SetPosition(pInsertTextTail->x, pInsertTextTail->y, pInsertTextTail->z);
+				pInsertTextTail->pTextInstance->Update();
+			}
 		}
 	}
 
@@ -405,10 +526,13 @@ void CPythonTextTail::ArrangeTextTail()
 		pTextTail->pTextInstance->SetPosition(pTextTail->x, pTextTail->y, pTextTail->z);
 		pTextTail->pTextInstance->Update();
 	}
+
+	m_dwLastArrangeMS = ELTimer_GetMSec() - dwArrangeStart;
 }
 
 void CPythonTextTail::Render()
 {
+	const DWORD dwRenderStart = ELTimer_GetMSec();
 	const int iRenderLimit = m_bOptimizationEnabled ? m_iMaxRenderCount : 1000000;
 	int iRendered = 0;
 	const DWORD dwTargetVID = CPythonPlayer::Instance().GetTargetVID();
@@ -528,6 +652,8 @@ void CPythonTextTail::Render()
 			++iRendered;
 		}
 	}
+
+	m_dwLastRenderMS = ELTimer_GetMSec() - dwRenderStart;
 }
 
 void CPythonTextTail::RenderTextTailBox(TTextTail * pTextTail)
@@ -1177,6 +1303,9 @@ void CPythonTextTail::Clear()
 	m_ItemTextTailMap.clear();
 	m_ItemTextTailList.clear();
 	m_ChatTailMap.clear();
+	m_dwLastCollisionChecks = 0;
+	m_dwLastArrangeMS = 0;
+	m_dwLastRenderMS = 0;
 
 	m_TextTailPool.Clear();
 }
@@ -1185,10 +1314,14 @@ CPythonTextTail::CPythonTextTail()
 {
 	m_bOptimizationEnabled = true;
 	m_iOptimizationProfile = 1;
+	m_bGridOptimizationEnabled = true;
 	m_dwLastArrangeTime = 0;
 	m_dwArrangeIntervalMS = 100;
 	m_iMaxRenderCount = 80;
 	m_fOptimizationMaxDistance = 3500.0f;
+	m_dwLastArrangeMS = 0;
+	m_dwLastRenderMS = 0;
+	m_dwLastCollisionChecks = 0;
 	Clear();
 }
 

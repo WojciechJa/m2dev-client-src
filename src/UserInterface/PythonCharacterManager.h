@@ -112,6 +112,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		void __RenderSortedAliveActorList();
 		void __RenderSortedDeadActorList();
 		bool __ShouldThrottleAnimation(CInstanceBase* pInstance, CInstanceBase* pMainInstance, DWORD dwTargetVID) const;
+		void __MarkSortCacheDirty(bool bAlive = true, bool bDead = true);
 
 	protected:
 		CInstanceBase *						m_pkInstMain;
@@ -123,6 +124,16 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		TCharacterInstanceList				m_kDeadInstList;
 
 		std::vector<CInstanceBase*>			m_kVct_pkInstPicked;
+		std::vector<CInstanceBase*>			m_kVctAliveSortCache;
+		std::vector<CInstanceBase*>			m_kVctDeadSortCache;
+		bool								m_bAliveSortCacheDirty;
+		bool								m_bDeadSortCacheDirty;
+		DWORD								m_dwSortRenderFrame;
+		DWORD								m_dwLastAliveSortFrame;
+		DWORD								m_dwLastDeadSortFrame;
+		DWORD								m_dwLastSortTargetVID;
+		bool								m_bHasLastSortCameraEye;
+		D3DXVECTOR3							m_v3LastSortCameraEye;
 		bool								m_bAnimLODEnabled;
 		int									m_iAnimLODProfile;
 		DWORD								m_dwAnimLODFrameCounter;

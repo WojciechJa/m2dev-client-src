@@ -211,7 +211,10 @@ PyObject * systemSetPerfProfile(PyObject * poSelf, PyObject * poArgs)
 		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
 		CPythonSystem::Instance().IsAnimLODEnabled(),
 		CPythonSystem::Instance().IsTextTailOptEnabled(),
-		CPythonSystem::Instance().GetShadowCadence());
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
 	return Py_BuildNone();
 }
 
@@ -232,7 +235,10 @@ PyObject * systemSetFXAdaptive(PyObject * poSelf, PyObject * poArgs)
 		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
 		CPythonSystem::Instance().IsAnimLODEnabled(),
 		CPythonSystem::Instance().IsTextTailOptEnabled(),
-		CPythonSystem::Instance().GetShadowCadence());
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
 	return Py_BuildNone();
 }
 
@@ -253,7 +259,10 @@ PyObject * systemSetAnimLOD(PyObject * poSelf, PyObject * poArgs)
 		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
 		CPythonSystem::Instance().IsAnimLODEnabled(),
 		CPythonSystem::Instance().IsTextTailOptEnabled(),
-		CPythonSystem::Instance().GetShadowCadence());
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
 	return Py_BuildNone();
 }
 
@@ -274,7 +283,10 @@ PyObject * systemSetTextTailOpt(PyObject * poSelf, PyObject * poArgs)
 		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
 		CPythonSystem::Instance().IsAnimLODEnabled(),
 		CPythonSystem::Instance().IsTextTailOptEnabled(),
-		CPythonSystem::Instance().GetShadowCadence());
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
 	return Py_BuildNone();
 }
 
@@ -295,7 +307,82 @@ PyObject * systemSetShadowCadence(PyObject * poSelf, PyObject * poArgs)
 		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
 		CPythonSystem::Instance().IsAnimLODEnabled(),
 		CPythonSystem::Instance().IsTextTailOptEnabled(),
-		CPythonSystem::Instance().GetShadowCadence());
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetFXStrideBias(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetFXStrideBias());
+}
+
+PyObject * systemSetFXStrideBias(PyObject * poSelf, PyObject * poArgs)
+{
+	int iBias;
+	if (!PyTuple_GetInteger(poArgs, 0, &iBias))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetFXStrideBias(iBias);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetShadowDynamicBoost(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsShadowDynamicBoostEnabled() ? 1 : 0);
+}
+
+PyObject * systemSetShadowDynamicBoost(PyObject * poSelf, PyObject * poArgs)
+{
+	int iFlag;
+	if (!PyTuple_GetInteger(poArgs, 0, &iFlag))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetShadowDynamicBoostEnabled(iFlag ? true : false);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
+	return Py_BuildNone();
+}
+
+PyObject * systemGetTextTailGridOpt(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsTextTailGridOptEnabled() ? 1 : 0);
+}
+
+PyObject * systemSetTextTailGridOpt(PyObject * poSelf, PyObject * poArgs)
+{
+	int iFlag;
+	if (!PyTuple_GetInteger(poArgs, 0, &iFlag))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetTextTailGridOptEnabled(iFlag ? true : false);
+	CPythonApplication::Instance().ApplyPerformanceConfig(
+		CPythonSystem::Instance().GetPerfProfile(),
+		CPythonSystem::Instance().IsFXAdaptiveEnabled(),
+		CPythonSystem::Instance().IsAnimLODEnabled(),
+		CPythonSystem::Instance().IsTextTailOptEnabled(),
+		CPythonSystem::Instance().GetShadowCadence(),
+		CPythonSystem::Instance().GetFXStrideBias(),
+		CPythonSystem::Instance().IsShadowDynamicBoostEnabled(),
+		CPythonSystem::Instance().IsTextTailGridOptEnabled());
 	return Py_BuildNone();
 }
 
@@ -593,6 +680,9 @@ void initsystem()
 		{ "GetAnimLOD",					systemGetAnimLOD,				METH_VARARGS },
 		{ "GetTextTailOpt",				systemGetTextTailOpt,			METH_VARARGS },
 		{ "GetShadowCadence",			systemGetShadowCadence,			METH_VARARGS },
+		{ "GetFXStrideBias",			systemGetFXStrideBias,			METH_VARARGS },
+		{ "GetShadowDynamicBoost",		systemGetShadowDynamicBoost,	METH_VARARGS },
+		{ "GetTextTailGridOpt",			systemGetTextTailGridOpt,		METH_VARARGS },
 		{ "GetTextTailOptRange",		systemGetTextTailOptRange,		METH_VARARGS },
 
 		{ "SetMusicVolume",				systemSetMusicVolume,			METH_VARARGS },
@@ -604,6 +694,9 @@ void initsystem()
 		{ "SetAnimLOD",					systemSetAnimLOD,				METH_VARARGS },
 		{ "SetTextTailOpt",				systemSetTextTailOpt,			METH_VARARGS },
 		{ "SetShadowCadence",			systemSetShadowCadence,			METH_VARARGS },
+		{ "SetFXStrideBias",			systemSetFXStrideBias,			METH_VARARGS },
+		{ "SetShadowDynamicBoost",		systemSetShadowDynamicBoost,	METH_VARARGS },
+		{ "SetTextTailGridOpt",			systemSetTextTailGridOpt,		METH_VARARGS },
 		{ "SetTextTailOptRange",		systemSetTextTailOptRange,		METH_VARARGS },
 		{ "IsSoftwareCursor",			systemIsSoftwareCursor,			METH_VARARGS },
 

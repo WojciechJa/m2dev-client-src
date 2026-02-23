@@ -4,6 +4,41 @@
 #include "EterLib/Camera.h"
 #include "EffectManager.h"
 
+std::string CEffectManager::NormalizeEffectPath(const char* cszFile)
+{
+	if (!cszFile || !cszFile[0])
+		return std::string();
+
+	std::string stPath;
+	StringPath(cszFile, stPath);
+	for (size_t i = 0; i < stPath.size(); ++i)
+	{
+		char& c = stPath[i];
+		if (c == '\\')
+			c = '/';
+		c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+	}
+
+	return stPath;
+}
+
+bool CEffectManager::IsHighPriorityFX(const CEffectInstance* pEffectInstance) const
+{
+	if (!pEffectInstance)
+		return false;
+
+	CEffectData* pEffectData = pEffectInstance->GetEffectDataPointer();
+	if (!pEffectData)
+		return false;
+
+	const std::string stPath = NormalizeEffectPath(pEffectData->GetFileName());
+	if (stPath.empty())
+		return false;
+
+	return stPath.find("pc/common/effect/armor/armor_") != std::string::npos ||
+		stPath.find("pc/common/effect/sword/sword_") != std::string::npos;
+}
+
 void CEffectManager::GetInfo(std::string* pstInfo)
 {
 	char szInfo[256];
@@ -49,9 +84,13 @@ void CEffectManager::Update()
 	++m_dwUpdateFrame;
 
 	D3DXVECTOR3 v3CameraEye(0.0f, 0.0f, 0.0f);
+	D3DXVECTOR3 v3CameraTarget(0.0f, 0.0f, 0.0f);
 	CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
 	if (pCamera)
+	{
 		v3CameraEye = pCamera->GetEye();
+		v3CameraTarget = pCamera->GetTarget();
+	}
 
 	// 2004. 3. 1. myevan. 이펙트 모니터링 하는 코드
 	/*
@@ -70,26 +109,46 @@ void CEffectManager::Update()
 
 	for (TEffectInstanceMap::iterator itor = m_kEftInstMap.begin(); itor != m_kEftInstMap.end();)
 	{
+		const DWORD dwInstanceID = itor->first;
 		CEffectInstance * pEffectInstance = itor->second;
 
 		DWORD dwUpdateStride = 1;
-		if (m_bAdaptiveFX && pCamera && (m_iPerfProfile >= 2 || m_bOverBudgetReduced))
+		if (m_bAdaptiveFX && pCamera)
 		{
+			const bool bHighPriorityFX = IsHighPriorityFX(pEffectInstance);
 			D3DXVECTOR3 v3Center;
 			float fRadius = 0.0f;
 			if (pEffectInstance->GetBoundingSphere(v3Center, fRadius))
 			{
-				D3DXVECTOR3 v3Diff = v3Center - v3CameraEye;
-				const float fDistSq = D3DXVec3Dot(&v3Diff, &v3Diff);
+				D3DXVECTOR3 v3DiffEye = v3Center - v3CameraEye;
+				const float fDistEyeSq = D3DXVec3Dot(&v3DiffEye, &v3DiffEye);
+				D3DXVECTOR3 v3DiffTarget = v3Center - v3CameraTarget;
+				const float fDistTargetSq = D3DXVec3Dot(&v3DiffTarget, &v3DiffTarget);
+				const float fDistSq = std::min(fDistEyeSq, fDistTargetSq);
+				const bool bImportantFX = bHighPriorityFX || (fDistSq < (4500.0f * 4500.0f));
 
-				if (fDistSq > (9000.0f * 9000.0f))
-					dwUpdateStride = m_bOverBudgetReduced ? 4 : 3;
-				else if (fDistSq > (5000.0f * 5000.0f))
-					dwUpdateStride = 2;
+				if (m_iPerfProfile >= 2 && !bImportantFX && !bHighPriorityFX)
+				{
+					if (fDistSq > (9000.0f * 9000.0f))
+						dwUpdateStride = m_bOverBudgetReduced ? 4 : 3;
+					else if (fDistSq > (5000.0f * 5000.0f))
+						dwUpdateStride = 2;
+
+					if (m_iFXStrideBias <= 0)
+					{
+						if (dwUpdateStride > 1)
+							--dwUpdateStride;
+					}
+					else if (m_iFXStrideBias >= 2)
+					{
+						if (dwUpdateStride > 1)
+							++dwUpdateStride;
+					}
+				}
 			}
 		}
 
-		if (dwUpdateStride <= 1 || (m_dwUpdateFrame % dwUpdateStride) == 0)
+		if (dwUpdateStride <= 1 || ((m_dwUpdateFrame + (dwInstanceID % dwUpdateStride)) % dwUpdateStride) == 0)
 			pEffectInstance->Update(/*fElapsedTime*/);
 
 		if (pEffectInstance->isAlive()) [[likely]] {
@@ -161,7 +220,7 @@ void CEffectManager::Render()
 	}
 }
 
-void CEffectManager::SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool bOverBudgetReduced)
+void CEffectManager::SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool bOverBudgetReduced, int iStrideBias)
 {
 	m_iPerfProfile = iProfile;
 	if (m_iPerfProfile < 0)
@@ -171,6 +230,12 @@ void CEffectManager::SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool
 
 	m_bAdaptiveFX = bAdaptiveFX;
 	m_bOverBudgetReduced = bOverBudgetReduced;
+	if (iStrideBias < 0)
+		m_iFXStrideBias = 0;
+	else if (iStrideBias > 2)
+		m_iFXStrideBias = 2;
+	else
+		m_iFXStrideBias = iStrideBias;
 
 	if (m_iPerfProfile <= 0)
 		m_dwSortInterval = 1;
@@ -185,12 +250,16 @@ void CEffectManager::SetPerformanceSettings(int iProfile, bool bAdaptiveFX, bool
 	{
 		float fScale = 1.0f;
 		if (m_iPerfProfile == 1)
-			fScale = 0.85f;
+			fScale = 0.90f;
 		else if (m_iPerfProfile >= 2)
-			fScale = 0.65f;
+			fScale = 0.80f;
 
 		if (m_bOverBudgetReduced)
-			fScale *= 0.8f;
+			fScale *= 0.9f;
+
+		const float fMinScale = (m_iPerfProfile >= 2) ? 0.72f : 0.80f;
+		if (fScale < fMinScale)
+			fScale = fMinScale;
 
 		CParticleSystemInstance::SetGlobalEmissionScale(fScale);
 	}
@@ -559,6 +628,7 @@ void CEffectManager::__Initialize()
 	m_iPerfProfile = 1;
 	m_bAdaptiveFX = true;
 	m_bOverBudgetReduced = false;
+	m_iFXStrideBias = 1;
 	m_dwUpdateFrame = 0;
 	m_dwRenderFrame = 0;
 	m_dwSortInterval = 2;

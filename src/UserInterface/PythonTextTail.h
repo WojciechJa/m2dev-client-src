@@ -60,9 +60,13 @@ class CPythonTextTail : public CSingleton<CPythonTextTail>
 		void UpdateShowingTextTail();
 		void Render();
 		void SetOptimizationSettings(bool bEnable, int iProfile);
+		void SetGridOptimizationEnabled(bool bEnable);
+		bool IsGridOptimizationEnabled() const;
 		void SetOptimizationRange(float fMaxDistance);
 		float GetOptimizationRange() const;
 		DWORD GetVisibleTextTailCount() const;
+		DWORD GetLastFrameMS() const;
+		DWORD GetLastCollisionCheckCount() const;
 
 		void ArrangeTextTail();
 		void HideAllTextTail();
@@ -118,6 +122,10 @@ class CPythonTextTail : public CSingleton<CPythonTextTail>
 		DWORD						m_dwArrangeIntervalMS;
 		int							m_iMaxRenderCount;
 		float						m_fOptimizationMaxDistance;
+		bool						m_bGridOptimizationEnabled;
+		DWORD						m_dwLastArrangeMS;
+		DWORD						m_dwLastRenderMS;
+		DWORD						m_dwLastCollisionChecks;
 
 	private:
 		CDynamicPool<STextTail>		m_TextTailPool;

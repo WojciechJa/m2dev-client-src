@@ -161,6 +161,14 @@ void CPythonCharacterManager::SetAnimationLODSettings(bool bEnable, int iProfile
 	m_dwAnimLODFrameCounter = 0;
 }
 
+void CPythonCharacterManager::__MarkSortCacheDirty(bool bAlive, bool bDead)
+{
+	if (bAlive)
+		m_bAliveSortCacheDirty = true;
+	if (bDead)
+		m_bDeadSortCacheDirty = true;
+}
+
 bool CPythonCharacterManager::__ShouldThrottleAnimation(CInstanceBase* pInstance, CInstanceBase* pMainInstance, DWORD dwTargetVID) const
 {
 	if (!m_bAnimLODEnabled)
@@ -399,6 +407,7 @@ void CPythonCharacterManager::UpdateDeleting()
 		else [[unlikely]] {
 			CInstanceBase::Delete(pInstance);
 			itor = m_kDeadInstList.erase(itor);
+			__MarkSortCacheDirty(false, true);
 		}
 	}
 }
@@ -518,50 +527,82 @@ struct FCharacterInstanceRenderTrace
 
 void CPythonCharacterManager::__RenderSortedAliveActorList()
 {
-	static std::vector<CInstanceBase*> s_kVct_pkInstAliveSort;
-	s_kVct_pkInstAliveSort.clear();
-
 	CCamera* pCamera = CCameraManager::instance().GetCurrentCamera();
 	if (!pCamera) [[unlikely]]
 		return;
 
-	TCharacterInstanceMap& rkMap_pkInstAlive=m_kAliveInstMap;
-	TCharacterInstanceMap::iterator i;
-	for (i=rkMap_pkInstAlive.begin(); i!=rkMap_pkInstAlive.end(); ++i)
-		s_kVct_pkInstAliveSort.push_back(i->second);
+	const D3DXVECTOR3 v3CameraEye = pCamera->GetEye();
+	const D3DXVECTOR3 v3CameraDiff = v3CameraEye - m_v3LastSortCameraEye;
+	const DWORD dwCurrentTargetVID = CPythonPlayer::Instance().GetTargetVID();
+	const bool bCameraMoved =
+		(!m_bHasLastSortCameraEye) ||
+		(D3DXVec3LengthSq(&v3CameraDiff) > (120.0f * 120.0f));
+	const bool bTargetChanged = (m_dwLastSortTargetVID != dwCurrentTargetVID);
+	const bool bFrameRefresh = (m_dwSortRenderFrame - m_dwLastAliveSortFrame) >= 3;
+	const bool bSizeChanged = (m_kVctAliveSortCache.size() != m_kAliveInstMap.size());
 
-	LessCharacterInstancePtrRenderOrder fSortFunc;
-	fSortFunc.v3CameraPosition = pCamera->GetEye();
+	if (m_bAliveSortCacheDirty || bCameraMoved || bTargetChanged || bFrameRefresh || bSizeChanged)
+	{
+		m_kVctAliveSortCache.clear();
+		m_kVctAliveSortCache.reserve(m_kAliveInstMap.size());
+		for (TCharacterInstanceMap::iterator i = m_kAliveInstMap.begin(); i != m_kAliveInstMap.end(); ++i)
+			m_kVctAliveSortCache.push_back(i->second);
 
-	std::sort(s_kVct_pkInstAliveSort.begin(), s_kVct_pkInstAliveSort.end(), fSortFunc);
-	std::for_each(s_kVct_pkInstAliveSort.begin(), s_kVct_pkInstAliveSort.end(), FCharacterInstanceRender());
-	std::for_each(s_kVct_pkInstAliveSort.begin(), s_kVct_pkInstAliveSort.end(), FCharacterInstanceRenderTrace());
+		LessCharacterInstancePtrRenderOrder fSortFunc;
+		fSortFunc.v3CameraPosition = v3CameraEye;
+		std::sort(m_kVctAliveSortCache.begin(), m_kVctAliveSortCache.end(), fSortFunc);
+
+		m_bAliveSortCacheDirty = false;
+		m_dwLastAliveSortFrame = m_dwSortRenderFrame;
+		m_v3LastSortCameraEye = v3CameraEye;
+		m_bHasLastSortCameraEye = true;
+	}
+	m_dwLastSortTargetVID = dwCurrentTargetVID;
+
+	std::for_each(m_kVctAliveSortCache.begin(), m_kVctAliveSortCache.end(), FCharacterInstanceRender());
+	std::for_each(m_kVctAliveSortCache.begin(), m_kVctAliveSortCache.end(), FCharacterInstanceRenderTrace());
 }
 
 void CPythonCharacterManager::__RenderSortedDeadActorList()
 {
-	static std::vector<CInstanceBase*> s_kVct_pkInstDeadSort;
-	s_kVct_pkInstDeadSort.clear();
-
 	CCamera* pCamera = CCameraManager::instance().GetCurrentCamera();
 	if (!pCamera) [[unlikely]]
 		return;
 
-	TCharacterInstanceList& rkLst_pkInstDead=m_kDeadInstList;
-	TCharacterInstanceList::iterator i;
-	for (i=rkLst_pkInstDead.begin(); i!=rkLst_pkInstDead.end(); ++i)
-		s_kVct_pkInstDeadSort.push_back(*i);
+	const DWORD dwFrameInterval = (m_iAnimLODProfile >= 2) ? 2 : 1;
+	const D3DXVECTOR3 v3CameraEye = pCamera->GetEye();
+	const D3DXVECTOR3 v3CameraDiff = v3CameraEye - m_v3LastSortCameraEye;
+	const bool bCameraMoved =
+		(!m_bHasLastSortCameraEye) ||
+		(D3DXVec3LengthSq(&v3CameraDiff) > (120.0f * 120.0f));
+	const bool bFrameRefresh = (m_dwSortRenderFrame - m_dwLastDeadSortFrame) >= dwFrameInterval;
+	const bool bSizeChanged = (m_kVctDeadSortCache.size() != m_kDeadInstList.size());
 
-	LessCharacterInstancePtrRenderOrder fSortFunc;
-	fSortFunc.v3CameraPosition = pCamera->GetEye();
+	if (m_bDeadSortCacheDirty || bCameraMoved || bFrameRefresh || bSizeChanged)
+	{
+		m_kVctDeadSortCache.clear();
+		m_kVctDeadSortCache.reserve(m_kDeadInstList.size());
+		for (TCharacterInstanceList::iterator i = m_kDeadInstList.begin(); i != m_kDeadInstList.end(); ++i)
+			m_kVctDeadSortCache.push_back(*i);
 
-	std::sort(s_kVct_pkInstDeadSort.begin(), s_kVct_pkInstDeadSort.end(), fSortFunc);
-	std::for_each(s_kVct_pkInstDeadSort.begin(), s_kVct_pkInstDeadSort.end(), FCharacterInstanceRender());
+		LessCharacterInstancePtrRenderOrder fSortFunc;
+		fSortFunc.v3CameraPosition = v3CameraEye;
+		std::sort(m_kVctDeadSortCache.begin(), m_kVctDeadSortCache.end(), fSortFunc);
+
+		m_bDeadSortCacheDirty = false;
+		m_dwLastDeadSortFrame = m_dwSortRenderFrame;
+		m_v3LastSortCameraEye = v3CameraEye;
+		m_bHasLastSortCameraEye = true;
+	}
+
+	std::for_each(m_kVctDeadSortCache.begin(), m_kVctDeadSortCache.end(), FCharacterInstanceRender());
 
 }
 
 void CPythonCharacterManager::Render()
 {
+	++m_dwSortRenderFrame;
+
 	STATEMANAGER.SetTexture(0, NULL);	
 	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
 	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_CURRENT);
@@ -602,7 +643,50 @@ struct FCharacterManagerCharacterInstanceRenderToShadowMap
 
 void CPythonCharacterManager::RenderShadowAllInstances()
 {
-	std::for_each(m_kAliveInstMap.begin(), m_kAliveInstMap.end(), FCharacterManagerCharacterInstanceRenderToShadowMap());
+	int iMaxCasters = -1;
+	if (m_iAnimLODProfile == 1)
+		iMaxCasters = 120;
+	else if (m_iAnimLODProfile >= 2)
+		iMaxCasters = 70;
+
+	CInstanceBase* pMainInstance = GetMainInstancePtr();
+	if (iMaxCasters <= 0 || !pMainInstance || m_kAliveInstMap.size() <= static_cast<size_t>(iMaxCasters))
+	{
+		std::for_each(m_kAliveInstMap.begin(), m_kAliveInstMap.end(), FCharacterManagerCharacterInstanceRenderToShadowMap());
+		return;
+	}
+
+	std::vector<std::pair<float, CInstanceBase*> > kVctShadowCasters;
+	kVctShadowCasters.reserve(m_kAliveInstMap.size());
+	for (TCharacterInstanceMap::iterator it = m_kAliveInstMap.begin(); it != m_kAliveInstMap.end(); ++it)
+	{
+		CInstanceBase* pInst = it->second;
+		if (!pInst || pInst->IsDead())
+			continue;
+
+		const float fDistanceSq = pInst->NEW_GetDistanceFromDestInstanceSquared(*pMainInstance);
+		kVctShadowCasters.push_back(std::make_pair(fDistanceSq, pInst));
+	}
+
+	if (kVctShadowCasters.size() <= static_cast<size_t>(iMaxCasters))
+	{
+		for (std::vector<std::pair<float, CInstanceBase*> >::iterator it = kVctShadowCasters.begin(); it != kVctShadowCasters.end(); ++it)
+			it->second->RenderToShadowMap();
+		return;
+	}
+
+	std::nth_element(
+		kVctShadowCasters.begin(),
+		kVctShadowCasters.begin() + iMaxCasters,
+		kVctShadowCasters.end(),
+		std::less<std::pair<float, CInstanceBase*> >());
+
+	for (int i = 0; i < iMaxCasters; ++i)
+	{
+		CInstanceBase* pInst = kVctShadowCasters[i].second;
+		if (pInst)
+			pInst->RenderToShadowMap();
+	}
 }
 
 struct FCharacterManagerCharacterInstanceRenderCollision
@@ -654,6 +738,7 @@ CInstanceBase * CPythonCharacterManager::RegisterInstance(DWORD VirtualID)
 
 	CInstanceBase * pCharacterInstance = CInstanceBase::New();
 	m_kAliveInstMap.insert(TCharacterInstanceMap::value_type(VirtualID, pCharacterInstance));
+	__MarkSortCacheDirty(true, false);
 
 	return (pCharacterInstance);
 }
@@ -682,12 +767,14 @@ void CPythonCharacterManager::DeleteInstance(DWORD dwDelVID)
 	CInstanceBase::Delete(pkInstDel);
 
 	m_kAliveInstMap.erase(itor);
+	__MarkSortCacheDirty(true, false);
 }
 
 void CPythonCharacterManager::__DeleteBlendOutInstance(CInstanceBase* pkInstDel)
 {
 	pkInstDel->DeleteBlendOut();
 	m_kDeadInstList.push_back(pkInstDel);	
+	__MarkSortCacheDirty(true, true);
 
 	IAbstractPlayer& rkPlayer=IAbstractPlayer::GetSingleton();
 	rkPlayer.NotifyCharacterDead(pkInstDel->GetVirtualID());
@@ -702,6 +789,7 @@ void CPythonCharacterManager::DeleteInstanceByFade(DWORD dwVID)
 	}
 	__DeleteBlendOutInstance(f->second);
 	m_kAliveInstMap.erase(f);	
+	__MarkSortCacheDirty(true, false);
 }
 
 void CPythonCharacterManager::SelectInstance(DWORD VirtualID)
@@ -1005,12 +1093,14 @@ void CPythonCharacterManager::DestroyAliveInstanceMap()
 		CInstanceBase::Delete(i->second);
 
 	m_kAliveInstMap.clear();
+	__MarkSortCacheDirty(true, false);
 }
 
 void CPythonCharacterManager::DestroyDeadInstanceList()
 {
 	std::for_each(m_kDeadInstList.begin(), m_kDeadInstList.end(), CInstanceBase::Delete);
 	m_kDeadInstList.clear();
+	__MarkSortCacheDirty(false, true);
 }
 
 void CPythonCharacterManager::Destroy()
@@ -1029,6 +1119,16 @@ void CPythonCharacterManager::__Initialize()
 	m_pkInstBind = NULL;
 	m_pkInstPick = NULL;
 	m_v2PickedInstProjPos = D3DXVECTOR2(0.0f, 0.0f);
+	m_kVctAliveSortCache.clear();
+	m_kVctDeadSortCache.clear();
+	m_bAliveSortCacheDirty = true;
+	m_bDeadSortCacheDirty = true;
+	m_dwSortRenderFrame = 0;
+	m_dwLastAliveSortFrame = 0;
+	m_dwLastDeadSortFrame = 0;
+	m_dwLastSortTargetVID = 0;
+	m_bHasLastSortCameraEye = false;
+	m_v3LastSortCameraEye = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
 	m_bAnimLODEnabled = true;
 	m_iAnimLODProfile = 1;
 	m_dwAnimLODFrameCounter = 0;
