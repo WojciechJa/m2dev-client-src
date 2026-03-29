@@ -1,12 +1,14 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "GrpTextInstance.h"
-#include "StateManager.h"
 #include "IME.h"
 #include "TextTag.h"
 #include "EterBase/Utils.h"
 #include "EterLocale/Arabic.h"
+#include "GrpDeviceDX11.h"
+#include "GrpScreen.h"
 
 #include <unordered_map>
+#include <set>
 #include <utf8.h>
 
 // Forward declaration to avoid header conflicts
@@ -20,6 +22,34 @@ static int gs_mx = 0;
 static int gs_my = 0;
 
 static std::wstring gs_hyperlinkText;
+
+// M2-UI-TEXTTAIL-PARITY-26: Startup guard state (file-scope to allow reset)
+static DWORD s_dwDX11TextStartupGuardBeginMS = timeGetTime(); // Initialize at first load
+
+static bool __IsDX11TextStartupGuardActive()
+{
+	// Ignore transient bootstrap/resource misses in first frames after startup.
+	// M2-UI-TEXTTAIL-PARITY-26: Extended to 5000ms to cover phase changes (alt-tab, resize, fullscreen).
+	const DWORD dwNow = timeGetTime();
+	return (dwNow >= s_dwDX11TextStartupGuardBeginMS) &&
+		((dwNow - s_dwDX11TextStartupGuardBeginMS) < 5000u);
+}
+
+// M2-UI-TEXTTAIL-PARITY-26: Allow external reset of guard timer on phase changes (alt-tab, resize, fullscreen)
+void ResetDX11TextStartupGuard()
+{
+	s_dwDX11TextStartupGuardBeginMS = timeGetTime();
+}
+
+static void __LogDX11TextFailOnce(bool& rbLogged, const char* c_szReason)
+{
+	if (rbLogged)
+		return;
+	if (__IsDX11TextStartupGuardActive())
+		return;
+	rbLogged = true;
+	TraceError("DX11_TEXT_RENDER_FAIL reason=%s", c_szReason);
+}
 
 void CGraphicTextInstance::Hyperlink_UpdateMousePos(int x, int y)
 {
@@ -410,7 +440,7 @@ void CGraphicTextInstance::Update()
 
 							// FIX: Use false to let BiDi auto-detect direction from content
 							// This ensures English items like [Sword+9] stay LTR
-							// while Arabic items like [درع فولاذي+9] are properly RTL
+							// while Arabic items like [Ø¯Ø±Ø¹ ÙÙˆÙ„Ø§Ø°ÙŠ+9] are properly RTL
 							std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
 								s_content.data(), (int)s_content.size(), false);
 
@@ -429,7 +459,7 @@ void CGraphicTextInstance::Update()
 							s_visibleToRender.insert(s_visibleToRender.end(), visual.begin(), visual.end());
 						}
 
-						// Ensure a space AFTER the hyperlink chunk (so it becomes "[hyperlink] اختبار...")
+						// Ensure a space AFTER the hyperlink chunk (so it becomes "[hyperlink] Ø§Ø®ØªØ¨Ø§Ø±...")
 						s_visibleToRender.push_back(L' ');
 
 						// Key behavior:
@@ -504,23 +534,227 @@ void CGraphicTextInstance::Update()
 	m_isUpdate = true;
 }
 
+// M3-ETERLIB-TEXT-66: Text Rendering Architecture Summary
+// ========================================================
+// DX11 Path (DX11_STRICT_ONLY mode):
+//   - RenderDX11() uses direct D3D11 API (lines 1183-1738)
+//   - LCD two-pass subpixel rendering with explicit blend states
+//   - No StateManager dependencies
+//   - Baseline state: CGraphicDeviceDX11::SetUITextBaselineState()
+//
+// Legacy DX9 Path was removed from the runtime code path in this branch.
+// Render() now uses RenderDX11() only; no StateManager fallback remains.
 void CGraphicTextInstance::Render(RECT * pClipRect)
 {
-	if (!m_isUpdate)
-		return;
+	// Try DX11 rendering first
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid())
+	{
+		// Startup/idle guard: no prepared glyph batch yet is not a DX11 failure.
+		if (!m_isUpdate || m_pCharInfoVector.empty())
+			return;
 
-	CGraphicText* pkText=m_roText.GetPointer();
-	if (!pkText)
+		if (RenderDX11(pClipRect))
+		{
+			// M3-CORE-51: Telemetry for strict mode compliance (30s heartbeat)
+			static DWORD s_dwLastTelemetryTick = 0;
+			const DWORD dwNow = timeGetTime();
+			if (dwNow - s_dwLastTelemetryTick > 30000)
+			{
+				s_dwLastTelemetryTick = dwNow;
+				TraceError("DX11_PIPELINE_STATE_PARITY pass=ui_text_strict path=dx11_native state_manager=unused");
+			}
+			return;
+		}
+
+		// M2-UI-TEXT-PATH-71: DX11-only text rendering - no legacy fallback available
+		static DWORD s_dwLastDX11TextFailTick = 0;
+		const DWORD dwNow = timeGetTime();
+		if (0 == s_dwLastDX11TextFailTick || (dwNow - s_dwLastDX11TextFailTick) >= 5000)
+		{
+			s_dwLastDX11TextFailTick = dwNow;
+			TraceError("DX11_TEXT_RENDER_FAIL reason=dx11_path_failed chars=%u update=%d",
+				static_cast<unsigned int>(m_pCharInfoVector.size()),
+				m_isUpdate ? 1 : 0);
+		}
 		return;
+	}
+
+	// M2-ETERLIB-TEXT-68: DX11-only - no DX9 fallback path, removed all legacy DX9 code
+	// If DX11 path failed above, do not attempt DX9 rendering
+	return;
+}
+
+bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
+{
+	// M2-ETERLIB-TEXT-68: Removed DX11_STRICT_ONLY guard - always use DX11 path
+	if (!m_isUpdate)
+		return true;
+
+	CGraphicText* pkText = m_roText.GetPointer();
+	if (!pkText)
+	{
+		static bool s_bLoggedTextResourceWait = false;
+		__LogDX11TextFailOnce(s_bLoggedTextResourceWait, "font_resource_wait_text_pointer");
+		return true;
+	}
 
 	CGraphicFontTexture* pFontTexture = pkText->GetFontTexturePointer();
 	if (!pFontTexture)
-		return;
+	{
+		static bool s_bLoggedFontTextureWait = false;
+		__LogDX11TextFailOnce(s_bLoggedFontTextureWait, "font_resource_wait_texture_pointer");
+		return true;
+	}
 
+	// Get DX11 device
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+	{
+		// M2-UI-PARITY-FILTER-25: Track device invalidation when filter might be active
+		static DWORD s_dwLastDeviceFailTick = 0;
+		const DWORD dwNow = timeGetTime();
+		if (dwNow - s_dwLastDeviceFailTick >= 10000)
+		{
+			s_dwLastDeviceFailTick = dwNow;
+			TraceError("DX11_TEXT_FILTER_PARITY device_invalid_when_filter_active "
+				"dx11_ptr=%p valid=%d",
+				pDX11Device,
+				pDX11Device ? pDX11Device->IsValid() : -1);
+		}
+		return false;
+	}
+
+	// Ensure bootstrap pipeline is ready
+	if (!pDX11Device->EnsureBootstrapPipelineReady() || !pDX11Device->EnsureBootstrapUISamplerReady())
+	{
+		static bool s_bLoggedBootstrapFail = false;
+		__LogDX11TextFailOnce(s_bLoggedBootstrapFail, "bootstrap_resources_incomplete");
+		return false;
+	}
+
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	ID3D11Buffer* pVertexBuffer = pDX11Device->GetBootstrapUIVertexBuffer();
+	ID3D11VertexShader* pVertexShader = pDX11Device->GetBootstrapUIVertexShader();
+	ID3D11PixelShader* pPixelShader = pDX11Device->GetBootstrapUITexturePixelShader();
+	ID3D11InputLayout* pInputLayout = pDX11Device->GetBootstrapUIInputLayout();
+	ID3D11SamplerState* pSamplerState = pDX11Device->GetBootstrapUISamplerState();
+	ID3D11BlendState* pAlphaBlendState = pDX11Device->GetBootstrapUIAlphaBlendState();
+	ID3D11DepthStencilState* pDepthDisableState = pDX11Device->GetBootstrapUIDepthDisableState();
+
+	if (!pContext || !pVertexBuffer || !pVertexShader || !pPixelShader || !pInputLayout || !pSamplerState || !pAlphaBlendState || !pDepthDisableState)
+	{
+		static bool s_bLoggedResourceFail = false;
+		__LogDX11TextFailOnce(s_bLoggedResourceFail, "bootstrap_resources_null");
+		return false;
+	}
+
+	// Use dedicated point sampler for glyph atlas to avoid blurred text while
+	// keeping regular UI sprites on linear filtering.
+	static ID3D11SamplerState* s_pDX11TextPointSampler = nullptr;
+	if (!s_pDX11TextPointSampler)
+	{
+		if (ID3D11Device* pDevice = pDX11Device->GetDevice())
+		{
+			D3D11_SAMPLER_DESC kTextSamplerDesc = {};
+			kTextSamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+			kTextSamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			kTextSamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			kTextSamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			kTextSamplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+			kTextSamplerDesc.MinLOD = 0.0f;
+			kTextSamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+			pDevice->CreateSamplerState(&kTextSamplerDesc, &s_pDX11TextPointSampler);
+		}
+	}
+
+	// Get backbuffer dimensions for NDC conversion
+	UINT uBackBufferWidth = 0, uBackBufferHeight = 0;
+	CGraphicBase::GetBackBufferSize(&uBackBufferWidth, &uBackBufferHeight);
+	if (uBackBufferWidth == 0 || uBackBufferHeight == 0)
+	{
+		static bool s_bLoggedBackbufferFail = false;
+		__LogDX11TextFailOnce(s_bLoggedBackbufferFail, "backbuffer_size_invalid");
+		return false;
+	}
+
+	// World/game passes can leave RT unbound; recover to main RT only when OM has no RTV.
+	// If an overlay/filter RT is already active, preserve it to avoid breaking composed UI passes.
+	ID3D11RenderTargetView* pPreBindRTV = nullptr;
+	ID3D11DepthStencilView* pPreBindDSV = nullptr;
+	pContext->OMGetRenderTargets(1, &pPreBindRTV, &pPreBindDSV);
+
+	const bool bHadActiveRTV = (pPreBindRTV != nullptr);
+	if (!bHadActiveRTV)
+	{
+		pDX11Device->BindMainRenderTargets();
+
+		// M2-UI-TEXT-PATH-71: Also recover viewport after world→UI handoff
+		D3D11_VIEWPORT kViewport = {};
+		kViewport.TopLeftX = 0.0f;
+		kViewport.TopLeftY = 0.0f;
+		kViewport.Width = static_cast<float>(uBackBufferWidth);
+		kViewport.Height = static_cast<float>(uBackBufferHeight);
+		kViewport.MinDepth = 0.0f;
+		kViewport.MaxDepth = 1.0f;
+		pContext->RSSetViewports(1, &kViewport);
+	}
+
+	// M2-UI-PARITY-FILTER-25: Log only forced RT recovery path (when OM was null)
+	ID3D11RenderTargetView* pPostBindRTV = nullptr;
+	ID3D11DepthStencilView* pPostBindDSV = nullptr;
+	pContext->OMGetRenderTargets(1, &pPostBindRTV, &pPostBindDSV);
+
+	static DWORD s_dwLastRTRecoverLog = 0;
+	if (!bHadActiveRTV && pPostBindRTV != nullptr)
+	{
+		const DWORD dwNow = timeGetTime();
+		if (dwNow - s_dwLastRTRecoverLog >= 10000)
+		{
+			s_dwLastRTRecoverLog = dwNow;
+			TraceError("DX11_TEXT_FILTER_PARITY rt_recovered_for_text rt_before=%p rt_after=%p",
+				pPreBindRTV, pPostBindRTV);
+		}
+	}
+
+	if (pPreBindRTV) pPreBindRTV->Release();
+	if (pPreBindDSV) pPreBindDSV->Release();
+	if (pPostBindRTV) pPostBindRTV->Release();
+	if (pPostBindDSV) pPostBindDSV->Release();
+
+	// DX11 Model Sync M3-TEXTTAIL22.A: Verify RT binding succeeded
+	ID3D11RenderTargetView* pBoundRTV = nullptr;
+	ID3D11DepthStencilView* pBoundDSV = nullptr;
+	pContext->OMGetRenderTargets(1, &pBoundRTV, &pBoundDSV);
+	static bool s_bLoggedRTMismatch = false;
+	if (!pBoundRTV && !s_bLoggedRTMismatch)
+	{
+		s_bLoggedRTMismatch = true;
+		TraceError("DX11_TEXTTAIL_RT_FAIL reason=main_rt_bind_failed");
+	}
+	if (pBoundRTV) pBoundRTV->Release();
+	if (pBoundDSV) pBoundDSV->Release();
+
+	// NDC conversion lambdas
+	auto PixelToNDCX = [uBackBufferWidth](float fX) -> float {
+		return (2.0f * fX / static_cast<float>(uBackBufferWidth)) - 1.0f;
+	};
+	auto PixelToNDCY = [uBackBufferHeight](float fY) -> float {
+		return 1.0f - (2.0f * fY / static_cast<float>(uBackBufferHeight));
+	};
+
+	// SBootstrapVertex structure (must match DX11 input layout)
+	struct SBootstrapVertex
+	{
+		float x, y, z;
+		float r, g, b, a;
+		float u, v;
+	};
+
+	// Calculate text position with alignment
 	float fStanX = m_v3Position.x;
 	float fStanY = m_v3Position.y + 1.0f;
 
-	// Use the computed direction for this text instance, not the global UI direction
 	if (m_computedRTL)
 	{
 		switch (m_hAlign)
@@ -528,7 +762,6 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 			case HORIZONTAL_ALIGN_LEFT:
 				fStanX -= m_textWidth;
 				break;
-
 			case HORIZONTAL_ALIGN_CENTER:
 				fStanX -= float(m_textWidth / 2);
 				break;
@@ -541,7 +774,6 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 			case HORIZONTAL_ALIGN_RIGHT:
 				fStanX -= m_textWidth;
 				break;
-
 			case HORIZONTAL_ALIGN_CENTER:
 				fStanX -= float(m_textWidth / 2);
 				break;
@@ -553,192 +785,54 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 		case VERTICAL_ALIGN_BOTTOM:
 			fStanY -= m_textHeight;
 			break;
-
 		case VERTICAL_ALIGN_CENTER:
 			fStanY -= float(m_textHeight) / 2.0f;
 			break;
 	}
 
-	static std::unordered_map<LPDIRECT3DTEXTURE9, std::vector<SVertex>> s_outlineBatches;
-	static std::unordered_map<LPDIRECT3DTEXTURE9, std::vector<SVertex>> s_mainBatches;
-	s_outlineBatches.clear();
-	s_mainBatches.clear();
+	// Build vertex batches per texture page (using font atlas API from Model 1)
+	std::unordered_map<DWORD, std::vector<SBootstrapVertex>> outlineBatches;
+	std::unordered_map<DWORD, std::vector<SBootstrapVertex>> mainBatches;
+	// Screen-space UI/text in DX11 must keep a stable clip-space Z.
+	// Using legacy per-instance Z can clip texttails intermittently.
+	const float fUIZ = 0.0f;
 
-	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	DWORD dwFogEnable = STATEMANAGER.GetRenderState(D3DRS_FOGENABLE);
-	DWORD dwLighting = STATEMANAGER.GetRenderState(D3DRS_LIGHTING);
-	STATEMANAGER.SetRenderState(D3DRS_FOGENABLE, FALSE);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, FALSE);
+	const float fFontHalfWeight = 1.0f;
+	float fCurX, fCurY, fFontMaxHeight;
+	CGraphicFontTexture::TCharacterInfomation* pCurCharInfo;
 
-	STATEMANAGER.SetFVF(D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
-
-	// LCD subpixel rendering: mask alpha writes to prevent corruption during two-pass blending
-	STATEMANAGER.SaveRenderState(D3DRS_COLORWRITEENABLE,
-		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
-
+	// Build outline batches (if outline enabled)
+	if (m_isOutline)
 	{
-		const float fFontHalfWeight=1.0f;
+		fCurX = fStanX;
+		fCurY = fStanY;
+		fFontMaxHeight = 0.0f;
 
-		float fCurX;
-		float fCurY;
+		// Convert outline color DWORD to float RGBA
+		float outlineR = ((m_dwOutLineColor >> 16) & 0xFF) / 255.0f;
+		float outlineG = ((m_dwOutLineColor >> 8) & 0xFF) / 255.0f;
+		float outlineB = ((m_dwOutLineColor) & 0xFF) / 255.0f;
+		float outlineA = ((m_dwOutLineColor >> 24) & 0xFF) / 255.0f;
 
-		float fFontSx;
-		float fFontSy;
-		float fFontEx;
-		float fFontEy;
-		float fFontWidth;
-		float fFontHeight;
-		float fFontMaxHeight;
-		float fFontAdvance;
-
-		SVertex akVertex[4];
-		akVertex[0].z=m_v3Position.z;
-		akVertex[1].z=m_v3Position.z;
-		akVertex[2].z=m_v3Position.z;
-		akVertex[3].z=m_v3Position.z;
-
-		CGraphicFontTexture::TCharacterInfomation* pCurCharInfo;
-
-		if (m_isOutline)
+		for (int charIdx = 0; charIdx < (int)m_pCharInfoVector.size(); ++charIdx)
 		{
-			fCurX=fStanX;
-			fCurY=fStanY;
-			fFontMaxHeight=0.0f;
+			pCurCharInfo = m_pCharInfoVector[charIdx];
 
-			int charIdx = 0;
-			CGraphicFontTexture::TPCharacterInfomationVector::iterator i;
-			for (i=m_pCharInfoVector.begin(); i!=m_pCharInfoVector.end(); ++i, ++charIdx)
-			{
-				pCurCharInfo = *i;
-
-				float fKern = (charIdx < (int)m_kernVector.size()) ? m_kernVector[charIdx] : 0.0f;
-				fCurX += fKern;
-
-				fFontWidth=float(pCurCharInfo->width);
-				fFontHeight=float(pCurCharInfo->height);
-				fFontMaxHeight=(std::max)(fFontMaxHeight, fFontHeight);
-				fFontAdvance=float(pCurCharInfo->advance);
-
-				if ((fCurX+fFontWidth)-m_v3Position.x > m_fLimitWidth) [[unlikely]] {
-					if (m_isMultiLine)
-					{
-						fCurX=fStanX;
-						fCurY+=fFontMaxHeight;
-					}
-					else
-					{
-						break;
-					}
-				}
-
-				if (pClipRect)
-				{
-					if (fCurY <= pClipRect->top)
-					{
-						fCurX += fFontAdvance;
-						continue;
-					}
-				}
-
-				fFontSx = fCurX + pCurCharInfo->bearingX - 0.5f;
-				fFontSy = fCurY - 0.5f;
-				fFontEx = fFontSx + fFontWidth;
-				fFontEy = fFontSy + fFontHeight;
-
-				pFontTexture->SelectTexture(pCurCharInfo->index);
-				std::vector<SVertex>& vtxBatch = s_outlineBatches[pFontTexture->GetD3DTexture()];
-
-				akVertex[0].u=pCurCharInfo->left;
-				akVertex[0].v=pCurCharInfo->top;
-				akVertex[1].u=pCurCharInfo->left;
-				akVertex[1].v=pCurCharInfo->bottom;
-				akVertex[2].u=pCurCharInfo->right;
-				akVertex[2].v=pCurCharInfo->top;
-				akVertex[3].u=pCurCharInfo->right;
-				akVertex[3].v=pCurCharInfo->bottom;
-
-				akVertex[3].color = akVertex[2].color = akVertex[1].color = akVertex[0].color = m_dwOutLineColor;
-
-				float feather = 0.0f; // m_fFontFeather
-
-				akVertex[0].y=fFontSy-feather;
-				akVertex[1].y=fFontEy+feather;
-				akVertex[2].y=fFontSy-feather;
-				akVertex[3].y=fFontEy+feather;
-
-				// 왼
-				akVertex[0].x=fFontSx-fFontHalfWeight-feather;
-				akVertex[1].x=fFontSx-fFontHalfWeight-feather;
-				akVertex[2].x=fFontEx-fFontHalfWeight+feather;
-				akVertex[3].x=fFontEx-fFontHalfWeight+feather;
-
-				vtxBatch.push_back(akVertex[0]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[2]);
-				vtxBatch.push_back(akVertex[2]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[3]);
-
-				// 오른
-				akVertex[0].x=fFontSx+fFontHalfWeight-feather;
-				akVertex[1].x=fFontSx+fFontHalfWeight-feather;
-				akVertex[2].x=fFontEx+fFontHalfWeight+feather;
-				akVertex[3].x=fFontEx+fFontHalfWeight+feather;
-
-				vtxBatch.push_back(akVertex[0]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[2]);
-				vtxBatch.push_back(akVertex[2]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[3]);
-
-				akVertex[0].x=fFontSx-feather;
-				akVertex[1].x=fFontSx-feather;
-				akVertex[2].x=fFontEx+feather;
-				akVertex[3].x=fFontEx+feather;
-
-				// 위
-				akVertex[0].y=fFontSy-fFontHalfWeight-feather;
-				akVertex[1].y=fFontEy-fFontHalfWeight+feather;
-				akVertex[2].y=fFontSy-fFontHalfWeight-feather;
-				akVertex[3].y=fFontEy-fFontHalfWeight+feather;
-
-				vtxBatch.push_back(akVertex[0]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[2]);
-				vtxBatch.push_back(akVertex[2]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[3]);
-
-				// 아래
-				akVertex[0].y=fFontSy+fFontHalfWeight-feather;
-				akVertex[1].y=fFontEy+fFontHalfWeight+feather;
-				akVertex[2].y=fFontSy+fFontHalfWeight-feather;
-				akVertex[3].y=fFontEy+fFontHalfWeight+feather;
-
-				vtxBatch.push_back(akVertex[0]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[2]);
-				vtxBatch.push_back(akVertex[2]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[3]);
-
-				fCurX += fFontAdvance;
-			}
-		}
-
-		fCurX=fStanX;
-		fCurY=fStanY;
-		fFontMaxHeight=0.0f;
-
-		for (int i = 0; i < (int)m_pCharInfoVector.size(); ++i)
-		{
-			pCurCharInfo = m_pCharInfoVector[i];
-
-			float fKern = (i < (int)m_kernVector.size()) ? m_kernVector[i] : 0.0f;
+			float fKern = (charIdx < (int)m_kernVector.size()) ? m_kernVector[charIdx] : 0.0f;
 			fCurX += fKern;
 
-			fFontWidth=float(pCurCharInfo->width);
-			fFontHeight=float(pCurCharInfo->height);
-			fFontMaxHeight=(std::max)(fFontMaxHeight, fFontHeight);
-			fFontAdvance=float(pCurCharInfo->advance);
+			float fFontWidth = float(pCurCharInfo->width);
+			float fFontHeight = float(pCurCharInfo->height);
+			float fFontAdvance = float(pCurCharInfo->advance);
+			fFontMaxHeight = std::max(fFontMaxHeight, fFontHeight);
 
-			if ((fCurX + fFontWidth) - m_v3Position.x > m_fLimitWidth) [[unlikely]] {
+			// Multi-line wrapping
+			if ((fCurX + fFontWidth) - m_v3Position.x > m_fLimitWidth)
+			{
 				if (m_isMultiLine)
 				{
-					fCurX=fStanX;
-					fCurY+=fFontMaxHeight;
+					fCurX = fStanX;
+					fCurY += fFontMaxHeight;
 				}
 				else
 				{
@@ -746,205 +840,301 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 				}
 			}
 
-			if (pClipRect)
+			// Clipping
+			if (pClipRect && fCurY <= pClipRect->top)
 			{
-				if (fCurY <= pClipRect->top)
-				{
-					fCurX += fFontAdvance;
-					continue;
-				}
+				fCurX += fFontAdvance;
+				continue;
 			}
 
-			fFontSx = fCurX + pCurCharInfo->bearingX - 0.5f;
-			fFontSy = fCurY-0.5f;
-			fFontEx = fFontSx + fFontWidth;
-			fFontEy = fFontSy + fFontHeight;
+			float fFontSx = fCurX + pCurCharInfo->bearingX - 0.5f;
+			float fFontSy = fCurY - 0.5f;
+			float fFontEx = fFontSx + fFontWidth;
+			float fFontEy = fFontSy + fFontHeight;
 
-			pFontTexture->SelectTexture(pCurCharInfo->index);
-			std::vector<SVertex>& vtxBatch = s_mainBatches[pFontTexture->GetD3DTexture()];
+			DWORD dwTexturePage = pCurCharInfo->index;
+			std::vector<SBootstrapVertex>& vtxBatch = outlineBatches[dwTexturePage];
 
-			akVertex[0].x=fFontSx;
-			akVertex[0].y=fFontSy;
-			akVertex[0].u=pCurCharInfo->left;
-			akVertex[0].v=pCurCharInfo->top;
+			// Outline is rendered in 4 directions (left, right, top, bottom) with 2 triangles each
+			// Left outline
+			{
+				float x0 = PixelToNDCX(fFontSx - fFontHalfWeight);
+				float x1 = PixelToNDCX(fFontEx - fFontHalfWeight);
+				float y0 = PixelToNDCY(fFontSy);
+				float y1 = PixelToNDCY(fFontEy);
 
-			akVertex[1].x=fFontSx;
-			akVertex[1].y=fFontEy;
-			akVertex[1].u=pCurCharInfo->left;
-			akVertex[1].v=pCurCharInfo->bottom;
+				SBootstrapVertex v0 = { x0, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->top };
+				SBootstrapVertex v1 = { x0, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->bottom };
+				SBootstrapVertex v2 = { x1, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->top };
+				SBootstrapVertex v3 = { x1, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->bottom };
 
-			akVertex[2].x=fFontEx;
-			akVertex[2].y=fFontSy;
-			akVertex[2].u=pCurCharInfo->right;
-			akVertex[2].v=pCurCharInfo->top;
+				vtxBatch.push_back(v0); vtxBatch.push_back(v1); vtxBatch.push_back(v2);
+				vtxBatch.push_back(v2); vtxBatch.push_back(v1); vtxBatch.push_back(v3);
+			}
 
-			akVertex[3].x=fFontEx;
-			akVertex[3].y=fFontEy;
-			akVertex[3].u=pCurCharInfo->right;
-			akVertex[3].v=pCurCharInfo->bottom;
+			// Right outline
+			{
+				float x0 = PixelToNDCX(fFontSx + fFontHalfWeight);
+				float x1 = PixelToNDCX(fFontEx + fFontHalfWeight);
+				float y0 = PixelToNDCY(fFontSy);
+				float y1 = PixelToNDCY(fFontEy);
 
-			akVertex[0].color = akVertex[1].color = akVertex[2].color = akVertex[3].color = m_dwColorInfoVector[i];
+				SBootstrapVertex v0 = { x0, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->top };
+				SBootstrapVertex v1 = { x0, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->bottom };
+				SBootstrapVertex v2 = { x1, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->top };
+				SBootstrapVertex v3 = { x1, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->bottom };
 
-			vtxBatch.push_back(akVertex[0]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[2]);
-			vtxBatch.push_back(akVertex[2]); vtxBatch.push_back(akVertex[1]); vtxBatch.push_back(akVertex[3]);
+				vtxBatch.push_back(v0); vtxBatch.push_back(v1); vtxBatch.push_back(v2);
+				vtxBatch.push_back(v2); vtxBatch.push_back(v1); vtxBatch.push_back(v3);
+			}
+
+			// Top outline
+			{
+				float x0 = PixelToNDCX(fFontSx);
+				float x1 = PixelToNDCX(fFontEx);
+				float y0 = PixelToNDCY(fFontSy - fFontHalfWeight);
+				float y1 = PixelToNDCY(fFontEy - fFontHalfWeight);
+
+				SBootstrapVertex v0 = { x0, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->top };
+				SBootstrapVertex v1 = { x0, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->bottom };
+				SBootstrapVertex v2 = { x1, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->top };
+				SBootstrapVertex v3 = { x1, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->bottom };
+
+				vtxBatch.push_back(v0); vtxBatch.push_back(v1); vtxBatch.push_back(v2);
+				vtxBatch.push_back(v2); vtxBatch.push_back(v1); vtxBatch.push_back(v3);
+			}
+
+			// Bottom outline
+			{
+				float x0 = PixelToNDCX(fFontSx);
+				float x1 = PixelToNDCX(fFontEx);
+				float y0 = PixelToNDCY(fFontSy + fFontHalfWeight);
+				float y1 = PixelToNDCY(fFontEy + fFontHalfWeight);
+
+				SBootstrapVertex v0 = { x0, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->top };
+				SBootstrapVertex v1 = { x0, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->left, pCurCharInfo->bottom };
+				SBootstrapVertex v2 = { x1, y0, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->top };
+				SBootstrapVertex v3 = { x1, y1, fUIZ, outlineR, outlineG, outlineB, outlineA, pCurCharInfo->right, pCurCharInfo->bottom };
+
+				vtxBatch.push_back(v0); vtxBatch.push_back(v1); vtxBatch.push_back(v2);
+				vtxBatch.push_back(v2); vtxBatch.push_back(v1); vtxBatch.push_back(v3);
+			}
 
 			fCurX += fFontAdvance;
 		}
 	}
 
-	// --- Selection background (Ctrl+A / shift-select) ---
-	// MR-15: Expose text selection highlighting to Python
+	// Build main text batches
+	fCurX = fStanX;
+	fCurY = fStanY;
+	fFontMaxHeight = 0.0f;
+
+	for (int i = 0; i < (int)m_pCharInfoVector.size(); ++i)
 	{
-		// Determine selection range: IME state for active input fields, local state otherwise
-		int selBegin, selEnd;
+		pCurCharInfo = m_pCharInfoVector[i];
 
-		if (m_isCursor && CIME::ms_bCaptureInput)
+		float fKern = (i < (int)m_kernVector.size()) ? m_kernVector[i] : 0.0f;
+		fCurX += fKern;
+
+		float fFontWidth = float(pCurCharInfo->width);
+		float fFontHeight = float(pCurCharInfo->height);
+		float fFontAdvance = float(pCurCharInfo->advance);
+		fFontMaxHeight = std::max(fFontMaxHeight, fFontHeight);
+
+		// Multi-line wrapping
+		if ((fCurX + fFontWidth) - m_v3Position.x > m_fLimitWidth)
 		{
-			selBegin = CIME::GetSelBegin();
-			selEnd = CIME::GetSelEnd();
-		}
-		else
-		{
-			selBegin = m_selStart;
-			selEnd = m_selEnd;
-		}
-		// MR-15: -- END OF -- Expose text selection highlighting to Python
-
-		if (selBegin > selEnd) std::swap(selBegin, selEnd);
-
-		if (selBegin != selEnd)
-		{
-			float sx, sy, ex, ey;
-
-			// Convert logical selection positions to visual positions (handles tags)
-			int visualSelBegin = selBegin;
-			int visualSelEnd = selEnd;
-			if (!m_logicalToVisualPos.empty())
+			if (m_isMultiLine)
 			{
-				if (selBegin >= 0 && selBegin < (int)m_logicalToVisualPos.size())
-					visualSelBegin = m_logicalToVisualPos[selBegin];
-				if (selEnd >= 0 && selEnd < (int)m_logicalToVisualPos.size())
-					visualSelEnd = m_logicalToVisualPos[selEnd];
-			}
-
-			__GetTextPos(visualSelBegin, &sx, &sy);
-			__GetTextPos(visualSelEnd,   &ex, &sy);
-
-			// Handle RTL - use the computed direction for this text instance
-			// MR-15: Expose text highlighting to Python
-			// Apply horizontal alignment (must match text rendering offset)
-			float alignOffset = 0.0f;
-
-			if (m_computedRTL)
-			{
-				switch (m_hAlign)
-				{
-					case HORIZONTAL_ALIGN_LEFT:
-						alignOffset = -(float)m_textWidth;
-						break;
-					case HORIZONTAL_ALIGN_CENTER:
-						alignOffset = -float(m_textWidth / 2);
-						break;
-				}
+				fCurX = fStanX;
+				fCurY += fFontMaxHeight;
 			}
 			else
 			{
-				switch (m_hAlign)
-				{
-					case HORIZONTAL_ALIGN_RIGHT:
-						alignOffset = -(float)m_textWidth;
-						break;
-					case HORIZONTAL_ALIGN_CENTER:
-						alignOffset = -float(m_textWidth / 2);
-						break;
-				}
+				break;
 			}
-
-			sx += m_v3Position.x + alignOffset;
-			ex += m_v3Position.x + alignOffset;
-			// MR-15: -- END OF -- Expose text highlighting to Python
-
-			// Apply vertical alignment
-			float top = m_v3Position.y;
-			float bot = m_v3Position.y + m_textHeight;
-
-			switch (m_vAlign)
-			{
-				case VERTICAL_ALIGN_BOTTOM:
-					top -= m_textHeight;
-					bot -= m_textHeight;
-					break;
-
-				case VERTICAL_ALIGN_CENTER:
-					top -= float(m_textHeight) / 2.0f;
-					bot -= float(m_textHeight) / 2.0f;
-					break;
-			}
-
-			TPDTVertex vertices[4];
-			vertices[0].diffuse = 0x80339CFF;
-			vertices[1].diffuse = 0x80339CFF;
-			vertices[2].diffuse = 0x80339CFF;
-			vertices[3].diffuse = 0x80339CFF;
-
-			vertices[0].position = TPosition(sx, top, 0.0f);
-			vertices[1].position = TPosition(ex, top, 0.0f);
-			vertices[2].position = TPosition(sx, bot, 0.0f);
-			vertices[3].position = TPosition(ex, bot, 0.0f);
-
-			STATEMANAGER.SetTexture(0, NULL);
-			CGraphicBase::SetDefaultIndexBuffer(CGraphicBase::DEFAULT_IB_FILL_RECT);
-			if (CGraphicBase::SetPDTStream(vertices, 4))
-				STATEMANAGER.DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 4, 0, 2);
 		}
+
+		// Clipping
+		if (pClipRect && fCurY <= pClipRect->top)
+		{
+			fCurX += fFontAdvance;
+			continue;
+		}
+
+		float fFontSx = fCurX + pCurCharInfo->bearingX - 0.5f;
+		float fFontSy = fCurY - 0.5f;
+		float fFontEx = fFontSx + fFontWidth;
+		float fFontEy = fFontSy + fFontHeight;
+
+		DWORD dwTexturePage = pCurCharInfo->index;
+		std::vector<SBootstrapVertex>& vtxBatch = mainBatches[dwTexturePage];
+
+		// Convert per-character color DWORD to float RGBA
+		DWORD dwCharColor = m_dwColorInfoVector[i];
+		float charR = ((dwCharColor >> 16) & 0xFF) / 255.0f;
+		float charG = ((dwCharColor >> 8) & 0xFF) / 255.0f;
+		float charB = ((dwCharColor) & 0xFF) / 255.0f;
+		float charA = ((dwCharColor >> 24) & 0xFF) / 255.0f;
+
+		// Convert to NDC
+		float x0 = PixelToNDCX(fFontSx);
+		float x1 = PixelToNDCX(fFontEx);
+		float y0 = PixelToNDCY(fFontSy);
+		float y1 = PixelToNDCY(fFontEy);
+
+		SBootstrapVertex v0 = { x0, y0, fUIZ, charR, charG, charB, charA, pCurCharInfo->left, pCurCharInfo->top };
+		SBootstrapVertex v1 = { x0, y1, fUIZ, charR, charG, charB, charA, pCurCharInfo->left, pCurCharInfo->bottom };
+		SBootstrapVertex v2 = { x1, y0, fUIZ, charR, charG, charB, charA, pCurCharInfo->right, pCurCharInfo->top };
+		SBootstrapVertex v3 = { x1, y1, fUIZ, charR, charG, charB, charA, pCurCharInfo->right, pCurCharInfo->bottom };
+
+		vtxBatch.push_back(v0); vtxBatch.push_back(v1); vtxBatch.push_back(v2);
+		vtxBatch.push_back(v2); vtxBatch.push_back(v1); vtxBatch.push_back(v3);
+
+		fCurX += fFontAdvance;
 	}
 
-	// LCD subpixel two-pass rendering: correct per-channel alpha blending
-	auto DrawBatchLCD = [](const std::unordered_map<LPDIRECT3DTEXTURE9, std::vector<SVertex>>& batches, bool skipPass2) {
-		for (const auto& [pTexture, vtxBatch] : batches) {
+	// Set up DX11 pipeline state
+	UINT uStride = sizeof(SBootstrapVertex);
+	UINT uOffset = 0;
+	pContext->IASetVertexBuffers(0, 1, &pVertexBuffer, &uStride, &uOffset);
+	pContext->IASetInputLayout(pInputLayout);
+	pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	pContext->VSSetShader(pVertexShader, nullptr, 0);
+	pContext->PSSetShader(pPixelShader, nullptr, 0);
+	ID3D11SamplerState* pActiveTextSampler = s_pDX11TextPointSampler ? s_pDX11TextPointSampler : pSamplerState;
+	pContext->PSSetSamplers(0, 1, &pActiveTextSampler);
+	pContext->OMSetDepthStencilState(pDepthDisableState, 0);
+	// M2-ETERLIB-STATE-48: Unconditional rasterizer state setting (was conditional)
+	pContext->RSSetState(pDX11Device->GetBootstrapRasterizerState());
+
+	// M2-ETERLIB-STATE-48: Set explicit text baseline state
+	// M2-ETERLIB-STATE-49: DX11 shader-state is used instead of legacy SetTextureStageState (which is #else-guarded)
+	pDX11Device->SetUITextBaselineState();
+
+	// M2-UI-TEXTTAIL-PARITY-26: Track SRV failures for glyph emission diagnostics (persistent across frames)
+	static int s_iSRVFailures = 0;
+	static int s_iPersistentSRVFailures = 0;
+
+	// LCD two-pass rendering helper
+	auto DrawBatchLCD = [&](const std::unordered_map<DWORD, std::vector<SBootstrapVertex>>& batches, bool skipPass2) -> int
+	{
+		int iTotalGlyphQuads = 0;
+
+		for (const auto& [dwTexturePage, vtxBatch] : batches)
+		{
 			if (vtxBatch.empty())
 				continue;
 
-			STATEMANAGER.SetTexture(0, pTexture);
-
-			// Pass 1: dest.rgb *= (1 - coverage.rgb)
-			STATEMANAGER.SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ZERO);
-			STATEMANAGER.SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCCOLOR);
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLELIST,
-				vtxBatch.size() / 3, vtxBatch.data(), sizeof(SVertex));
-
-			if (!skipPass2) {
-				// Pass 2: dest.rgb += textColor.rgb * coverage.rgb
-				STATEMANAGER.SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-				STATEMANAGER.SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
-				STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-				STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-				STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-				STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-				STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-				STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
-				STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLELIST,
-					vtxBatch.size() / 3, vtxBatch.data(), sizeof(SVertex));
+			// Get texture SRV from font atlas using Model 1's API
+			ID3D11ShaderResourceView* pTextureSRV = pFontTexture->GetTexturePageSRV(dwTexturePage);
+			if (!pTextureSRV)
+			{
+				++s_iSRVFailures; // M3-TEXTTAIL22.A: Track SRV failures
+				++s_iPersistentSRVFailures; // M2-UI-TEXTTAIL-PARITY-26: Persistent tracking
+				static std::set<DWORD> s_loggedPages;
+				if (s_loggedPages.find(dwTexturePage) == s_loggedPages.end())
+				{
+					s_loggedPages.insert(dwTexturePage);
+					TraceError("DX11_TEXT_RENDER_FAIL reason=texture_srv_null page=%u", dwTexturePage);
+				}
+				continue;
 			}
+
+			// Map vertex buffer
+			D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
+			HRESULT hr = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+			if (FAILED(hr))
+			{
+				static bool s_bLoggedMapFail = false;
+				if (!s_bLoggedMapFail)
+				{
+					s_bLoggedMapFail = true;
+					TraceError("DX11_TEXT_RENDER_FAIL reason=vertex_buffer_map_failed");
+				}
+				continue;
+			}
+
+			memcpy(kMappedResource.pData, vtxBatch.data(), vtxBatch.size() * sizeof(SBootstrapVertex));
+			pContext->Unmap(pVertexBuffer, 0);
+
+			// Bind texture
+			pContext->PSSetShaderResources(0, 1, &pTextureSRV);
+
+			// Pass 1: dest.rgb *= (1 - coverage.rgb) - ZERO, INVSRCCOLOR blend
+			ID3D11BlendState* pPass1BlendState = pDX11Device->GetBootstrapUILCDPass1BlendState();
+			if (pPass1BlendState)
+			{
+				float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				pContext->OMSetBlendState(pPass1BlendState, blendFactor, 0xFFFFFFFF);
+			}
+			else
+			{
+				// Fallback: use alpha blend (not ideal for LCD, but won't crash)
+				float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				pContext->OMSetBlendState(pAlphaBlendState, blendFactor, 0xFFFFFFFF);
+			}
+
+			pContext->Draw((UINT)vtxBatch.size(), 0);
+
+			if (!skipPass2)
+			{
+				// Pass 2: dest.rgb += textColor.rgb * coverage.rgb - ONE, ONE blend
+				ID3D11BlendState* pPass2BlendState = pDX11Device->GetBootstrapUILCDPass2BlendState();
+				if (pPass2BlendState)
+				{
+					float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+					pContext->OMSetBlendState(pPass2BlendState, blendFactor, 0xFFFFFFFF);
+				}
+				else
+				{
+					// Fallback: use alpha blend
+					float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+					pContext->OMSetBlendState(pAlphaBlendState, blendFactor, 0xFFFFFFFF);
+				}
+
+				pContext->Draw((UINT)vtxBatch.size(), 0);
+			}
+
+			iTotalGlyphQuads += (int)(vtxBatch.size() / 6);
 		}
+
+		return iTotalGlyphQuads;
 	};
 
-	// Draw outline batches first (skip Pass 2 for black outlines — MODULATE with black = 0)
+	// Render outline batches first (skip Pass 2 if black outline)
 	bool outlineIsBlack = ((m_dwOutLineColor & 0x00FFFFFF) == 0);
-	DrawBatchLCD(s_outlineBatches, outlineIsBlack);
+	int iOutlineQuads = DrawBatchLCD(outlineBatches, outlineIsBlack);
 
-	// Draw main text batches (always both passes)
-	DrawBatchLCD(s_mainBatches, false);
+	// Render main text batches (always both passes)
+	int iMainQuads = DrawBatchLCD(mainBatches, false);
 
+	// M2-UI-TEXTTAIL-PARITY-26: Enhanced telemetry - glyph emission breakdown with persistent tracking
+	static DWORD s_dwLastTelemetryTime = 0;
+	DWORD dwNow = timeGetTime();
+	if (dwNow - s_dwLastTelemetryTime > 5000)
+	{
+		s_dwLastTelemetryTime = dwNow;
+		const int iTotalGlyphsSubmitted = static_cast<int>(m_pCharInfoVector.size());
+		const int iGlyphsEmitted = iOutlineQuads + iMainQuads;
+		TraceError("DX11_TEXT_RENDER_DX11 glyphs_submitted=%d glyphs_emitted=%d "
+			"srv_failures=%d srv_failures_persistent=%d outline_quads=%d main_quads=%d",
+			iTotalGlyphsSubmitted,
+			iGlyphsEmitted,
+			s_iSRVFailures,
+			s_iPersistentSRVFailures,
+			iOutlineQuads,
+			iMainQuads);
+		s_iSRVFailures = 0;
+		// NOTE: s_iPersistentSRVFailures is never reset - accumulates for lifetime of process
+	}
+
+	// M2-ETERLIB-TEXT-68: Port cursor/selection rendering from DX9 to DX11
 	if (m_isCursor)
 	{
 		// Draw Cursor
 		float sx, sy, ex, ey;
-		TDiffuse diffuse;
+		DirectX::SimpleMath::Color diffuse(1.0f, 1.0f, 1.0f, 1.0f); // M2-ETERLIB-TEXT-68
 
 		int curpos = CIME::GetCurPos();
 		int compend = curpos + CIME::GetCompLen();
@@ -965,12 +1155,12 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 		// If Composition
 		if(visualCurpos<visualCompend)
 		{
-			diffuse = 0x7fffffff;
+			diffuse = DirectX::SimpleMath::Color(1.0f, 1.0f, 1.0f, 0.5f); // 0x7fffffff - M2-ETERLIB-TEXT-68
 			__GetTextPos(visualCompend, &ex, &sy);
 		}
 		else
 		{
-			diffuse = 0xffffffff;
+			diffuse = DirectX::SimpleMath::Color(1.0f, 1.0f, 1.0f, 1.0f); // 0xffffffff - M2-ETERLIB-TEXT-68
 			ex = sx + 2;
 		}
 
@@ -1004,22 +1194,24 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 		// NOW calculate ey after sy has been adjusted
 		ey = sy + m_textHeight;
 
-		TPDTVertex vertices[4];
-		vertices[0].diffuse = diffuse;
-		vertices[1].diffuse = diffuse;
-		vertices[2].diffuse = diffuse;
-		vertices[3].diffuse = diffuse;
-		vertices[0].position = TPosition(sx, sy, 0.0f);
-		vertices[1].position = TPosition(ex, sy, 0.0f);
-		vertices[2].position = TPosition(sx, ey, 0.0f);
-		vertices[3].position = TPosition(ex, ey, 0.0f);
+		// M3-UI-TEXT-IME-CURSOR-70: DX11 cursor rendering implementation
+		if (m_isCursor)
+		{
+			float cursorX = sx;
+			float cursorY = sy;
+			__GetTextPos(visualCurpos, &cursorX, &cursorY);
 
-		STATEMANAGER.SetTexture(0, NULL);
+			cursorX += m_v3Position.x;
+			cursorY += m_v3Position.y;
 
-		CGraphicBase::SetDefaultIndexBuffer(CGraphicBase::DEFAULT_IB_FILL_RECT);
-		if (CGraphicBase::SetPDTStream(vertices, 4))
-			STATEMANAGER.DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 4, 0, 2);
+			// Draw cursor as a thin vertical bar (2 pixels wide, text height tall)
+			const float cursorWidth = 2.0f;
+			CScreen screen;
+			screen.SetDiffuseColor(1.0f, 1.0f, 1.0f, 1.0f); // White cursor
+			screen.RenderBar2dDX11(cursorX, cursorY, cursorX + cursorWidth, cursorY + m_textHeight, 0.0f);
+		}
 
+		// M3-UI-TEXT-IME-UNDERLINE-70: DX11 underline rendering implementation
 		int ulbegin = CIME::GetULBegin();
 		int ulend = CIME::GetULEnd();
 
@@ -1033,26 +1225,14 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 			ex += m_v3Position.x;
 			ey = sy + 2;
 
-			vertices[0].diffuse = 0xFFFF0000;
-			vertices[1].diffuse = 0xFFFF0000;
-			vertices[2].diffuse = 0xFFFF0000;
-			vertices[3].diffuse = 0xFFFF0000;
-			vertices[0].position = TPosition(sx, sy, 0.0f);
-			vertices[1].position = TPosition(ex, sy, 0.0f);
-			vertices[2].position = TPosition(sx, ey, 0.0f);
-			vertices[3].position = TPosition(ex, ey, 0.0f);
-
-			STATEMANAGER.DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, 4, 2, c_FillRectIndices, D3DFMT_INDEX16, vertices, sizeof(TPDTVertex));
+			// Draw underline in red (0xFFFF0000)
+			CScreen screen;
+			screen.SetDiffuseColor(1.0f, 0.0f, 0.0f, 1.0f);
+			screen.RenderBar2dDX11(sx, sy, ex, ey, 0.0f);
 		}
 	}
 
-	STATEMANAGER.RestoreRenderState(D3DRS_COLORWRITEENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
-
-	STATEMANAGER.SetRenderState(D3DRS_FOGENABLE, dwFogEnable);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, dwLighting);
-
+	// M2-ETERLIB-TEXT-68: Port hyperlink hit testing from DX9 to DX11 (plain code, no DX11 calls needed)
 	if (m_hyperlinkVector.size() != 0)
 	{
 		// FOR_ARABIC_ALIGN: RTL text is drawn with offset (m_v3Position.x - m_textWidth)
@@ -1077,6 +1257,8 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 			}
 		}
 	}
+
+	return true;
 }
 
 void CGraphicTextInstance::CreateSystem(UINT uCapacity)
@@ -1282,7 +1464,7 @@ WORD CGraphicTextInstance::GetTextLineCount()
 		float fFontAdvance=float(pCurCharInfo->advance);
 		//float fFontHeight=float(pCurCharInfo->height);
 
-		// NOTE : 폰트 출력에 Width 제한을 둡니다. - [levites]
+		// NOTE : í°íŠ¸ ì¶œë ¥ì— Width ì œí•œì„ ë‘¡ë‹ˆë‹¤. - [levites]
 		if (fx+fFontWidth > m_fLimitWidth)
 		{
 			fx = 0.0f;
