@@ -1,7 +1,7 @@
 #include "StdAfx.h"
 #include "EterBase/Stl.h"
 #include "GrpTexture.h"
-#include "StateManager.h"
+#include "GrpDeviceDX11.h"
 
 void CGraphicTexture::DestroyDeviceObjects()
 {
@@ -30,8 +30,20 @@ bool CGraphicTexture::IsEmpty() const
 
 void CGraphicTexture::SetTextureStage(int stage) const
 {
-	assert(ms_lpd3dDevice != NULL);
-	STATEMANAGER.SetTexture(stage, m_lpd3dTexture);	
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid())
+	{
+		pDX11Device->SetBootstrapTextureStageSRV(static_cast<UINT>(stage), GetD3D11TextureSRV());
+		return;
+	}
+
+	static bool s_bLoggedTextureStageRedirectFail = false;
+	if (!s_bLoggedTextureStageRedirectFail)
+	{
+		s_bLoggedTextureStageRedirectFail = true;
+		TraceError("DX11_TEXTURE_STAGE_BLOCK path=grptexture_set_texture_stage reason=dx11_device_unavailable");
+	}
+	return;
 }
 
 LPDIRECT3DTEXTURE9 CGraphicTexture::GetD3DTexture() const
