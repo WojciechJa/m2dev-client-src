@@ -1,12 +1,27 @@
 #include "StdAfx.h"
 #include "GrpImageInstance.h"
 #include "StateManager.h"
+#include "GrpDeviceDX11.h"
 
 #include "EterBase/CRC32.h"
 //STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_INVDESTCOLOR);
 //STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
 //STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
 //STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
+
+// Shared UI widget counters used by image/expanded/mark instances.
+struct SUIWidgetCounters
+{
+	DWORD dwImageSuccess = 0;
+	DWORD dwExpandedSuccess = 0;
+	DWORD dwMarkSuccess = 0;
+	DWORD dwImageFail = 0;
+	DWORD dwExpandedFail = 0;
+	DWORD dwMarkFail = 0;
+	DWORD dwLastHeartbeatTime = 0;
+};
+
+SUIWidgetCounters s_kUIWidgetCounters;
 
 CDynamicPool<CGraphicImageInstance>		CGraphicImageInstance::ms_kPool;
 
@@ -37,6 +52,13 @@ void CGraphicImageInstance::Render()
 		return;
 
 	assert(!IsEmpty());
+
+	CGraphicDeviceDX11* pDeviceDX11 = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDeviceDX11 && pDeviceDX11->IsValid())
+	{
+		if (OnRenderDX11())
+			return;
+	}
 
 	OnRender();
 }
@@ -219,4 +241,9 @@ CGraphicImageInstance::CGraphicImageInstance()
 CGraphicImageInstance::~CGraphicImageInstance()
 {
 	Destroy();
+}
+
+bool CGraphicImageInstance::OnRenderDX11()
+{
+	return false;
 }
