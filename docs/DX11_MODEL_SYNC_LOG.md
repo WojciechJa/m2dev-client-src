@@ -1,5 +1,44 @@
 ---
 
+## 2026-03-30 00:45 (local) - Model 2
+- Stream: M2-TERRAIN-DX11-FULL-75-HOTFIX
+- Status: COMPLETE - Fixed CStateManager11::Apply() compilation error
+- Context: User-reported compilation error after M2-TERRAIN-DX11-FULL-75 commit
+- Files modified:
+  1. `src/GameLib/MapOutdoorRenderDX11.cpp`
+     - **Line 1271**: Changed `pStateManager11->Apply()` → `pStateManager11->ApplyState()`
+     - **Line 1339**: Changed `pStateManager11->Apply()` → `pStateManager11->ApplyState()`
+- Root cause:
+  - Method name error in new code added to MapOutdoorRenderDX11.cpp
+  - CStateManager11 class has `ApplyState()` method, not `Apply()`
+  - Two occurrences in __RenderObjectsDX11() function
+- Fix:
+  - Replaced both `->Apply()` calls with `->ApplyState()`
+  - Uses correct CStateManager11 API for flushing cached state to DX11 context
+- Validation:
+  - ✅ Error E0135 resolved: class "CStateManager11" now has member "ApplyState"
+  - ✅ Build validation: `cmake --build ... --config Debug --target GameLib` → PASS
+  - ✅ Compilation successful, no remaining errors
+- Migration metrics:
+  - Lines changed: 2 (simple method name correction)
+  - Build status: PASS (was FAIL due to missing method)
+- Blockers resolved:
+  - ✅ Compilation error fixed
+  - ✅ CStateManager11 API usage corrected
+- Blockers remaining: NONE
+- Help needed: NO
+- Contract change: NO
+- Action for Model 1:
+  - Hotfix complete and validated
+  - MapOutdoorRenderDX11.cpp now compiles without errors
+  - Ready for runtime validation
+- Note:
+  - This was a simple API name correction in recently added code
+  - The fix does not change logic, only corrects method name
+  - Both occurrences fixed in single operation
+
+---
+
 ## 2026-03-30 00:30 (local) - Model 2
 - Stream: M2-TERRAIN-DX11-FULL-75
 - Status: COMPLETE - Full native DX11 terrain rendering implemented and validated

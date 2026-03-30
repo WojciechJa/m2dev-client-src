@@ -7,6 +7,7 @@
 #include "EterLib/Camera.h"
 #include "EterLib/StateManager11.h"
 #include "EterLib/GrpDeviceDX11.h"
+#include "EterLib/GrpTextureDX11.h"
 #include "EterLib/ResourceManager.h"
 #include "EterGrnLib/ModelInstance.h"
 #include "UserInterface/config.h"
@@ -48,6 +49,102 @@ namespace
 		D3DXVECTOR4 vAlphaUVTransform;
 		D3DXVECTOR4 vLightDir;
 		D3DXVECTOR4 vAmbient;
+	};
+
+	struct DX11WaterShaderCB
+	{
+		D3DXMATRIX matWorldViewProj;
+		D3DXVECTOR4 vWaterParams;
+		D3DXVECTOR4 vTint;
+	};
+
+	struct DX11WaterPassStateScope
+	{
+		ID3D11DeviceContext* pContext;
+		ID3D11BlendState* pPrevBlendState;
+		ID3D11DepthStencilState* pPrevDepthState;
+		ID3D11RasterizerState* pPrevRasterState;
+		ID3D11InputLayout* pPrevInputLayout;
+		ID3D11VertexShader* pPrevVS;
+		ID3D11PixelShader* pPrevPS;
+		ID3D11Buffer* pPrevVSConst;
+		ID3D11Buffer* pPrevPSConst;
+		ID3D11SamplerState* pPrevSampler;
+		ID3D11ShaderResourceView* pPrevSRV;
+		UINT uPrevSampleMask;
+		UINT uPrevStencilRef;
+		D3D11_PRIMITIVE_TOPOLOGY ePrevTopology;
+		UINT uPrevVBStride;
+		UINT uPrevVBOffset;
+		ID3D11Buffer* pPrevVB;
+
+		explicit DX11WaterPassStateScope(ID3D11DeviceContext* pInContext)
+			: pContext(pInContext)
+			, pPrevBlendState(nullptr)
+			, pPrevDepthState(nullptr)
+			, pPrevRasterState(nullptr)
+			, pPrevInputLayout(nullptr)
+			, pPrevVS(nullptr)
+			, pPrevPS(nullptr)
+			, pPrevVSConst(nullptr)
+			, pPrevPSConst(nullptr)
+			, pPrevSampler(nullptr)
+			, pPrevSRV(nullptr)
+			, uPrevSampleMask(0u)
+			, uPrevStencilRef(0u)
+			, ePrevTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+			, uPrevVBStride(0u)
+			, uPrevVBOffset(0u)
+			, pPrevVB(nullptr)
+		{
+			if (!pContext)
+				return;
+
+			float afBlend[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+			pContext->OMGetBlendState(&pPrevBlendState, afBlend, &uPrevSampleMask);
+			pContext->OMGetDepthStencilState(&pPrevDepthState, &uPrevStencilRef);
+			pContext->RSGetState(&pPrevRasterState);
+			pContext->IAGetInputLayout(&pPrevInputLayout);
+			pContext->IAGetPrimitiveTopology(&ePrevTopology);
+			pContext->IAGetVertexBuffers(0u, 1u, &pPrevVB, &uPrevVBStride, &uPrevVBOffset);
+			pContext->VSGetShader(&pPrevVS, nullptr, nullptr);
+			pContext->PSGetShader(&pPrevPS, nullptr, nullptr);
+			pContext->VSGetConstantBuffers(0u, 1u, &pPrevVSConst);
+			pContext->PSGetConstantBuffers(0u, 1u, &pPrevPSConst);
+			pContext->PSGetSamplers(0u, 1u, &pPrevSampler);
+			pContext->PSGetShaderResources(0u, 1u, &pPrevSRV);
+		}
+
+		~DX11WaterPassStateScope()
+		{
+			if (!pContext)
+				return;
+
+			pContext->PSSetShaderResources(0u, 1u, &pPrevSRV);
+			pContext->PSSetSamplers(0u, 1u, &pPrevSampler);
+			pContext->VSSetConstantBuffers(0u, 1u, &pPrevVSConst);
+			pContext->PSSetConstantBuffers(0u, 1u, &pPrevPSConst);
+			pContext->VSSetShader(pPrevVS, nullptr, 0u);
+			pContext->PSSetShader(pPrevPS, nullptr, 0u);
+			pContext->IASetInputLayout(pPrevInputLayout);
+			pContext->IASetPrimitiveTopology(ePrevTopology);
+			pContext->IASetVertexBuffers(0u, 1u, &pPrevVB, &uPrevVBStride, &uPrevVBOffset);
+			pContext->OMSetBlendState(pPrevBlendState, nullptr, uPrevSampleMask);
+			pContext->OMSetDepthStencilState(pPrevDepthState, uPrevStencilRef);
+			pContext->RSSetState(pPrevRasterState);
+
+			safe_release(pPrevBlendState);
+			safe_release(pPrevDepthState);
+			safe_release(pPrevRasterState);
+			safe_release(pPrevInputLayout);
+			safe_release(pPrevVS);
+			safe_release(pPrevPS);
+			safe_release(pPrevVSConst);
+			safe_release(pPrevPSConst);
+			safe_release(pPrevSampler);
+			safe_release(pPrevSRV);
+			safe_release(pPrevVB);
+		}
 	};
 
 	inline uint64_t MakeSplatAlphaCacheKey(const CTerrain* pTerrain, DWORD dwSplatIndex)
@@ -641,6 +738,47 @@ bool CMapOutdoor::__RenderTerrain_DX11HardwareTransformPatch(
 	pContext->OMGetDepthStencilState(&pOldDepth, &uOldStencilRef);
 	pContext->OMGetBlendState(&pOldBlend, afOldBlendFactor, &uOldSampleMask);
 
+	// Pass-local raster/depth ownership for terrain to avoid state leaks from object/character passes.
+	static ID3D11Device* s_pTerrainStateDevice = nullptr;
+	static ID3D11RasterizerState* s_pTerrainRasterState = nullptr;
+	static ID3D11DepthStencilState* s_pTerrainDepthState = nullptr;
+	if (s_pTerrainStateDevice != pDevice)
+	{
+		safe_release(s_pTerrainRasterState);
+		safe_release(s_pTerrainDepthState);
+		safe_release(s_pTerrainStateDevice);
+		if (pDevice)
+		{
+			s_pTerrainStateDevice = pDevice;
+			s_pTerrainStateDevice->AddRef();
+		}
+	}
+
+	if (!s_pTerrainRasterState)
+	{
+		D3D11_RASTERIZER_DESC kRasterDesc = {};
+		kRasterDesc.FillMode = D3D11_FILL_SOLID;
+		kRasterDesc.CullMode = D3D11_CULL_NONE;
+		kRasterDesc.FrontCounterClockwise = FALSE;
+		kRasterDesc.DepthClipEnable = TRUE;
+		pDevice->CreateRasterizerState(&kRasterDesc, &s_pTerrainRasterState);
+	}
+
+	if (!s_pTerrainDepthState)
+	{
+		D3D11_DEPTH_STENCIL_DESC kDepthDesc = {};
+		kDepthDesc.DepthEnable = TRUE;
+		kDepthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		kDepthDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		pDevice->CreateDepthStencilState(&kDepthDesc, &s_pTerrainDepthState);
+	}
+
+	if (s_pTerrainRasterState)
+		pContext->RSSetState(s_pTerrainRasterState);
+	if (s_pTerrainDepthState)
+		pContext->OMSetDepthStencilState(s_pTerrainDepthState, 0u);
+	pContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFFu);
+
 	float fLODLevel1Distance = __GetNoFogDistance();
 	float fLODLevel2Distance = __GetFogDistance();
 	BYTE byCurrentLOD = 0u;
@@ -1123,6 +1261,16 @@ void CMapOutdoor::__RenderObjectsDX11(ID3D11Device* pDevice, ID3D11DeviceContext
 	if (!pDevice || !pContext)
 		return;
 
+	CStateManager11* pStateManager11 = CStateManager11::InstancePtr();
+	DWORD dwOldCullMode = D3DCULL_CCW;
+	if (pStateManager11)
+	{
+		dwOldCullMode = pStateManager11->GetRenderState(D3DRS_CULLMODE);
+		// DX9 parity for world meshes.
+		pStateManager11->SetRenderState(D3DRS_CULLMODE, D3DCULL_CW);
+		pStateManager11->ApplyState();
+	}
+
 	if (!m_pDX11ObjectVS || !m_pDX11ObjectPS || !m_pDX11ObjectInputLayout || !m_pDX11ObjectConstantBuffer)
 	{
 		if (!__CreateDX11ObjectShaders(pDevice))
@@ -1183,6 +1331,12 @@ void CMapOutdoor::__RenderObjectsDX11(ID3D11Device* pDevice, ID3D11DeviceContext
 	{
 		if (pThing)
 			pThing->BlendRender();
+	}
+
+	if (pStateManager11)
+	{
+		pStateManager11->SetRenderState(D3DRS_CULLMODE, dwOldCullMode);
+		pStateManager11->ApplyState();
 	}
 }
 
