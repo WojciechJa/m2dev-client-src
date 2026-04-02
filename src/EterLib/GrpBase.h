@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Ray.h"
 #include <vector>
@@ -14,6 +14,12 @@ using D3DXVECTOR4 = DirectX::SimpleMath::Vector4;
 using D3DXQUATERNION = DirectX::SimpleMath::Quaternion;
 using D3DXMATRIX = DirectX::SimpleMath::Matrix;
 using D3DXPLANE = DirectX::SimpleMath::Vector4;
+
+// DX11-native compatibility constants for legacy D3DX call sites.
+static constexpr DWORD D3DX_FILTER_LINEAR = 0x2;
+static constexpr float D3DX_PI = DirectX::XM_PI;
+static constexpr float D3DX_2PI = DirectX::XM_2PI;
+static constexpr float D3DX_PI_2 = DirectX::XM_PIDIV2;
 
 struct D3DXCOLOR
 {
@@ -92,6 +98,7 @@ inline float D3DXToDegree(float fRadian)
 	return DirectX::XMConvertToDegrees(fRadian);
 }
 
+#if !defined(_d3d9TYPES_H_)
 using D3DCOLOR = DWORD;
 
 struct D3DVIEWPORT9
@@ -102,12 +109,6 @@ struct D3DVIEWPORT9
 	DWORD Height = 0;
 	float MinZ = 0.0f;
 	float MaxZ = 1.0f;
-};
-
-struct D3DCAPS9
-{
-	DWORD PrimitiveMiscCaps = 0;
-	DWORD VertexShaderVersion = 0;
 };
 
 struct D3DPRESENT_PARAMETERS
@@ -144,33 +145,6 @@ struct D3DMATERIAL9
 	float Power = 0.0f;
 };
 
-using D3DLIGHTTYPE = uint32_t;
-#ifndef DX11_D3DLIGHT_POINT_DEFINED
-static constexpr D3DLIGHTTYPE D3DLIGHT_POINT = 1u;
-#define DX11_D3DLIGHT_POINT_DEFINED 1
-#endif
-#ifndef DX11_D3DLIGHT_DIRECTIONAL_DEFINED
-static constexpr D3DLIGHTTYPE D3DLIGHT_DIRECTIONAL = 3u;
-#define DX11_D3DLIGHT_DIRECTIONAL_DEFINED 1
-#endif
-
-struct D3DLIGHT9
-{
-	D3DLIGHTTYPE Type = D3DLIGHT_DIRECTIONAL;
-	D3DXCOLOR Diffuse;
-	D3DXCOLOR Specular;
-	D3DXCOLOR Ambient;
-	D3DXVECTOR3 Position = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-	D3DXVECTOR3 Direction = D3DXVECTOR3(0.0f, 0.0f, 1.0f);
-	float Range = 0.0f;
-	float Falloff = 1.0f;
-	float Attenuation0 = 1.0f;
-	float Attenuation1 = 0.0f;
-	float Attenuation2 = 0.0f;
-	float Theta = 0.0f;
-	float Phi = 0.0f;
-};
-
 static constexpr DWORD D3DCREATE_HARDWARE_VERTEXPROCESSING = 0x00000040L;
 static constexpr DWORD D3DCREATE_MIXED_VERTEXPROCESSING = 0x00000080L;
 static constexpr DWORD D3DPMISCCAPS_CLIPTLVERTS = 0x00000040L;
@@ -178,12 +152,16 @@ static constexpr DWORD D3DPMISCCAPS_CLIPTLVERTS = 0x00000040L;
 #define D3DVS_VERSION(major, minor) (((major) << 8) | (minor))
 #endif
 
-static constexpr DWORD D3DFVF_XYZ = 0x002;
-static constexpr DWORD D3DFVF_NORMAL = 0x010;
-static constexpr DWORD D3DFVF_DIFFUSE = 0x040;
-static constexpr DWORD D3DFVF_TEX1 = 0x100;
-static constexpr DWORD D3DFVF_TEX2 = 0x200;
-static constexpr DWORD D3DFVF_TEXCOUNT_MASK = 0xF00;
+// DX11-native: neutral FVF-style layout flags used by legacy call sites.
+#ifndef DX11_FVF_LAYOUT_DEFINED
+#define DX11_FVF_LAYOUT_DEFINED 1
+inline constexpr DWORD FVF_XYZ = 0x002;
+inline constexpr DWORD FVF_NORMAL = 0x010;
+inline constexpr DWORD FVF_DIFFUSE = 0x040;
+inline constexpr DWORD FVF_TEX1 = 0x100;
+inline constexpr DWORD FVF_TEX2 = 0x200;
+inline constexpr DWORD FVF_TEXCOUNT_MASK = 0xF00;
+#endif
 
 using D3DBLEND = uint32_t;
 #ifndef DX11_D3DBLEND_ZERO_DEFINED
@@ -231,7 +209,132 @@ static constexpr D3DBLEND D3DBLEND_SRCALPHASAT = 11u;
 #define DX11_D3DBLEND_SRCALPHASAT_DEFINED 1
 #endif
 
+using D3DBLENDOP = uint32_t;
+static constexpr D3DBLENDOP D3DBLENDOP_ADD = 1u;
+static constexpr D3DBLENDOP D3DBLENDOP_SUBTRACT = 2u;
+static constexpr D3DBLENDOP D3DBLENDOP_REVSUBTRACT = 3u;
+static constexpr D3DBLENDOP D3DBLENDOP_MIN = 4u;
+static constexpr D3DBLENDOP D3DBLENDOP_MAX = 5u;
+
+using D3DCMPFUNC = uint32_t;
+static constexpr D3DCMPFUNC D3DCMP_NEVER = 1u;
+static constexpr D3DCMPFUNC D3DCMP_LESS = 2u;
+static constexpr D3DCMPFUNC D3DCMP_EQUAL = 3u;
+static constexpr D3DCMPFUNC D3DCMP_LESSEQUAL = 4u;
+static constexpr D3DCMPFUNC D3DCMP_GREATER = 5u;
+static constexpr D3DCMPFUNC D3DCMP_NOTEQUAL = 6u;
+static constexpr D3DCMPFUNC D3DCMP_GREATEREQUAL = 7u;
+static constexpr D3DCMPFUNC D3DCMP_ALWAYS = 8u;
+
+using D3DCULL = uint32_t;
+static constexpr D3DCULL D3DCULL_NONE = 1u;
+static constexpr D3DCULL D3DCULL_CW = 2u;
+static constexpr D3DCULL D3DCULL_CCW = 3u;
+
+using D3DSTENCILOP = uint32_t;
+static constexpr D3DSTENCILOP D3DSTENCILOP_KEEP = 1u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_ZERO = 2u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_REPLACE = 3u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_INCRSAT = 4u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_DECRSAT = 5u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_INVERT = 6u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_INCR = 7u;
+static constexpr D3DSTENCILOP D3DSTENCILOP_DECR = 8u;
+
+using D3DTEXTUREFILTERTYPE = uint32_t;
+static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_NONE = 0u;
+static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_POINT = 1u;
+static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_LINEAR = 2u;
+static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_ANISOTROPIC = 3u;
+
+using D3DTEXTUREADDRESS = uint32_t;
+static constexpr D3DTEXTUREADDRESS D3DTADDRESS_WRAP = 1u;
+static constexpr D3DTEXTUREADDRESS D3DTADDRESS_MIRROR = 2u;
+static constexpr D3DTEXTUREADDRESS D3DTADDRESS_CLAMP = 3u;
+static constexpr D3DTEXTUREADDRESS D3DTADDRESS_BORDER = 4u;
+static constexpr D3DTEXTUREADDRESS D3DTADDRESS_MIRRORONCE = 5u;
+
+using D3DFOGMODE = uint32_t;
+static constexpr D3DFOGMODE D3DFOG_NONE = 0u;
+static constexpr D3DFOGMODE D3DFOG_EXP = 1u;
+static constexpr D3DFOGMODE D3DFOG_EXP2 = 2u;
+static constexpr D3DFOGMODE D3DFOG_LINEAR = 3u;
+
+using D3DRENDERSTATETYPE = uint32_t;
+static constexpr D3DRENDERSTATETYPE D3DRS_ZENABLE = 7u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FILLMODE = 8u;
+static constexpr D3DRENDERSTATETYPE D3DRS_SHADEMODE = 9u;
+static constexpr D3DRENDERSTATETYPE D3DRS_ZWRITEENABLE = 14u;
+static constexpr D3DRENDERSTATETYPE D3DRS_SRCBLEND = 19u;
+static constexpr D3DRENDERSTATETYPE D3DRS_DESTBLEND = 20u;
+static constexpr D3DRENDERSTATETYPE D3DRS_CULLMODE = 22u;
+static constexpr D3DRENDERSTATETYPE D3DRS_ZFUNC = 23u;
+static constexpr D3DRENDERSTATETYPE D3DRS_ALPHAREF = 24u;
+static constexpr D3DRENDERSTATETYPE D3DRS_ALPHABLENDENABLE = 27u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FOGENABLE = 28u;
+static constexpr D3DRENDERSTATETYPE D3DRS_SPECULARENABLE = 29u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FOGCOLOR = 34u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FOGSTART = 36u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FOGEND = 37u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FOGDENSITY = 38u;
+static constexpr D3DRENDERSTATETYPE D3DRS_RANGEFOGENABLE = 48u;
+static constexpr D3DRENDERSTATETYPE D3DRS_TEXTUREFACTOR = 60u;
+static constexpr D3DRENDERSTATETYPE D3DRS_LIGHTING = 137u;
+static constexpr D3DRENDERSTATETYPE D3DRS_AMBIENT = 139u;
+static constexpr D3DRENDERSTATETYPE D3DRS_FOGVERTEXMODE = 140u;
+static constexpr D3DRENDERSTATETYPE D3DRS_COLORWRITEENABLE = 168u;
+static constexpr D3DRENDERSTATETYPE D3DRS_BLENDOP = 171u;
+static constexpr D3DRENDERSTATETYPE D3DRS_SCISSORTESTENABLE = 174u;
+
+using D3DSAMPLERSTATETYPE = uint32_t;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_ADDRESSU = 1u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_ADDRESSV = 2u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_ADDRESSW = 3u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_BORDERCOLOR = 4u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MAGFILTER = 5u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MINFILTER = 6u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MIPFILTER = 7u;
+static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MAXANISOTROPY = 10u;
+
+using D3DTRANSFORMSTATETYPE = uint32_t;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_VIEW = 2u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_PROJECTION = 3u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE0 = 16u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE1 = 17u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE2 = 18u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE3 = 19u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE4 = 20u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE5 = 21u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE6 = 22u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE7 = 23u;
+static constexpr D3DTRANSFORMSTATETYPE D3DTS_WORLD = 256u;
+
+using D3DTEXTURESTAGESTATETYPE = uint32_t;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_COLOROP = 1u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_COLORARG1 = 2u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_COLORARG2 = 3u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_ALPHAOP = 4u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_ALPHAARG1 = 5u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_ALPHAARG2 = 6u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_TEXCOORDINDEX = 11u;
+static constexpr D3DTEXTURESTAGESTATETYPE TSS_TEXTURETRANSFORMFLAGS = 24u;
+
+using D3DTEXTUREARG = uint32_t;
+static constexpr D3DTEXTUREARG D3DTA_DIFFUSE = 0x00000000u;
+static constexpr D3DTEXTUREARG D3DTA_CURRENT = 0x00000001u;
+static constexpr D3DTEXTUREARG D3DTA_TEXTURE = 0x00000002u;
+static constexpr D3DTEXTUREARG D3DTA_TFACTOR = 0x00000003u;
+
+static constexpr DWORD TSS_TCI_CAMERASPACEPOSITION = 0x00010000u;
+static constexpr DWORD D3DTTFF_DISABLE = 0u;
+static constexpr DWORD D3DTTFF_COUNT1 = 1u;
+static constexpr DWORD D3DTTFF_COUNT2 = 2u;
+static constexpr DWORD D3DTTFF_COUNT3 = 3u;
+static constexpr DWORD D3DTTFF_COUNT4 = 4u;
 using D3DTEXTUREOP = uint32_t;
+static constexpr D3DTEXTUREOP D3DTOP_DISABLE = 1u;
+static constexpr D3DTEXTUREOP D3DTOP_SELECTARG1 = 2u;
+static constexpr D3DTEXTUREOP D3DTOP_SELECTARG2 = 3u;
 static constexpr D3DTEXTUREOP D3DTOP_MODULATE = 4u;
 
 using D3DFORMAT = uint32_t;
@@ -252,14 +355,30 @@ static constexpr DWORD D3DUSAGE_DYNAMIC = 0x200L;
 static constexpr DWORD D3DUSAGE_WRITEONLY = 0x8L;
 static constexpr DWORD D3DLOCK_DISCARD = 0x2000L;
 
-static constexpr DWORD D3DX_FILTER_LINEAR = 0x2;
-static constexpr float D3DX_PI = DirectX::XM_PI;
-static constexpr float D3DX_2PI = DirectX::XM_2PI;
-static constexpr float D3DX_PI_2 = DirectX::XM_PIDIV2;
-
 static constexpr UINT D3DPRESENT_INTERVAL_ONE = 1u;
 static constexpr UINT D3DPRESENT_INTERVAL_IMMEDIATE = 0u;
+#endif // !defined(_d3d9TYPES_H_)
 
+#ifndef DX11_FVF_LAYOUT_DEFINED
+#define DX11_FVF_LAYOUT_DEFINED 1
+inline constexpr DWORD FVF_XYZ = 0x002;
+inline constexpr DWORD FVF_NORMAL = 0x010;
+inline constexpr DWORD FVF_DIFFUSE = 0x040;
+inline constexpr DWORD FVF_TEX1 = 0x100;
+inline constexpr DWORD FVF_TEX2 = 0x200;
+inline constexpr DWORD FVF_TEXCOUNT_MASK = 0xF00;
+#endif
+
+#if !defined(_D3D9CAPS_H_) && !defined(DX11_D3DCAPS9_DEFINED)
+struct D3DCAPS9
+{
+	DWORD PrimitiveMiscCaps = 0;
+	DWORD VertexShaderVersion = 0;
+};
+#define DX11_D3DCAPS9_DEFINED 1
+#endif // !defined(_D3D9CAPS_H_) && !defined(DX11_D3DCAPS9_DEFINED)
+
+#ifndef D3DCOLOR_ARGB
 inline DWORD D3DCOLOR_ARGB(int a, int r, int g, int b)
 {
 	return (DWORD((a & 0xFF) << 24) |
@@ -268,6 +387,9 @@ inline DWORD D3DCOLOR_ARGB(int a, int r, int g, int b)
 		DWORD((b & 0xFF)));
 }
 
+#endif // D3DCOLOR_ARGB
+
+#ifndef D3DCOLOR_COLORVALUE
 inline DWORD D3DCOLOR_COLORVALUE(float r, float g, float b, float a)
 {
 	return D3DCOLOR_ARGB(
@@ -276,6 +398,7 @@ inline DWORD D3DCOLOR_COLORVALUE(float r, float g, float b, float a)
 		int(std::clamp(g, 0.0f, 1.0f) * 255.0f),
 		int(std::clamp(b, 0.0f, 1.0f) * 255.0f));
 }
+#endif // D3DCOLOR_COLORVALUE
 
 using LPDIRECT3DTEXTURE9 = ID3D11ShaderResourceView*;
 using LPDIRECT3DSURFACE9 = ID3D11RenderTargetView*;
@@ -283,6 +406,27 @@ using LPDIRECT3DVERTEXDECLARATION9 = ID3D11InputLayout*;
 using LPDIRECT3DVERTEXBUFFER9 = ID3D11Buffer*;
 using LPDIRECT3DINDEXBUFFER9 = ID3D11Buffer*;
 using IDirect3DVertexBuffer9 = ID3D11Buffer;
+
+#ifndef D3DXIFF_DDS
+using D3DXIMAGE_FILEFORMAT = DWORD;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_BMP = 0u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_JPG = 1u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_TGA = 2u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_PNG = 3u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_DDS = 4u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_PPM = 5u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_DIB = 6u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_HDR = 7u;
+static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_PFM = 8u;
+
+HRESULT D3DXSaveTextureToFileA(const char* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, LPDIRECT3DTEXTURE9 pSrcTexture, const void* pPalette);
+HRESULT D3DXSaveTextureToFileW(const wchar_t* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, LPDIRECT3DTEXTURE9 pSrcTexture, const void* pPalette);
+#ifdef UNICODE
+#define D3DXSaveTextureToFile D3DXSaveTextureToFileW
+#else
+#define D3DXSaveTextureToFile D3DXSaveTextureToFileA
+#endif
+#endif
 
 inline D3DXMATRIX* D3DXMatrixIdentity(D3DXMATRIX* pOut)
 {
@@ -368,18 +512,19 @@ inline D3DXMATRIX* D3DXMatrixOrthoRH(D3DXMATRIX* pOut, float w, float h, float z
 	return pOut;
 }
 
+// M2-GRPBASE-TYPE-CUT-73: Renamed function to use FVF_* constants (neutral naming)
 inline UINT D3DXGetFVFVertexSize(DWORD fvf)
 {
 	UINT stride = 0;
 
-	if (fvf & D3DFVF_XYZ)
+	if (fvf & FVF_XYZ)
 		stride += 3u * sizeof(float);
-	if (fvf & D3DFVF_NORMAL)
+	if (fvf & FVF_NORMAL)
 		stride += 3u * sizeof(float);
-	if (fvf & D3DFVF_DIFFUSE)
+	if (fvf & FVF_DIFFUSE)
 		stride += sizeof(DWORD);
 
-	const UINT texCount = (fvf & D3DFVF_TEXCOUNT_MASK) >> 8;
+	const UINT texCount = (fvf & FVF_TEXCOUNT_MASK) >> 8;
 	stride += texCount * 2u * sizeof(float);
 	return stride;
 }
@@ -536,14 +681,30 @@ inline D3DXVECTOR3* D3DXVec3Unproject(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, 
 	return pOut;
 }
 
-class CD3DXMeshStub
+class CD3DXMeshCompat
 {
 public:
 	HRESULT DrawSubset(UINT) { return S_OK; }
 	ULONG Release() { return 0u; }
 };
 
-using LPD3DXMESH = CD3DXMeshStub*;
+using LPD3DXMESH = CD3DXMeshCompat*;
+
+inline HRESULT D3DXCreateSphere(ID3D11Device*, float, UINT, UINT, LPD3DXMESH* ppMesh, void*)
+{
+	if (!ppMesh)
+		return E_INVALIDARG;
+	*ppMesh = new CD3DXMeshCompat();
+	return S_OK;
+}
+
+inline HRESULT D3DXCreateCylinder(ID3D11Device*, float, float, float, UINT, UINT, LPD3DXMESH* ppMesh, void*)
+{
+	if (!ppMesh)
+		return E_INVALIDARG;
+	*ppMesh = new CD3DXMeshCompat();
+	return S_OK;
+}
 
 void PixelPositionToD3DXVECTOR3(const D3DXVECTOR3& c_rkPPosSrc, D3DXVECTOR3* pv3Dst);
 void D3DXVECTOR3ToPixelPosition(const D3DXVECTOR3& c_rv3Src, D3DXVECTOR3* pv3Dst);
@@ -672,7 +833,7 @@ enum EIndexCount
 class CGraphicBase
 {
 	public:
-		static DWORD GetAvailableTextureMemory();
+		static uint64_t GetAvailableTextureMemory();
 		static const D3DXMATRIX& GetViewMatrix();
 		static const D3DXMATRIX& GetProjMatrix();
 		static const D3DXMATRIX & GetIdentityMatrix();
@@ -744,9 +905,11 @@ class CGraphicBase
 
 		void		UpdateProjMatrix();
 		void		UpdateViewMatrix();
-		
+
 		void		SetViewport(DWORD dwX, DWORD dwY, DWORD dwWidth, DWORD dwHeight, float fMinZ, float fMaxZ);
+		static void		GetViewport(DWORD* pdwX, DWORD* pdwY, DWORD* pdwWidth, DWORD* pdwHeight, float* pfMinZ, float* pfMaxZ);
 		static void		GetBackBufferSize(UINT* puWidth, UINT* puHeight);
+		static void		SetBackBufferSize(UINT uWidth, UINT uHeight);
 		static bool		IsTLVertexClipping();
 		static bool		IsFastTNL();
 		static bool		IsLowTextureMemory();
@@ -774,7 +937,7 @@ class CGraphicBase
 		void		UpdatePipeLineMatrix();
 
 	protected:
-		// 각종 D3DX Mesh 들 (컬루젼 데이터 등을 표시활 때 쓴다)
+		// ÃªÂ°ÂÃ¬Â¢â€¦ D3DX Mesh Ã«â€œÂ¤ (Ã¬Â»Â¬Ã«Â£Â¨Ã¬Â Â¼ Ã«ÂÂ°Ã¬ÂÂ´Ã­â€žÂ° Ã«â€œÂ±Ã¬Ââ€ž Ã­â€˜Å“Ã¬â€¹Å“Ã­â„¢Å“ Ã«â€¢Å’ Ã¬â€œÂ´Ã«â€¹Â¤)
 		static LPD3DXMESH				ms_lpSphereMesh;
 		static LPD3DXMESH				ms_lpCylinderMesh;
 
@@ -807,7 +970,7 @@ class CGraphicBase
 		static float					ms_fNearY;
 		static float					ms_fFarY;
 
-		// 2004.11.18.myevan.DynamicVertexBuffer로 교체
+		// 2004.11.18.myevan.DynamicVertexBufferÃ«Â¡Å“ ÃªÂµÂÃ¬Â²Â´
 		/*
 		static std::vector<TIndex>		ms_lineIdxVector;
 		static std::vector<TIndex>		ms_lineTriIdxVector;
@@ -825,7 +988,7 @@ class CGraphicBase
 		static DWORD					ms_dwFlashingEndTime;
 		static D3DXCOLOR				ms_FlashingColor;
 
-		// Terrain picking용 Ray... CCamera 이용하는 버전.. 기존의 Ray와 통합 필요...
+		// Terrain pickingÃ¬Å¡Â© Ray... CCamera Ã¬ÂÂ´Ã¬Å¡Â©Ã­â€¢ËœÃ«Å â€ Ã«Â²â€žÃ¬Â â€ž.. ÃªÂ¸Â°Ã¬Â¡Â´Ã¬ÂËœ RayÃ¬â„¢â‚¬ Ã­â€ ÂµÃ­â€¢Â© Ã­â€¢â€žÃ¬Å¡â€...
  		static CRay						ms_Ray;
 
 		// 
@@ -841,3 +1004,14 @@ class CGraphicBase
 		
 		
 };
+
+
+
+
+
+
+
+
+
+
+
