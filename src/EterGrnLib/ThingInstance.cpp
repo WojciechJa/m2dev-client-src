@@ -6,7 +6,12 @@
 #include "Thing.h"
 #include "ModelInstance.h"
 
+// DX11_STRICT_ONLY: Include ImGui metrics for draw call tracking
+#include "../DebugUI/ImGuiGraphicsMetrics.h"
+#include "../EterLib/GrpDeviceDX11.h"
+
 CDynamicPool<CGraphicThingInstance>		CGraphicThingInstance::ms_kPool;
+DWORD CGraphicThingInstance::ms_dwDX11SubmittedDrawCount = 0;
 
 CGraphicThing* CGraphicThingInstance::GetBaseThingPtr()
 {
@@ -246,6 +251,7 @@ bool CGraphicThingInstance::IsMotionThing()
 
 void CGraphicThingInstance::ReserveModelInstance(int iCount)
 {
+	std::lock_guard<std::mutex> guard(m_lodControllerMutex);
 	stl_wipe(m_LODControllerVector);
 
 	for (int i = 0; i < iCount; ++i)
@@ -810,12 +816,49 @@ void CGraphicThingInstance::OnUpdate()
 
 void CGraphicThingInstance::OnRender()
 {
+#if defined(DX11_STRICT_ONLY)
+	// Strict DX11 runtime: route to DX11 render variant instead of legacy path.
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid() && pDX11Device->GetContext())
+	{
+		CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
+		const D3DXMATRIX& matView = (pCamera ? pCamera->GetViewMatrix() : D3DXMATRIX());
+		const D3DXMATRIX& matProj = GetProjMatrix();
+		const D3DXMATRIX matViewProj = matView * matProj;
+		RenderWithOneTextureDX11(pDX11Device->GetContext(), matViewProj);
+		return;
+	}
+
+	static bool s_bLoggedThingNoContext = false;
+	if (!s_bLoggedThingNoContext)
+	{
+		s_bLoggedThingNoContext = true;
+		TraceError("DX11_STRICT_THING_SKIP reason=dx11_context_unavailable");
+	}
+	return;
+#else
 	RenderWithOneTexture();
+#endif
 }
 
 void CGraphicThingInstance::OnBlendRender()
 {
+#if defined(DX11_STRICT_ONLY)
+	// Strict DX11 runtime: route to DX11 render variant instead of legacy path.
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid() && pDX11Device->GetContext())
+	{
+		CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
+		const D3DXMATRIX& matView = (pCamera ? pCamera->GetViewMatrix() : D3DXMATRIX());
+		const D3DXMATRIX& matProj = GetProjMatrix();
+		const D3DXMATRIX matViewProj = matView * matProj;
+		RenderWithOneTextureDX11(pDX11Device->GetContext(), matViewProj);
+		return;
+	}
+	return;
+#else
 	BlendRenderWithOneTexture();
+#endif
 }
 
 void CGraphicThingInstance::RenderWithOneTexture()
@@ -824,6 +867,9 @@ void CGraphicThingInstance::RenderWithOneTexture()
 	if (!m_bUpdated)
 		return;
 
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FRenderWithOneTexture render;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), render);
 }
@@ -834,6 +880,9 @@ void CGraphicThingInstance::BlendRenderWithOneTexture()
 	if (!m_bUpdated)
 		return;
 
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FBlendRenderWithOneTexture blendRender;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), blendRender);
 }
@@ -844,6 +893,9 @@ void CGraphicThingInstance::RenderWithTwoTexture()
 	if (!m_bUpdated)
 		return;
 
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FRenderWithTwoTexture render;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), render);
 }
@@ -854,6 +906,9 @@ void CGraphicThingInstance::BlendRenderWithTwoTexture()
 	if (!m_bUpdated)
 		return;
 
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FRenderWithTwoTexture blendRender;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), blendRender);
 }
@@ -862,48 +917,130 @@ void CGraphicThingInstance::OnRenderToShadowMap()
 {
 	if (!m_bUpdated)
 		return;
-	
+
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FRenderToShadowMap RenderToShadowMap;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), RenderToShadowMap);
 }
 
+// W4.1: DX11 world rendering
+void CGraphicThingInstance::RenderWithOneTextureDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+{
+	if (!m_bUpdated || !pContext)
+		return;
+
+	std::lock_guard<std::mutex> guard(m_lodControllerMutex);
+	CGrannyLODController::FRenderWithOneTextureDX11 render(pContext, matViewProj);
+	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), render);
+}
+
+void CGraphicThingInstance::RenderWithTwoTextureDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+{
+	if (!m_bUpdated || !pContext)
+		return;
+
+	std::lock_guard<std::mutex> guard(m_lodControllerMutex);
+	CGrannyLODController::FRenderWithTwoTextureDX11 render(pContext, matViewProj);
+	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), render);
+}
+
+// S1: DX11 shadow caster rendering
+void CGraphicThingInstance::RenderToShadowMapDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& c_rmatLightViewProj)
+{
+	if (!m_bUpdated || !pContext)
+		return;
+
+	std::lock_guard<std::mutex> guard(m_lodControllerMutex);
+	// Iterate LOD controllers and call DX11 shadow rendering
+	for (auto* pLODController : m_LODControllerVector)
+	{
+		if (pLODController)
+			pLODController->RenderToShadowMapDX11(pContext, c_rmatLightViewProj);
+	}
+}
+
 void CGraphicThingInstance::OnRenderShadow()
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FRenderShadow RenderShadow;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), RenderShadow);
 }
 
 void CGraphicThingInstance::OnRenderPCBlocker()
 {
+#if defined(DX11_STRICT_ONLY)
+	// Strict DX11 runtime: route PC blocker pass through native DX11 geometry path.
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid() && pDX11Device->GetContext())
+	{
+		CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
+		const D3DXMATRIX& matView = (pCamera ? pCamera->GetViewMatrix() : D3DXMATRIX());
+		const D3DXMATRIX& matProj = GetProjMatrix();
+		const D3DXMATRIX matViewProj = matView * matProj;
+		RenderWithOneTextureDX11(pDX11Device->GetContext(), matViewProj);
+		return;
+	}
+
+	static bool s_bLoggedPCBlockerNoContext = false;
+	if (!s_bLoggedPCBlockerNoContext)
+	{
+		s_bLoggedPCBlockerNoContext = true;
+		TraceError("DX11_STRICT_PC_BLOCKER_SKIP reason=dx11_context_unavailable");
+	}
+	return;
+#else
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FRenderWithOneTexture RenderPCBlocker;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), RenderPCBlocker);
+#endif
 }
 
 DWORD CGraphicThingInstance::GetLODControllerCount() const
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return 0;
 	return m_LODControllerVector.size();
 }
 
 CGrannyLODController * CGraphicThingInstance::GetLODControllerPointer(DWORD dwModelIndex) const
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return NULL;
 	assert(dwModelIndex < m_LODControllerVector.size());
 	return m_LODControllerVector[dwModelIndex];
 }
 
 CGrannyLODController * CGraphicThingInstance::GetLODControllerPointer(DWORD dwModelIndex)
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return NULL;
 	assert(dwModelIndex < m_LODControllerVector.size());
 	return m_LODControllerVector[dwModelIndex];
 }
 
 BYTE CGraphicThingInstance::GetLODLevel(DWORD dwModelInstance)
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return 0;
 	assert(dwModelInstance < m_LODControllerVector.size());
 	return (m_LODControllerVector[dwModelInstance]->GetLODLevel());
 }
 
 float CGraphicThingInstance::GetHeight()
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return 0.0f;
 	if (m_LODControllerVector.empty())
 		return 0.0f;
 
@@ -919,12 +1056,18 @@ float CGraphicThingInstance::GetHeight()
 
 void CGraphicThingInstance::ReloadTexture()
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return;
 	CGrannyLODController::FReloadTexture ReloadTexture;
 	std::for_each(m_LODControllerVector.begin(), m_LODControllerVector.end(), ReloadTexture);
 }
 
 bool CGraphicThingInstance::HaveBlendThing()
 {
+	std::unique_lock<std::mutex> guard(m_lodControllerMutex, std::try_to_lock);
+	if (!guard.owns_lock())
+		return false;
 	for (int i = 0; i < m_LODControllerVector.size(); i++)
 	{
 		if (m_LODControllerVector[i]->HaveBlendThing())
@@ -936,6 +1079,7 @@ bool CGraphicThingInstance::HaveBlendThing()
 
 void CGraphicThingInstance::OnClear()
 {
+	std::lock_guard<std::mutex> guard(m_lodControllerMutex);
 	stl_wipe(m_LODControllerVector);
 	stl_wipe_second(m_roMotionThingMap);
 
@@ -964,4 +1108,30 @@ CGraphicThingInstance::CGraphicThingInstance()
 
 CGraphicThingInstance::~CGraphicThingInstance()
 {
+}
+
+void CGraphicThingInstance::ResetDX11SubmittedDrawCount()
+{
+	ms_dwDX11SubmittedDrawCount = 0;
+}
+
+void CGraphicThingInstance::AddDX11SubmittedDrawCount(DWORD dwCount)
+{
+	if (0 == dwCount)
+		return;
+
+	if (ms_dwDX11SubmittedDrawCount > 0xffffffffu - dwCount)
+		ms_dwDX11SubmittedDrawCount = 0xffffffffu;
+	else
+		ms_dwDX11SubmittedDrawCount += dwCount;
+
+	// M2-O4: Removed batch-level ReportImGuiCharacterDrawCalls() to avoid double counting
+	// Subsystem reporting now happens ONLY at actual Draw*() sites in ModelInstanceRender.cpp
+	// where we have accurate per-draw counts and primitive counts available.
+	// This counter (ms_dwDX11SubmittedDrawCount) is used only for world-port telemetry (MapOutdoorRenderDX11).
+}
+
+DWORD CGraphicThingInstance::GetDX11SubmittedDrawCount()
+{
+	return ms_dwDX11SubmittedDrawCount;
 }

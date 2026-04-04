@@ -61,10 +61,6 @@ class CGrannyMaterial : public CReferenceObject
 		const CGraphicTexture * GetDiffuseTexture() const;
 		const CGraphicTexture * GetOpacityTexture() const;
 
-#if !defined(DX11_STRICT_ONLY)
-	// DX11 Model Sync M3-EGRN17.C: D3D9 texture getter not available in strict mode
-	ID3D11ShaderResourceView*		GetD3DTexture(int iStage) const;
-#endif
 
 	// MR-12: Fix specular isolation issue
 		float					GetSpecularPower() const;

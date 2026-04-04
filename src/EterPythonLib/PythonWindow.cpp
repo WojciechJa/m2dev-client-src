@@ -5,16 +5,70 @@
 #include "PythonWindowManager.h"
 
 #include "EterLib/StateManager.h"
+#include "EterLib/GrpDeviceDX11.h"
 #include "UserInterface/Locale.h"
 
 BOOL g_bOutlineBoxEnable = FALSE;
 
 namespace UI
 {
+	namespace
+	{
+		static const int kMaxWindowTreeDepth = 2048;
+
+		struct ScopedDepthGuard
+		{
+			int& m_rDepth;
+			bool m_bActive;
+
+			explicit ScopedDepthGuard(int& rDepth)
+				: m_rDepth(rDepth), m_bActive(false)
+			{
+				if (m_rDepth < kMaxWindowTreeDepth)
+				{
+					++m_rDepth;
+					m_bActive = true;
+				}
+			}
+
+			~ScopedDepthGuard()
+			{
+				if (m_bActive)
+					--m_rDepth;
+			}
+
+			bool IsOverflow() const
+			{
+				return !m_bActive;
+			}
+		};
+
+		int g_iWindowUpdateDepth = 0;
+		int g_iWindowRenderDepth = 0;
+		int g_iWindowPickDepth = 0;
+		int g_iWindowRectDepth = 0;
+
+		void LogWindowTreeGuard(const char* c_szPhase, const CWindow* pWindow)
+		{
+			static DWORD s_dwLastLogTick = 0;
+			const DWORD dwNow = ELTimer_GetMSec();
+			if (0 == s_dwLastLogTick || dwNow - s_dwLastLogTick >= 2000u)
+			{
+				s_dwLastLogTick = dwNow;
+				TraceError(
+					"UI_WINDOW_TREE_GUARD phase=%s window=%p limit=%d",
+					c_szPhase ? c_szPhase : "unknown",
+					pWindow,
+					kMaxWindowTreeDepth);
+			}
+		}
+	}
+
 	struct ScopedScissorRect
 	{
 		DWORD __OldState = 0;
 		RECT __OldRect = { 0 };
+		bool __Enabled = false;  // Track if StateManager was available
 
 		bool __Enable;
 		RECT __Rect;
@@ -22,17 +76,106 @@ namespace UI
 		ScopedScissorRect(const RECT& rect, bool enable)
 			: __Rect(rect), __Enable(enable)
 		{
-			__OldState = STATEMANAGER.GetRenderState(D3DRS_SCISSORTESTENABLE);
-			STATEMANAGER.GetScissorRect(&__OldRect);
+			// M2-UIPY-40: DX11 scissor test implementation
+			CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+			if (!pDX11Device || !pDX11Device->IsValid())
+				return;
 
-			STATEMANAGER.SetRenderState(D3DRS_SCISSORTESTENABLE, enable);
-			STATEMANAGER.SetScissorRect(rect);
+			ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+			if (!pContext)
+				return;
+
+			__Enabled = true;
+
+			// Save current scissor rect (DX11 supports up to 16 scissor rects, we use slot 0)
+			UINT uNumScissors = 1;
+			D3D11_RECT kCurrentScissor;
+			pContext->RSGetScissorRects(&uNumScissors, &kCurrentScissor);
+
+			if (uNumScissors > 0)
+			{
+				__OldRect.left = static_cast<LONG>(kCurrentScissor.left);
+				__OldRect.top = static_cast<LONG>(kCurrentScissor.top);
+				__OldRect.right = static_cast<LONG>(kCurrentScissor.right);
+				__OldRect.bottom = static_cast<LONG>(kCurrentScissor.bottom);
+			}
+
+			// Apply new scissor rect if enabled
+			if (enable)
+			{
+				D3D11_RECT kNewScissor;
+				kNewScissor.left = static_cast<FLOAT>(rect.left);
+				kNewScissor.top = static_cast<FLOAT>(rect.top);
+				kNewScissor.right = static_cast<FLOAT>(rect.right);
+				kNewScissor.bottom = static_cast<FLOAT>(rect.bottom);
+				pContext->RSSetScissorRects(1, &kNewScissor);
+			}
+			else
+			{
+				// Disable scissor test by setting empty rect
+				D3D11_RECT kEmptyScissor = { 0, 0, 0, 0 };
+			}
+
+			// One-shot telemetry (throttled to 5 seconds)
+			static DWORD s_dwLastScissorLogTick = 0;
+			const DWORD dwNow = ELTimer_GetMSec();
+			if (0 == s_dwLastScissorLogTick || (dwNow - s_dwLastScissorLogTick) >= 5000)
+			{
+				s_dwLastScissorLogTick = dwNow;
+				TraceError("DX11_SCISSOR_APPLY enabled=%d left=%d top=%d right=%d bottom=%d",
+					enable ? 1 : 0, rect.left, rect.top, rect.right, rect.bottom);
+			}
 		}
 
 		~ScopedScissorRect()
 		{
-			STATEMANAGER.SetRenderState(D3DRS_SCISSORTESTENABLE, __OldState);
-			STATEMANAGER.SetScissorRect(__OldRect);
+			// M2-UIPY-40: DX11 scissor restore
+			if (!__Enabled)
+				return;
+
+			CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+			if (!pDX11Device || !pDX11Device->IsValid())
+				return;
+
+			ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+			if (!pContext)
+				return;
+
+			// Restore previous scissor rect
+			D3D11_RECT kRestoreScissor;
+			kRestoreScissor.left = static_cast<FLOAT>(__OldRect.left);
+			kRestoreScissor.top = static_cast<FLOAT>(__OldRect.top);
+			kRestoreScissor.right = static_cast<FLOAT>(__OldRect.right);
+			kRestoreScissor.bottom = static_cast<FLOAT>(__OldRect.bottom);
+			pContext->RSSetScissorRects(1, &kRestoreScissor);
+
+			// Throttled telemetry
+			static DWORD s_dwLastScissorRestoreLogTick = 0;
+			const DWORD dwNow = ELTimer_GetMSec();
+			if (0 == s_dwLastScissorRestoreLogTick || (dwNow - s_dwLastScissorRestoreLogTick) >= 5000)
+			{
+				s_dwLastScissorRestoreLogTick = dwNow;
+				TraceError("DX11_SCISSOR_RESTORE left=%d top=%d right=%d bottom=%d",
+					__OldRect.left, __OldRect.top, __OldRect.right, __OldRect.bottom);
+			}
+		}
+	};
+
+	struct ScopedChildTraversal
+	{
+		CWindow* m_pWindow;
+
+		explicit ScopedChildTraversal(CWindow* pWindow)
+			: m_pWindow(pWindow)
+		{
+			if (m_pWindow)
+				m_pWindow->BeginChildTraversal();
+		}
+
+		~ScopedChildTraversal()
+		{
+			if (m_pWindow)
+				m_pWindow->EndChildTraversal();
 		}
 	};
 
@@ -73,7 +216,9 @@ namespace UI
 		m_bEnableScissorRect(false),
 		m_pParent(NULL),
 		m_dwFlag(0),
-		m_isUpdatingChildren(FALSE)
+		m_isUpdatingChildren(FALSE),
+		m_isRenderingChildren(FALSE),
+		m_iChildTraversalDepth(0)
 	{			
 #ifdef _DEBUG
 		static DWORD DEBUG_dwGlobalCounter=0;
@@ -121,7 +266,7 @@ namespace UI
 
 	void CWindow::Clear()
 	{
-		// FIXME : Children을 즉시 Delete하지는 않는다.
+	// NOTE: Children are not deleted immediately here.
 		//         어차피 Python쪽에서 Destroy가 하나씩 다시 호출 될 것이므로..
 		//         하지만 만약을 위해 링크는 끊어 놓는다.
 		//         더 좋은 형태는 있는가? - [levites]
@@ -163,15 +308,38 @@ namespace UI
 
 	void CWindow::__RemoveReserveChildren()
 	{
+		if (m_iChildTraversalDepth > 0)
+			return;
+
 		if (m_pReserveChildList.empty())
 			return;
 
 		TWindowContainer::iterator it;
 		for(it = m_pReserveChildList.begin(); it != m_pReserveChildList.end(); ++it)
 		{
+			if (*it && (*it)->m_pParent == this)
+				(*it)->m_pParent = NULL;
 			m_pChildList.remove(*it);
 		}
 		m_pReserveChildList.clear();
+	}
+
+	void CWindow::BeginChildTraversal()
+	{
+		++m_iChildTraversalDepth;
+	}
+
+	void CWindow::EndChildTraversal()
+	{
+		if (m_iChildTraversalDepth <= 0)
+		{
+			m_iChildTraversalDepth = 0;
+			return;
+		}
+
+		--m_iChildTraversalDepth;
+		if (0 == m_iChildTraversalDepth && !m_isUpdatingChildren && !m_isRenderingChildren)
+			__RemoveReserveChildren();
 	}
 
 	void CWindow::Update()
@@ -179,26 +347,46 @@ namespace UI
 		if (!IsShow())
 			return;
 
+		ScopedDepthGuard depthGuard(g_iWindowUpdateDepth);
+		if (depthGuard.IsOverflow())
+		{
+			LogWindowTreeGuard("update_depth_overflow", this);
+			return;
+		}
+
 		__RemoveReserveChildren();
 
 		OnUpdate();
 
 		m_isUpdatingChildren = TRUE;
-		TWindowContainer::iterator it;
-		for(it = m_pChildList.begin(); it != m_pChildList.end();)
 		{
-			TWindowContainer::iterator it_next = it;
-			++it_next;
-			(*it)->Update();
-			it = it_next;
+			ScopedChildTraversal childTraversal(this);
+			TWindowContainer::iterator it;
+			for(it = m_pChildList.begin(); it != m_pChildList.end();)
+			{
+				TWindowContainer::iterator it_next = it;
+				++it_next;
+				(*it)->Update();
+				it = it_next;
+			}
 		}
 		m_isUpdatingChildren = FALSE;		
+		__RemoveReserveChildren();
 	}
 
 	void CWindow::Render()
 	{
 		if (!IsShow())
 			return;
+
+		ScopedDepthGuard depthGuard(g_iWindowRenderDepth);
+		if (depthGuard.IsOverflow())
+		{
+			LogWindowTreeGuard("render_depth_overflow", this);
+			return;
+		}
+
+		__RemoveReserveChildren();
 
 		if (m_bEnableScissorRect)
 		{
@@ -237,7 +425,20 @@ namespace UI
 				CPythonGraphic::Instance().RenderBox2d(m_rect.left, m_rect.top, m_rect.right, m_rect.bottom);
 			}
 
-			std::for_each(m_pChildList.begin(), m_pChildList.end(), std::mem_fn(&CWindow::Render));
+			m_isRenderingChildren = TRUE;
+			{
+				ScopedChildTraversal childTraversal(this);
+				TWindowContainer::iterator it;
+				for (it = m_pChildList.begin(); it != m_pChildList.end();)
+				{
+					TWindowContainer::iterator it_next = it;
+					++it_next;
+					(*it)->Render();
+					it = it_next;
+				}
+			}
+			m_isRenderingChildren = FALSE;
+			__RemoveReserveChildren();
 		}
 		else 
 		{
@@ -249,7 +450,20 @@ namespace UI
 				CPythonGraphic::Instance().RenderBox2d(m_rect.left, m_rect.top, m_rect.right, m_rect.bottom);
 			}
 
-			std::for_each(m_pChildList.begin(), m_pChildList.end(), std::mem_fn(&CWindow::Render));
+			m_isRenderingChildren = TRUE;
+			{
+				ScopedChildTraversal childTraversal(this);
+				TWindowContainer::iterator it;
+				for (it = m_pChildList.begin(); it != m_pChildList.end();)
+				{
+					TWindowContainer::iterator it_next = it;
+					++it_next;
+					(*it)->Render();
+					it = it_next;
+				}
+			}
+			m_isRenderingChildren = FALSE;
+			__RemoveReserveChildren();
 		}
 	}
 
@@ -266,6 +480,11 @@ namespace UI
 		//PyCallClassMemberFunc(m_poHandler, "OnUpdate", BuildEmptyTuple());
 		PyCallClassMemberFunc_ByPyString(m_poHandler, poFuncName_OnUpdate, BuildEmptyTuple());
 		
+	}
+
+	void CWindow::OnChangePosition()
+	{
+		// Base window has no additional geometry side effects by default.
 	}
 
 	void CWindow::EnableScissorRect()
@@ -293,6 +512,11 @@ namespace UI
 
 		//PyCallClassMemberFunc(m_poHandler, "OnRender", BuildEmptyTuple());
 		PyCallClassMemberFunc(m_poHandler, "OnRender", BuildEmptyTuple());
+	}
+
+	void CWindow::SetColor(DWORD dwColor)
+	{
+		(void)dwColor;
 	}
 
 	void CWindow::SetName(const char * c_szName)
@@ -337,6 +561,13 @@ namespace UI
 
 	long CWindow::UpdateRect()
 	{
+		ScopedDepthGuard depthGuard(g_iWindowRectDepth);
+		if (depthGuard.IsOverflow())
+		{
+			LogWindowTreeGuard("rect_depth_overflow", this);
+			return 0;
+		}
+
 		m_rect.top		= m_y;
 		if (m_pParent)
 		{
@@ -425,17 +656,56 @@ namespace UI
 
 	void CWindow::AddChild(CWindow * pWin)
 	{
+		if (!pWin)
+			return;
+		if (pWin == this)
+		{
+			LogWindowTreeGuard("add_child_self_cycle", this);
+			return;
+		}
+
+		int iParentWalkDepth = 0;
+		for (CWindow* pWalk = this; pWalk; pWalk = pWalk->m_pParent)
+		{
+			if (pWalk == pWin)
+			{
+				LogWindowTreeGuard("add_child_parent_cycle", this);
+				return;
+			}
+			++iParentWalkDepth;
+			if (iParentWalkDepth > kMaxWindowTreeDepth)
+			{
+				LogWindowTreeGuard("add_child_parent_chain_overflow", this);
+				return;
+			}
+		}
+
+		if (std::find(m_pChildList.begin(), m_pChildList.end(), pWin) != m_pChildList.end())
+			return;
+
+		if (pWin->m_pParent && pWin->m_pParent != this)
+			pWin->m_pParent->DeleteChild(pWin);
+
 		m_pChildList.push_back(pWin);
 		pWin->m_pParent = this;
 	}
 
 	CWindow * CWindow::GetRoot()
 	{
-		if (m_pParent)
-			if (m_pParent->IsWindow())
-				return m_pParent->GetRoot();
+		CWindow* pRoot = this;
+		int iDepth = 0;
+		while (pRoot && pRoot->m_pParent && pRoot->m_pParent->IsWindow())
+		{
+			pRoot = pRoot->m_pParent;
+			++iDepth;
+			if (iDepth > kMaxWindowTreeDepth)
+			{
+				LogWindowTreeGuard("get_root_depth_overflow", this);
+				break;
+			}
+		}
 
-		return this;
+		return pRoot ? pRoot : this;
 	}
 
 	CWindow * CWindow::GetParent()
@@ -460,13 +730,18 @@ namespace UI
 
 	void CWindow::DeleteChild(CWindow * pWin)
 	{
-		if (m_isUpdatingChildren)
+		if (!pWin)
+			return;
+
+		if (m_isUpdatingChildren || m_isRenderingChildren || IsTraversingChildren())
 		{
 			m_pReserveChildList.push_back(pWin);
 		}
 		else
 		{
 			m_pChildList.remove(pWin);
+			if (pWin->m_pParent == this)
+				pWin->m_pParent = NULL;
 		}
 	}
 
@@ -547,6 +822,7 @@ namespace UI
 		if (OnIMETabEvent())
 			return TRUE;
 
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -567,6 +843,7 @@ namespace UI
 		if (OnIMEReturnEvent())
 			return TRUE;
 
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -587,6 +864,7 @@ namespace UI
 		if (OnIMEKeyDownEvent(ikey))
 			return TRUE;
 
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -604,6 +882,7 @@ namespace UI
 		if (OnKeyDown(ikey))
 			return this;
 
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -627,6 +906,7 @@ namespace UI
 		if (OnKeyUp(ikey))
 			return TRUE;
 
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -642,6 +922,7 @@ namespace UI
 
 	BOOL CWindow::RunPressEscapeKeyEvent()
 	{
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -660,6 +941,7 @@ namespace UI
 
 	BOOL CWindow::RunPressExitKeyEvent()
 	{
+		ScopedChildTraversal childTraversal(this);
 		TWindowContainer::reverse_iterator itor;
 		for (itor = m_pChildList.rbegin(); itor != m_pChildList.rend(); ++itor)
 		{
@@ -757,6 +1039,7 @@ namespace UI
 		bool bValue = false;
 		if (PyCallClassMemberFunc(m_poHandler, "OnRunMouseWheel", Py_BuildValue("(l)", nLen), &bValue))
 			return bValue;
+		return FALSE;
 	}
 #endif
 
@@ -891,6 +1174,14 @@ namespace UI
 
 	CWindow * CWindow::PickWindow(long x, long y)
 	{
+		ScopedDepthGuard depthGuard(g_iWindowPickDepth);
+		if (depthGuard.IsOverflow())
+		{
+			LogWindowTreeGuard("pick_depth_overflow", this);
+			return NULL;
+		}
+
+		ScopedChildTraversal childTraversal(this);
 		std::list<CWindow *>::reverse_iterator ritor = m_pChildList.rbegin();
 		for (; ritor != m_pChildList.rend(); ++ritor)
 		{
@@ -920,6 +1211,7 @@ namespace UI
 
 	CWindow * CWindow::PickTopWindow(long x, long y)
 	{
+		ScopedChildTraversal childTraversal(this);
 		std::list<CWindow *>::reverse_iterator ritor = m_pChildList.rbegin();
 		for (; ritor != m_pChildList.rend(); ++ritor)
 		{

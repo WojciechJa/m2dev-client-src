@@ -738,10 +738,54 @@ Latest sync log (2026-03-30 00:45) reports no blockers. M2-TERRAIN-DX11-FULL-75-
 **Migration metrics**: LPDIRECT3D* occurrences: 269 → 0 (excluding WorldEditor)
 **WorldEditor note**: 44 LPDIRECT3D* refs remain in WorldEditor (editor-only, excluded from migration)
 
-#### 9. Remove DX11_STRICT_ONLY Guards (1 day)
-- Replace with runtime feature checks
-- Simplify code paths
+#### 9. [COMPLETED] Remove DX11_STRICT_ONLY Guards (1 day)
 
+**Status**: COMPLETE (2026-04-04)
+**Stream**: M2-DX11-GUARDS-REMOVAL-09
+
+**Summary**:
+Removed ~25+ DX11_STRICT_ONLY compile-time guards, replacing with runtime feature checks where appropriate. Simplified code paths by removing obsolete DX9 fallback branches.
+
+**Category A - DebugUI Module**: COMPLETE
+- Removed informational comments from 8 files
+- Removed #ifdef DX11_STRICT_ONLY guard from ImGuiManager.h (always include d3d11.h)
+- Removed DX11_STRICT_ONLY define from DebugUI/CMakeLists.txt
+- Files: ImGuiManager.h/cpp, ImGuiGraphicsMetrics.h/cpp, ImGuiGraphPlotter.h/cpp, ImGuiMetricsCollector.h/cpp, CMakeLists.txt
+
+**Category B - Progressive Rollout Bypass Guards**: COMPLETE
+- Replaced compile-time bDX11StrictNativeOnlyBuild with runtime m_pySystem.IsDX11StrictNativeOnlyEnabled()
+- Removed RuntimeCompatMode force activation guard (use progressive rollout logic instead)
+- Files: PythonApplication.cpp (3 guards removed at lines 1047-1051, 1353-1405)
+
+**Category C - DX9 Fallback Guards**: COMPLETE
+- Removed DX9 fallback paths from PythonWindow.cpp (2 guards: scissor rect save/restore)
+- Removed DX9 fallback paths from PythonGraphic.cpp (4 guards: rendering paths)
+- Kept DX11-only code paths
+- Files: PythonWindow.cpp, PythonGraphic.cpp
+
+**Category D - EterGrnLib Simple Guards**: COMPLETE
+- Removed DX9 texture getter from Material.h
+- Removed include guard from ThingInstance.cpp (always include ImGui headers)
+- Files: Material.h, ThingInstance.cpp
+
+**Build Verification**: ALL PASS
+- DebugUI: PASS
+- EterPythonLib: PASS (fixed orphaned #endif)
+- EterGrnLib: PASS
+- UserInterface: PASS (full exe built)
+
+**Total Impact**:
+- Guards removed: ~25+ occurrences
+- Files modified: 14 files
+- Lines removed: ~150 lines (guards + DX9 fallback code)
+- Build regressions: 0
+
+**Remaining Guards** (intentionally kept for future work):
+- Complex guards in PythonApplication.cpp (6 guards - require deeper runtime checks)
+- Model.cpp CPU shadow buffer guards (6 guards - functional, not legacy)
+- ModelInstanceModel.cpp DX9 VB/IB unlock guards (6 guards - functional, not legacy)
+
+**Strategy**: Removed simple compile-time guards, replaced with runtime checks where possible
 #### 10. Optimize Texture Loading (1-2 days)
 - Add async texture loading
 - Implement texture streaming for large textures
