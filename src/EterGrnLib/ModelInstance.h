@@ -7,6 +7,8 @@
 #include "Model.h"
 #include "Motion.h"
 
+struct ID3D11Buffer;
+
 class CGrannyModelInstance : public CGraphicCollisionObject
 {
 	public:
@@ -55,7 +57,7 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 		void	DeformNoSkin(const D3DXMATRIX * c_pWorldMatrix);
 		void	Deform(const D3DXMATRIX * c_pWorldMatrix);
 
-		// FIXME : 현재는 하드웨어의 한계로 2장의 텍스춰로 제한이 되어있는 상태이기에 이런
+		// NOTE! : 현재는 하드웨어의 한계로 2장의 텍스춰로 제한이 되어있는 상태이기에 이런
 		//         불안정한 아키텍춰가 가능하지만, 궁극적인 방향은 (모델 텍스춰 전부) + (효과용 텍스춰)
 		//         이런식의 자동 셋팅이 이뤄져야 되지 않나 생각합니다. - [levites]
 		// NOTE : 내부에 if문을 포함 시키기 보다는 조금은 번거롭지만 이렇게 함수 콜 자체를 분리
@@ -66,6 +68,32 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 		void	BlendRenderWithOneTexture();
 		void	BlendRenderWithTwoTexture();
 		void	RenderWithoutTexture();
+
+		// W4.1: DX11 world rendering (reuses S1.2 VB infrastructure, true DX11 submit counters)
+		void	RenderWithOneTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
+		void	BlendRenderWithOneTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+		{
+			// Blend rendering uses same DX11 path as opaque - both material types rendered together
+			RenderWithOneTextureDX11(pContext, matViewProj);
+		}
+		void	RenderWithTwoTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
+
+		void	RenderToShadowMapDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& c_rmatLightViewProj);  // S1: DX11 shadow caster
+
+		// W4.2: Set DX11 object shaders (called by MapOutdoor before character rendering)
+		static void SetDX11ObjectShaders(
+			struct ID3D11VertexShader* pVS,
+			struct ID3D11PixelShader* pPS,
+			struct ID3D11InputLayout* pInputLayout,
+			struct ID3D11Buffer* pConstantBuffer,
+			struct ID3D11SamplerState* pSampler,
+			const D3DXVECTOR4& vLightDir,
+			const D3DXVECTOR4& vAmbient);
+
+		// S1.2: DX11 vertex buffer lifecycle for character shadows
+		void	CreateDX11VertexBuffers(struct ID3D11Device* pDevice);
+		void	DestroyDX11VertexBuffers();
+		void	UpdateDX11DeformableVertexBuffer(struct ID3D11DeviceContext* pContext);
 
 		// Model
 		CGrannyModel* GetModel();
@@ -137,7 +165,7 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 		bool	__IsDeformableVertexBuffer();
 		void	__SetSharedDeformableVertexBuffer(CGraphicVertexBuffer* pkSharedDeformableVertexBuffer);
 		
-		IDirect3DVertexBuffer9* __GetDeformableD3DVertexBufferPtr();
+		ID3D11Buffer* __GetDeformableD3DVertexBufferPtr();
 		CGraphicVertexBuffer&	__GetDeformableVertexBufferRef();
 		
 		granny_world_pose* __GetWorldPosePtr() const;
@@ -152,6 +180,18 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 		void	RenderMeshNodeListWithOneTexture(CGrannyMesh::EType eMeshType, CGrannyMaterial::EType eMtrlType);
 		void	RenderMeshNodeListWithTwoTexture(CGrannyMesh::EType eMeshType, CGrannyMaterial::EType eMtrlType);
 		void	RenderMeshNodeListWithoutTexture(CGrannyMesh::EType eMeshType, CGrannyMaterial::EType eMtrlType);
+
+		// S1.2: DX11 shadow rendering helper
+		void	__RenderMeshNodeListToShadowMapDX11(struct ID3D11DeviceContext* pContext,
+			const D3DXMATRIX& c_rmatLightViewProj,
+			CGrannyMesh::EType eMeshType,
+			CGrannyMaterial::EType eMtrlType);
+
+		// W4.1: DX11 world rendering helper
+		UINT	__RenderMeshNodeListDX11(struct ID3D11DeviceContext* pContext,
+			const D3DXMATRIX& matViewProj,
+			CGrannyMesh::EType eMeshType,
+			CGrannyMaterial::EType eMtrlType);
 
 	protected:
 		// Static Data
@@ -188,8 +228,15 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 		// Dynamic Vertex Buffer
 		CGraphicVertexBuffer*			m_pkSharedDeformableVertexBuffer;
 		CGraphicVertexBuffer			m_kLocalDeformableVertexBuffer;
-		bool							m_isDeformableVertexBuffer;		
+		bool							m_isDeformableVertexBuffer;
 		// END_OF_WORK
+
+		// S1.2: DX11 Shadow Rendering Support (character VB conversion)
+		ID3D11Buffer*					m_pDX11DeformableVertexBuffer;	// DX11 deformable VB (dynamic)
+		ID3D11Buffer*					m_pDX11RigidVertexBuffer;		// DX11 rigid VB (static)
+		ID3D11Buffer*					m_pDX11IndexBuffer;				// DX11 index buffer
+		bool							m_bDX11VertexBuffersReady;		// Init flag
+		// S1.2: END
 
 		// TEST
 		CGrannyModelInstance** m_ppkSkeletonInst;
@@ -203,3 +250,4 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 	public:
 		bool							HaveBlendThing() { return m_pModel->HaveBlendThing(); }
 };
+

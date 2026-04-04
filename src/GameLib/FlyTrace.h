@@ -23,7 +23,7 @@ class CFlyTrace : public CScreen
 		typedef std::deque<TTimePosition> TTimePositionDeque;
 
 		//CGraphicImageInstance m_ImageInstance;
-		//LPDIRECT3DTEXTURE9 m_lpTexture;
+		//ID3D11ShaderResourceView* m_lpTexture;
 
 		bool m_bRectShape;
 		DWORD m_dwColor;

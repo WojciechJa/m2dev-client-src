@@ -2,12 +2,15 @@
 
 #include <granny.h>
 #include <windows.h>
-#include <d3d9.h>
+// DX11 runtime uses engine compatibility headers/types from EterLib.
+//#include <d3d9.h>
 
 #include "Eterlib/ReferenceObject.h"
 #include "Eterlib/Ref.h"
 #include "Eterlib/GrpImageInstance.h"
 #include "Util.h"
+
+struct ID3D11RasterizerState;
 
 class CGrannyMaterial : public CReferenceObject
 {
@@ -58,9 +61,12 @@ class CGrannyMaterial : public CReferenceObject
 		const CGraphicTexture * GetDiffuseTexture() const;
 		const CGraphicTexture * GetOpacityTexture() const;
 
-		LPDIRECT3DTEXTURE9		GetD3DTexture(int iStage) const;
+#if !defined(DX11_STRICT_ONLY)
+	// DX11 Model Sync M3-EGRN17.C: D3D9 texture getter not available in strict mode
+	ID3D11ShaderResourceView*		GetD3DTexture(int iStage) const;
+#endif
 
-		// MR-12: Fix specular isolation issue
+	// MR-12: Fix specular isolation issue
 		float					GetSpecularPower() const;
 		bool					IsSpecularEnabled() const { return m_bSpecularEnable; }
 		BYTE					GetSphereMapIndex() const { return m_bSphereMapIndex; }
@@ -89,7 +95,8 @@ class CGrannyMaterial : public CReferenceObject
 		bool					m_bTwoSideRender;
 		DWORD					m_dwLastCullRenderStateForTwoSideRendering;
 		BYTE					m_bSphereMapIndex;
-		
+		bool					m_bDX11AppliedCullNone;
+		ID3D11RasterizerState*	m_pDX11TwoSidedRasterState;
 
 		void (CGrannyMaterial::*m_pfnApplyRenderState)();
 		void (CGrannyMaterial::*m_pfnRestoreRenderState)();

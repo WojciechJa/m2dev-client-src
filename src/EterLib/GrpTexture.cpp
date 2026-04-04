@@ -46,7 +46,7 @@ void CGraphicTexture::SetTextureStage(int stage) const
 	return;
 }
 
-LPDIRECT3DTEXTURE9 CGraphicTexture::GetD3DTexture() const
+ID3D11ShaderResourceView* CGraphicTexture::GetD3DTexture() const
 {
 	return m_lpd3dTexture;
 }

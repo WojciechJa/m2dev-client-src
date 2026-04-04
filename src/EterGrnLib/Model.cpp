@@ -2,6 +2,55 @@
 #include "Model.h"
 #include "Mesh.h"
 
+// M3-EGRN-27: Throttled telemetry for legacy buffer accessor skips in DX11 strict mode
+namespace {
+	inline void LogLegacyBufferAccessorSkip(const char* c_szBufferType)
+	{
+		static DWORD s_dwLastHeartbeatTick = 0;
+		static int s_iVBSkipsSinceHeartbeat = 0;
+		static int s_iIBSkipsSinceHeartbeat = 0;
+
+		if (0 == strcmp(c_szBufferType, "VB"))
+			++s_iVBSkipsSinceHeartbeat;
+		else if (0 == strcmp(c_szBufferType, "IB"))
+			++s_iIBSkipsSinceHeartbeat;
+
+		// Throttled heartbeat telemetry (30s cadence)
+		const DWORD dwNow = GetTickCount();
+		if (0 == s_dwLastHeartbeatTick || dwNow - s_dwLastHeartbeatTick >= 30000u)
+		{
+			s_dwLastHeartbeatTick = dwNow;
+			if (s_iVBSkipsSinceHeartbeat > 0 || s_iIBSkipsSinceHeartbeat > 0)
+			{
+				TraceError("DX11_EGRN_LEGACY_BUFFER_SKIP_HEARTBEAT vb_skips=%d ib_skips=%d interval_ms=30000",
+					s_iVBSkipsSinceHeartbeat, s_iIBSkipsSinceHeartbeat);
+				s_iVBSkipsSinceHeartbeat = 0;
+				s_iIBSkipsSinceHeartbeat = 0;
+			}
+		}
+	}
+}
+
+// DX11 Migration: Vertex layout metadata helper functions
+SVertexLayoutMetadata SVertexLayoutMetadata::CreateFromFVF(DWORD dwFvF)
+{
+	SVertexLayoutMetadata kLayout;
+	kLayout.bHasPosition = (dwFvF & FVF_XYZ) != 0;
+	kLayout.bHasNormal = (dwFvF & FVF_NORMAL) != 0;
+	kLayout.bHasTexCoord0 = (dwFvF & FVF_TEX1) != 0;
+	kLayout.bHasTexCoord1 = (dwFvF & FVF_TEX2) != 0;
+
+	// Calculate stride
+	DWORD stride = 0;
+	if (kLayout.bHasPosition) stride += 12;  // 3 floats (x,y,z)
+	if (kLayout.bHasNormal) stride += 12;    // 3 floats (nx,ny,nz)
+	if (kLayout.bHasTexCoord0) stride += 8;  // 2 floats (u,v)
+	if (kLayout.bHasTexCoord1) stride += 8;  // 2 floats (u,v)
+	kLayout.dwVertexStride = stride;
+
+	return kLayout;
+}
+
 const CGrannyMaterialPalette& CGrannyModel::GetMaterialPalette() const
 {
 	return m_kMtrlPal;
@@ -52,6 +101,11 @@ int CGrannyModel::GetRigidVertexCount() const
 	return m_rigidVtxCount;
 }
 
+DWORD CGrannyModel::GetRigidVertexStride() const
+{
+	return m_kVertexLayout.dwVertexStride ? m_kVertexLayout.dwVertexStride : sizeof(TPNTVertex);
+}
+
 int CGrannyModel::GetDeformVertexCount() const
 {
 	return m_deformVtxCount;
@@ -72,24 +126,63 @@ granny_model* CGrannyModel::GetGrannyModelPointer()
 	return m_pgrnModel;
 }
 
-LPDIRECT3DINDEXBUFFER9 CGrannyModel::GetD3DIndexBuffer() const
+ID3D11Buffer* CGrannyModel::GetD3DIndexBuffer() const
 {
+#if defined(DX11_STRICT_ONLY)
+	static bool s_bLoggedGetIndexBufferSkip = false;
+	if (!s_bLoggedGetIndexBufferSkip)
+	{
+		s_bLoggedGetIndexBufferSkip = true;
+		TraceError("DX11_EGRN_LEGACY_IB_SKIP function=GetD3DIndexBuffer reason=strict_mode_no_dx9_pointer");
+	}
+	LogLegacyBufferAccessorSkip("IB");
+	return nullptr;
+#else
 	return m_idxBuf.GetD3DIndexBuffer();
+#endif
 }
 
-LPDIRECT3DVERTEXBUFFER9 CGrannyModel::GetPNTD3DVertexBuffer() const
+ID3D11Buffer* CGrannyModel::GetPNTD3DVertexBuffer() const
 {
+#if defined(DX11_STRICT_ONLY)
+	static bool s_bLoggedGetVertexBufferSkip = false;
+	if (!s_bLoggedGetVertexBufferSkip)
+	{
+		s_bLoggedGetVertexBufferSkip = true;
+		TraceError("DX11_EGRN_LEGACY_VB_SKIP function=GetPNTD3DVertexBuffer reason=strict_mode_no_dx9_pointer");
+	}
+	LogLegacyBufferAccessorSkip("VB");
+	return nullptr;
+#else
 	return m_pntVtxBuf.GetD3DVertexBuffer();
+	#endif
 }
 
+#if defined(DX11_STRICT_ONLY)
+// DX11 Model Sync M3-EGRN18.A: Lock CPU shadow buffers in strict mode
 bool CGrannyModel::LockVertices(void** indicies, void** vertices) const
 {
-	if (!m_idxBuf.Lock(indicies))
+	// CGraphicIndexBuffer::Lock() and CGraphicVertexBuffer::Lock() automatically
+	// use CPU shadow buffers when ms_lpd3dDevice is NULL (strict mode).
+	// Important: some Granny models are fully deformable (no rigid VB), so lock only required sources.
+	if (indicies)
+		*indicies = nullptr;
+	if (vertices)
+		*vertices = nullptr;
+
+	const bool bNeedIndices = (m_idxCount > 0) && (nullptr != indicies);
+	const bool bNeedRigidVertices = (m_rigidVtxCount > 0) && (nullptr != vertices);
+
+	if (!bNeedIndices && !bNeedRigidVertices)
+		return true;
+
+	if (bNeedIndices && !m_idxBuf.Lock(indicies))
 		return false;
 
-	if (!m_pntVtxBuf.Lock(vertices))
+	if (bNeedRigidVertices && !m_pntVtxBuf.Lock(vertices))
 	{
-		m_idxBuf.Unlock();
+		if (bNeedIndices)
+			m_idxBuf.Unlock();
 		return false;
 	}
 
@@ -98,9 +191,49 @@ bool CGrannyModel::LockVertices(void** indicies, void** vertices) const
 
 void CGrannyModel::UnlockVertices() const
 {
-	m_idxBuf.Unlock();
-	m_pntVtxBuf.Unlock();
+	// CGraphicIndexBuffer::Unlock() and CGraphicVertexBuffer::Unlock() automatically
+	// use CPU shadow buffers when ms_lpd3dDevice is NULL (strict mode)
+	if (m_idxCount > 0)
+		m_idxBuf.Unlock();
+	if (m_rigidVtxCount > 0)
+		m_pntVtxBuf.Unlock();
 }
+#else
+// DX9 fallback (hybrid mode only)
+bool CGrannyModel::LockVertices(void** indicies, void** vertices) const
+{
+	if (indicies)
+		*indicies = nullptr;
+	if (vertices)
+		*vertices = nullptr;
+
+	const bool bNeedIndices = (m_idxCount > 0) && (nullptr != indicies);
+	const bool bNeedRigidVertices = (m_rigidVtxCount > 0) && (nullptr != vertices);
+
+	if (!bNeedIndices && !bNeedRigidVertices)
+		return true;
+
+	if (bNeedIndices && !m_idxBuf.Lock(indicies))
+		return false;
+
+	if (bNeedRigidVertices && !m_pntVtxBuf.Lock(vertices))
+	{
+		if (bNeedIndices)
+			m_idxBuf.Unlock();
+		return false;
+	}
+
+	return true;
+}
+
+void CGrannyModel::UnlockVertices() const
+{
+	if (m_idxCount > 0)
+		m_idxBuf.Unlock();
+	if (m_rigidVtxCount > 0)
+		m_pntVtxBuf.Unlock();
+}
+#endif
 
 bool CGrannyModel::LoadPNTVertices()
 {
@@ -109,7 +242,11 @@ bool CGrannyModel::LoadPNTVertices()
 
 	assert(m_meshs != NULL);
 
-	if (!m_pntVtxBuf.Create(m_rigidVtxCount, m_dwFvF, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
+#if defined(DX11_STRICT_ONLY)
+	// DX11 Model Sync M3-EGRN18.A: Populate CPU shadow buffer in strict mode
+	// CGraphicVertexBuffer::CreateWithStride() allocates CPU shadow when ms_lpd3dDevice is NULL.
+	// Without Create(), Lock() returns false and DX11 upload path sees source=none.
+	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
 		return false;
 
 	void* vertices;
@@ -124,6 +261,24 @@ bool CGrannyModel::LoadPNTVertices()
 
 	m_pntVtxBuf.Unlock();
 	return true;
+#else
+	// DX9 fallback (hybrid mode only)
+	if (!m_pntVtxBuf.Create(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
+		return false;
+
+	void* vertices;
+	if (!m_pntVtxBuf.Lock(&vertices))
+		return false;
+
+	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
+	{
+		CGrannyMesh& rMesh = m_meshs[m];
+		rMesh.LoadPNTVertices(vertices);
+	}
+
+	m_pntVtxBuf.Unlock();
+	return true;
+#endif
 }
 
 bool CGrannyModel::LoadIndices()
@@ -132,6 +287,10 @@ bool CGrannyModel::LoadIndices()
 	if (m_idxCount <= 0)
 		return true;
 
+#if defined(DX11_STRICT_ONLY)
+	// DX11 Model Sync M3-EGRN18.A: Populate CPU shadow buffer in strict mode
+	// CGraphicIndexBuffer::Create() allocates CPU shadow when ms_lpd3dDevice is NULL.
+	// Without Create(), Lock() returns false and DX11 upload path sees source=none.
 	if (!m_idxBuf.Create(m_idxCount, D3DFMT_INDEX16))
 		return false;
 
@@ -146,8 +305,27 @@ bool CGrannyModel::LoadIndices()
 		rMesh.LoadIndices(indices);
 	}
 
-	m_idxBuf.Unlock();	
+	m_idxBuf.Unlock();
 	return true;
+#else
+	// DX9 fallback (hybrid mode only)
+	if (!m_idxBuf.Create(m_idxCount, D3DFMT_INDEX16))
+		return false;
+
+	void * indices;
+
+	if (!m_idxBuf.Lock((void**)&indices))
+		return false;
+
+	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
+	{
+		CGrannyMesh& rMesh = m_meshs[m];
+		rMesh.LoadIndices(indices);
+	}
+
+	m_idxBuf.Unlock();
+	return true;
+#endif
 }
 
 bool CGrannyModel::LoadMeshs()
@@ -172,7 +350,7 @@ bool CGrannyModel::LoadMeshs()
 	int meshCount = GetMeshCount();
 	m_meshs = new CGrannyMesh[meshCount];
 
-	m_dwFvF = 0;
+	m_kVertexLayout = SVertexLayoutMetadata();  // Reset to default
 
 	for (int m = 0; m < meshCount; ++m)
 	{
@@ -196,16 +374,17 @@ bool CGrannyModel::LoadMeshs()
 		}
 		m_bHaveBlendThing |= rMesh.HaveBlendThing();
 
+		// DX11 Migration: Build vertex layout metadata instead of FVF flags
 		for (int i = 0; pgrnMesh->PrimaryVertexData->VertexType[i].Name != nullptr; ++i)
 		{
 			if ( 0 == strcmp(pgrnMesh->PrimaryVertexData->VertexType[i].Name, GrannyVertexPositionName) )
-				m_dwFvF |= D3DFVF_XYZ;
+				m_kVertexLayout.bHasPosition = true;
 			else if ( 0 == strcmp(pgrnMesh->PrimaryVertexData->VertexType[i].Name, GrannyVertexNormalName) )
-				m_dwFvF |= D3DFVF_NORMAL;
+				m_kVertexLayout.bHasNormal = true;
 			else if ( 0 == strcmp(pgrnMesh->PrimaryVertexData->VertexType[i].Name, GrannyVertexTextureCoordinatesName"0") )
-				m_dwFvF |= D3DFVF_TEX1;
+				m_kVertexLayout.bHasTexCoord0 = true;
 			else if ( 0 == strcmp(pgrnMesh->PrimaryVertexData->VertexType[i].Name, GrannyVertexTextureCoordinatesName"1") )
-				m_dwFvF |= D3DFVF_TEX2;
+				m_kVertexLayout.bHasTexCoord1 = true;
 		}
 
 		vtxPos += GrannyGetMeshVertexCount(pgrnMesh);
@@ -217,6 +396,14 @@ bool CGrannyModel::LoadMeshs()
 		if (rMesh.GetTriGroupNodeList(CGrannyMaterial::TYPE_BLEND_PNT))
 			++blendPNTMeshNodeCount;
 	}
+
+	// Calculate vertex stride from detected components
+	DWORD stride = 0;
+	if (m_kVertexLayout.bHasPosition) stride += 12;   // 3 floats (x,y,z)
+	if (m_kVertexLayout.bHasNormal) stride += 12;     // 3 floats (nx,ny,nz)
+	if (m_kVertexLayout.bHasTexCoord0) stride += 8;   // 2 floats (u,v)
+	if (m_kVertexLayout.bHasTexCoord1) stride += 8;   // 2 floats (u,v)
+	m_kVertexLayout.dwVertexStride = stride;
 
 	m_meshNodeCapacity = diffusePNTMeshNodeCount + blendPNTMeshNodeCount + blendPNT2MeshNodeCount;
 	m_meshNodes = new TMeshNode[m_meshNodeCapacity];
@@ -235,8 +422,9 @@ bool CGrannyModel::LoadMeshs()
 			AppendMeshNode(eMeshType, CGrannyMaterial::TYPE_BLEND_PNT, n);
 	}
 
-	// For Dungeon Block
-	if ((D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1|D3DFVF_TEX2) == m_dwFvF)
+	// For Dungeon Block - detect PNT2 format (Position + Normal + 2 TexCoords)
+	if (m_kVertexLayout.bHasPosition && m_kVertexLayout.bHasNormal &&
+		m_kVertexLayout.bHasTexCoord0 && m_kVertexLayout.bHasTexCoord1)
 	{
 		for (int n = 0; n < meshCount; ++n)
 		{
@@ -355,27 +543,49 @@ bool CGrannyModel::__LoadVertices()
 {
 	if (m_rigidVtxCount <= 0)
 		return true;
-	
+
 	assert(m_meshs != NULL);
 
-//	assert((m_dwFvF & (D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1)) == m_dwFvF);
-
-//	if (!m_pntVtxBuf.Create(m_rigidVtxCount, D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1, D3DUSAGE_WRITEONLY, D3DPOOL_MANAGED))
-	if (!m_pntVtxBuf.Create(m_rigidVtxCount, m_dwFvF, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
+#if defined(DX11_STRICT_ONLY)
+	// DX11 Model Sync M3-EGRN18.A: Populate CPU shadow buffer in strict mode
+	// CGraphicVertexBuffer::CreateWithStride() allocates CPU shadow when ms_lpd3dDevice is NULL.
+	// Without Create(), Lock() returns false and DX11 upload path sees source=none.
+	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
 		return false;
-	
+
 	void* vertices;
 	if (!m_pntVtxBuf.Lock(&vertices))
 		return false;
-	
+
 	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
 	{
 		CGrannyMesh& rMesh = m_meshs[m];
 		rMesh.NEW_LoadVertices(vertices);
 	}
-	
+
 	m_pntVtxBuf.Unlock();
 	return true;
+#else
+	// DX9 fallback (hybrid mode only)
+//	assert((m_kVertexLayout.dwVertexStride == 32) || (m_kVertexLayout.dwVertexStride == 40));
+
+//	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, 32, D3DUSAGE_WRITEONLY, D3DPOOL_MANAGED))
+	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
+		return false;
+
+	void* vertices;
+	if (!m_pntVtxBuf.Lock(&vertices))
+		return false;
+
+	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
+	{
+		CGrannyMesh& rMesh = m_meshs[m];
+		rMesh.NEW_LoadVertices(vertices);
+	}
+
+	m_pntVtxBuf.Unlock();
+	return true;
+#endif
 }
 
 void CGrannyModel::Initialize()
@@ -396,7 +606,7 @@ void CGrannyModel::Initialize()
 
 	m_canDeformPNVertices = false;
 
-	m_dwFvF = 0;
+	m_kVertexLayout = SVertexLayoutMetadata();  // Reset to default
 	m_bHaveBlendThing = false;
 }
 
@@ -408,4 +618,10 @@ CGrannyModel::CGrannyModel()
 CGrannyModel::~CGrannyModel()
 {
 	Destroy();
+}
+
+void CGrannyModel::OnSelfDestruct()
+{
+	// Lifetime is controlled by CGraphicThing (array owner). Releasing reference
+	// count to zero must not call delete this on an array element.
 }

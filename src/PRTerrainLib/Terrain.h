@@ -89,7 +89,7 @@ class CTerrainImpl
 		bool					LoadWaterMap(const char * c_szWaterMapName);
 		bool					LoadWaterMapFile(const char * c_szWaterMapName);
 		
-		LPDIRECT3DTEXTURE9		GetShadowTexture()						{ return m_lpShadowTexture; }
+		ID3D11ShaderResourceView* GetShadowTextureSRV() { return m_pShadowTextureSRV; } // M2-PRTERRAIN-DX11-NATIVE-01: Return DX11 SRV instead of DX9 texture
 
 		DWORD					GetShadowMapColor(float fx, float fy);		
 
@@ -106,7 +106,7 @@ class CTerrainImpl
 		}
 
 	protected:
-		LPDIRECT3DTEXTURE9		m_lpAlphaTexture[MAXTERRAINTEXTURES];
+		ID3D11ShaderResourceView* m_pAlphaTextureSRV[MAXTERRAINTEXTURES]; // M2-PRTERRAIN-DX11-NATIVE-01: DX11 SRV array instead of ID3D11ShaderResourceView*
 		WORD					m_awRawHeightMap[HEIGHTMAP_RAW_YSIZE*HEIGHTMAP_RAW_XSIZE];
 					
 		BYTE 					m_abyTileMap[TILEMAP_RAW_YSIZE*TILEMAP_RAW_XSIZE];		
@@ -134,7 +134,8 @@ class CTerrainImpl
 
 		//////////////////////////////////////////////////////////////////////////
 		// Shadow Map
-		LPDIRECT3DTEXTURE9		m_lpShadowTexture;
+		ID3D11ShaderResourceView* m_pShadowTextureSRV; // M2-PRTERRAIN-DX11-NATIVE-01: DX11 SRV instead of ID3D11ShaderResourceView*
+		ID3D11Texture2D* m_pShadowTexture; // M2-PRTERRAIN-DX11-NATIVE-01: DX11 texture for Map/Unmap
 		WORD					m_awShadowMap[SHADOWMAP_YSIZE*SHADOWMAP_XSIZE];	// 16bit R5 G6 B5
 		
 	protected:

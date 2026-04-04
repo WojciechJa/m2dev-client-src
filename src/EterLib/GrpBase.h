@@ -269,7 +269,6 @@ static constexpr D3DRENDERSTATETYPE D3DRS_SRCBLEND = 19u;
 static constexpr D3DRENDERSTATETYPE D3DRS_DESTBLEND = 20u;
 static constexpr D3DRENDERSTATETYPE D3DRS_CULLMODE = 22u;
 static constexpr D3DRENDERSTATETYPE D3DRS_ZFUNC = 23u;
-static constexpr D3DRENDERSTATETYPE D3DRS_ALPHAREF = 24u;
 static constexpr D3DRENDERSTATETYPE D3DRS_ALPHABLENDENABLE = 27u;
 static constexpr D3DRENDERSTATETYPE D3DRS_FOGENABLE = 28u;
 static constexpr D3DRENDERSTATETYPE D3DRS_SPECULARENABLE = 29u;
@@ -310,14 +309,6 @@ static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE7 = 23u;
 static constexpr D3DTRANSFORMSTATETYPE D3DTS_WORLD = 256u;
 
 using D3DTEXTURESTAGESTATETYPE = uint32_t;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_COLOROP = 1u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_COLORARG1 = 2u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_COLORARG2 = 3u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_ALPHAOP = 4u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_ALPHAARG1 = 5u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_ALPHAARG2 = 6u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_TEXCOORDINDEX = 11u;
-static constexpr D3DTEXTURESTAGESTATETYPE TSS_TEXTURETRANSFORMFLAGS = 24u;
 
 using D3DTEXTUREARG = uint32_t;
 static constexpr D3DTEXTUREARG D3DTA_DIFFUSE = 0x00000000u;
@@ -325,7 +316,6 @@ static constexpr D3DTEXTUREARG D3DTA_CURRENT = 0x00000001u;
 static constexpr D3DTEXTUREARG D3DTA_TEXTURE = 0x00000002u;
 static constexpr D3DTEXTUREARG D3DTA_TFACTOR = 0x00000003u;
 
-static constexpr DWORD TSS_TCI_CAMERASPACEPOSITION = 0x00010000u;
 static constexpr DWORD D3DTTFF_DISABLE = 0u;
 static constexpr DWORD D3DTTFF_COUNT1 = 1u;
 static constexpr DWORD D3DTTFF_COUNT2 = 2u;
@@ -359,16 +349,6 @@ static constexpr UINT D3DPRESENT_INTERVAL_ONE = 1u;
 static constexpr UINT D3DPRESENT_INTERVAL_IMMEDIATE = 0u;
 #endif // !defined(_d3d9TYPES_H_)
 
-#ifndef DX11_FVF_LAYOUT_DEFINED
-#define DX11_FVF_LAYOUT_DEFINED 1
-inline constexpr DWORD FVF_XYZ = 0x002;
-inline constexpr DWORD FVF_NORMAL = 0x010;
-inline constexpr DWORD FVF_DIFFUSE = 0x040;
-inline constexpr DWORD FVF_TEX1 = 0x100;
-inline constexpr DWORD FVF_TEX2 = 0x200;
-inline constexpr DWORD FVF_TEXCOUNT_MASK = 0xF00;
-#endif
-
 #if !defined(_D3D9CAPS_H_) && !defined(DX11_D3DCAPS9_DEFINED)
 struct D3DCAPS9
 {
@@ -400,12 +380,6 @@ inline DWORD D3DCOLOR_COLORVALUE(float r, float g, float b, float a)
 }
 #endif // D3DCOLOR_COLORVALUE
 
-using LPDIRECT3DTEXTURE9 = ID3D11ShaderResourceView*;
-using LPDIRECT3DSURFACE9 = ID3D11RenderTargetView*;
-using LPDIRECT3DVERTEXDECLARATION9 = ID3D11InputLayout*;
-using LPDIRECT3DVERTEXBUFFER9 = ID3D11Buffer*;
-using LPDIRECT3DINDEXBUFFER9 = ID3D11Buffer*;
-using IDirect3DVertexBuffer9 = ID3D11Buffer;
 
 #ifndef D3DXIFF_DDS
 using D3DXIMAGE_FILEFORMAT = DWORD;
@@ -419,8 +393,8 @@ static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_DIB = 6u;
 static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_HDR = 7u;
 static constexpr D3DXIMAGE_FILEFORMAT D3DXIFF_PFM = 8u;
 
-HRESULT D3DXSaveTextureToFileA(const char* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, LPDIRECT3DTEXTURE9 pSrcTexture, const void* pPalette);
-HRESULT D3DXSaveTextureToFileW(const wchar_t* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, LPDIRECT3DTEXTURE9 pSrcTexture, const void* pPalette);
+HRESULT D3DXSaveTextureToFileA(const char* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, ID3D11ShaderResourceView* pSrcTexture, const void* pPalette);
+HRESULT D3DXSaveTextureToFileW(const wchar_t* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, ID3D11ShaderResourceView* pSrcTexture, const void* pPalette);
 #ifdef UNICODE
 #define D3DXSaveTextureToFile D3DXSaveTextureToFileW
 #else
@@ -1004,6 +978,8 @@ class CGraphicBase
 		
 		
 };
+
+
 
 
 

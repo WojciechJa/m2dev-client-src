@@ -1,9 +1,12 @@
+#include <dxgi1_4.h>
+
 #include "StdAfx.h"
 #include "EterBase/Utils.h"
 #include "EterBase/Timer.h"
 #include "GrpBase.h"
 #include "Camera.h"
 #include "StateManager.h"
+#include "GrpDeviceDX11.h"
 
 void PixelPositionToD3DXVECTOR3(const D3DXVECTOR3& c_rkPPosSrc, D3DXVECTOR3* pv3Dst)
 {
@@ -120,8 +123,33 @@ bool CGraphicBase::IsTLVertexClipping()
 
 void CGraphicBase::GetBackBufferSize(UINT* puWidth, UINT* puHeight)
 {
-	*puWidth=ms_d3dPresentParameter.BackBufferWidth;
-	*puHeight=ms_d3dPresentParameter.BackBufferHeight;
+	UINT uWidth = ms_d3dPresentParameter.BackBufferWidth;
+	UINT uHeight = ms_d3dPresentParameter.BackBufferHeight;
+
+	// DX11-native fallback: some paths query CGraphicBase size before legacy
+	// present params are populated. Recover from active DX11 device dimensions.
+	if ((0u == uWidth || 0u == uHeight))
+	{
+		if (CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice())
+		{
+			if (pDX11Device->IsValid())
+			{
+				uWidth = pDX11Device->GetWidth();
+				uHeight = pDX11Device->GetHeight();
+				ms_d3dPresentParameter.BackBufferWidth = uWidth;
+				ms_d3dPresentParameter.BackBufferHeight = uHeight;
+			}
+		}
+	}
+
+	*puWidth = uWidth;
+	*puHeight = uHeight;
+}
+
+void CGraphicBase::SetBackBufferSize(UINT uWidth, UINT uHeight)
+{
+	ms_d3dPresentParameter.BackBufferWidth = uWidth;
+	ms_d3dPresentParameter.BackBufferHeight = uHeight;
 }
 
 void CGraphicBase::SetDefaultIndexBuffer(UINT eDefIB)
@@ -141,9 +169,46 @@ bool CGraphicBase::SetPDTStream(SPDTVertexRaw* pSrcVertices, UINT uVtxCount)
 	return false;
 }
 
-DWORD CGraphicBase::GetAvailableTextureMemory()
+uint64_t CGraphicBase::GetAvailableTextureMemory()
 {
-	return 0;
+	static DWORD    s_dwNextUpdateTime = 0;
+	static uint64_t s_uRemainVRAM = 0;
+
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return s_uRemainVRAM;
+
+	DWORD dwCurTime = ELTimer_GetMSec();
+	if (s_dwNextUpdateTime < dwCurTime)
+	{
+		s_dwNextUpdateTime = dwCurTime + 5000;
+		//current->used->available
+		IDXGIFactory4* factory = nullptr;
+		IDXGIAdapter1* adapter1 = nullptr;
+		IDXGIAdapter3* adapter3 = nullptr;
+
+		if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) &&
+			SUCCEEDED(factory->EnumAdapters1(0, &adapter1)) &&
+			SUCCEEDED(adapter1->QueryInterface(IID_PPV_ARGS(&adapter3))))
+		{
+			DXGI_QUERY_VIDEO_MEMORY_INFO info = {};
+			if (SUCCEEDED(adapter3->QueryVideoMemoryInfo(
+				0,
+				DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+				&info)))
+			{
+				if (info.Budget > info.CurrentUsage)
+					s_uRemainVRAM = info.Budget - info.CurrentUsage;
+				else
+					s_uRemainVRAM = 0;
+			}
+		}
+		SAFE_RELEASE(adapter3);
+		SAFE_RELEASE(adapter1);
+		SAFE_RELEASE(factory);
+	}
+
+	return s_uRemainVRAM;
 }
 
 const D3DXMATRIX& CGraphicBase::GetViewMatrix()
@@ -306,6 +371,16 @@ void CGraphicBase::SetViewport(DWORD dwX, DWORD dwY, DWORD dwWidth, DWORD dwHeig
 	ms_Viewport.Height = dwHeight;
 	ms_Viewport.MinZ = fMinZ;
 	ms_Viewport.MaxZ = fMaxZ;
+}
+
+void CGraphicBase::GetViewport(DWORD* pdwX, DWORD* pdwY, DWORD* pdwWidth, DWORD* pdwHeight, float* pfMinZ, float* pfMaxZ)
+{
+	if (pdwX) *pdwX = static_cast<DWORD>(ms_Viewport.X);
+	if (pdwY) *pdwY = static_cast<DWORD>(ms_Viewport.Y);
+	if (pdwWidth) *pdwWidth = static_cast<DWORD>(ms_Viewport.Width);
+	if (pdwHeight) *pdwHeight = static_cast<DWORD>(ms_Viewport.Height);
+	if (pfMinZ) *pfMinZ = ms_Viewport.MinZ;
+	if (pfMaxZ) *pfMaxZ = ms_Viewport.MaxZ;
 }
 
 void CGraphicBase::GetTargetPosition(float * px, float * py, float * pz)
@@ -490,4 +565,168 @@ CGraphicBase::CGraphicBase()
 
 CGraphicBase::~CGraphicBase()
 {
+}
+
+namespace
+{
+	bool DX11ReadSRVToBGRA(ID3D11ShaderResourceView* pSRV, std::vector<std::uint8_t>& outPixels, UINT& outWidth, UINT& outHeight)
+	{
+		outPixels.clear();
+		outWidth = 0u;
+		outHeight = 0u;
+		if (!pSRV)
+			return false;
+
+		CGraphicDeviceDX11* pDevice = CGraphicDeviceDX11::GetActiveDevice();
+		if (!pDevice || !pDevice->IsValid())
+			return false;
+
+		ID3D11Resource* pResource = nullptr;
+		pSRV->GetResource(&pResource);
+		if (!pResource)
+			return false;
+
+		ID3D11Texture2D* pTex = nullptr;
+		HRESULT hr = pResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&pTex));
+		pResource->Release();
+		if (FAILED(hr) || !pTex)
+			return false;
+
+		D3D11_TEXTURE2D_DESC srcDesc = {};
+		pTex->GetDesc(&srcDesc);
+		if (!srcDesc.Width || !srcDesc.Height)
+		{
+			pTex->Release();
+			return false;
+		}
+
+		D3D11_TEXTURE2D_DESC stagingDesc = srcDesc;
+		stagingDesc.BindFlags = 0;
+		stagingDesc.Usage = D3D11_USAGE_STAGING;
+		stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		stagingDesc.MiscFlags = 0;
+
+		ID3D11Texture2D* pStaging = nullptr;
+		hr = pDevice->GetDevice()->CreateTexture2D(&stagingDesc, nullptr, &pStaging);
+		if (FAILED(hr) || !pStaging)
+		{
+			pTex->Release();
+			return false;
+		}
+
+		pDevice->GetContext()->CopyResource(pStaging, pTex);
+
+		D3D11_MAPPED_SUBRESOURCE mapped = {};
+		hr = pDevice->GetContext()->Map(pStaging, 0u, D3D11_MAP_READ, 0u, &mapped);
+		if (FAILED(hr))
+		{
+			pStaging->Release();
+			pTex->Release();
+			return false;
+		}
+
+		outWidth = srcDesc.Width;
+		outHeight = srcDesc.Height;
+		outPixels.resize(static_cast<size_t>(outWidth) * static_cast<size_t>(outHeight) * 4u);
+
+		for (UINT y = 0; y < outHeight; ++y)
+		{
+			const std::uint8_t* srcLine = reinterpret_cast<const std::uint8_t*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
+			std::uint8_t* dstLine = outPixels.data() + static_cast<size_t>(y) * static_cast<size_t>(outWidth) * 4u;
+			if (srcDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || srcDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || srcDesc.Format == DXGI_FORMAT_B8G8R8X8_UNORM || srcDesc.Format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB)
+			{
+				memcpy(dstLine, srcLine, static_cast<size_t>(outWidth) * 4u);
+				if (srcDesc.Format == DXGI_FORMAT_B8G8R8X8_UNORM || srcDesc.Format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB)
+				{
+					for (UINT x = 0; x < outWidth; ++x)
+						dstLine[x * 4 + 3] = 255u;
+				}
+			}
+			else if (srcDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || srcDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+			{
+				for (UINT x = 0; x < outWidth; ++x)
+				{
+					dstLine[x * 4 + 0] = srcLine[x * 4 + 2];
+					dstLine[x * 4 + 1] = srcLine[x * 4 + 1];
+					dstLine[x * 4 + 2] = srcLine[x * 4 + 0];
+					dstLine[x * 4 + 3] = srcLine[x * 4 + 3];
+				}
+			}
+			else
+			{
+				pDevice->GetContext()->Unmap(pStaging, 0u);
+				pStaging->Release();
+				pTex->Release();
+				return false;
+			}
+		}
+
+		pDevice->GetContext()->Unmap(pStaging, 0u);
+		pStaging->Release();
+		pTex->Release();
+		return true;
+	}
+
+	bool SaveBGRAAsTopDownBMP(const char* c_szFileName, const std::vector<std::uint8_t>& pixels, UINT w, UINT h)
+	{
+		if (!c_szFileName || pixels.empty() || !w || !h)
+			return false;
+
+		FILE* fp = fopen(c_szFileName, "wb");
+		if (!fp)
+			return false;
+
+		BITMAPFILEHEADER fileHeader = {};
+		BITMAPINFOHEADER infoHeader = {};
+		const DWORD imageSize = static_cast<DWORD>(w * h * 4u);
+
+		fileHeader.bfType = 0x4D42; // BM
+		fileHeader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+		fileHeader.bfSize = fileHeader.bfOffBits + imageSize;
+
+		infoHeader.biSize = sizeof(BITMAPINFOHEADER);
+		infoHeader.biWidth = static_cast<LONG>(w);
+		infoHeader.biHeight = -static_cast<LONG>(h); // top-down, parity with old D3DX output expectations
+		infoHeader.biPlanes = 1;
+		infoHeader.biBitCount = 32;
+		infoHeader.biCompression = BI_RGB;
+		infoHeader.biSizeImage = imageSize;
+
+		fwrite(&fileHeader, sizeof(fileHeader), 1, fp);
+		fwrite(&infoHeader, sizeof(infoHeader), 1, fp);
+		fwrite(pixels.data(), imageSize, 1, fp);
+		fclose(fp);
+		return true;
+	}
+}
+
+HRESULT D3DXSaveTextureToFileA(const char* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, ID3D11ShaderResourceView* pSrcTexture, const void*)
+{
+	if (!pDestFile || !pSrcTexture)
+		return E_INVALIDARG;
+
+	if (DestFormat == D3DXIFF_DDS)
+		return E_NOTIMPL;
+
+	std::vector<std::uint8_t> pixels;
+	UINT w = 0u;
+	UINT h = 0u;
+	if (!DX11ReadSRVToBGRA(pSrcTexture, pixels, w, h))
+		return E_FAIL;
+	if (!SaveBGRAAsTopDownBMP(pDestFile, pixels, w, h))
+		return E_FAIL;
+	return S_OK;
+}
+
+HRESULT D3DXSaveTextureToFileW(const wchar_t* pDestFile, D3DXIMAGE_FILEFORMAT DestFormat, ID3D11ShaderResourceView* pSrcTexture, const void* pPalette)
+{
+	if (!pDestFile)
+		return E_INVALIDARG;
+
+	char szPath[MAX_PATH * 2] = {};
+	int iLen = WideCharToMultiByte(CP_UTF8, 0, pDestFile, -1, szPath, static_cast<int>(sizeof(szPath)), nullptr, nullptr);
+	if (iLen <= 0)
+		return E_FAIL;
+
+	return D3DXSaveTextureToFileA(szPath, DestFormat, pSrcTexture, pPalette);
 }

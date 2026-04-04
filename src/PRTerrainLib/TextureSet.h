@@ -2,10 +2,13 @@
 #define __INC_TERRAINLIB_TEXTURESET_H__
 
 #include "EterLib/GrpImageInstance.h"
+#include <d3d11.h>
+#include "EterLib/DirectXMathHelpers.h"
 
 typedef struct STerrainTexture
 {
-	STerrainTexture() :	pd3dTexture(NULL),
+	STerrainTexture() :	pd3dTexture(nullptr),
+		pTextureSRV(nullptr),
 		UScale(4.0f),
 		VScale(4.0f),
 		UOffset(0.0f),
@@ -15,13 +18,14 @@ typedef struct STerrainTexture
 		End(0)
 	{
 	}
-	
+
 	~STerrainTexture()
 	{
 	}
 
 	std::string					stFilename;
-	LPDIRECT3DTEXTURE9			pd3dTexture;
+	ID3D11ShaderResourceView*		pd3dTexture;
+	ID3D11ShaderResourceView* pTextureSRV; // M2-PRTERRAIN-DX11-NATIVE-01: DX11 SRV instead of ID3D11ShaderResourceView*
 	CGraphicImageInstance 		ImageInstance;
 	float						UScale;
 	float						VScale;
@@ -29,7 +33,7 @@ typedef struct STerrainTexture
 	float						VOffset;
 	bool						bSplat;
 	unsigned short				Begin, End;	// 0 ~ 65535 의 16bit heightfield 높이값.
-	D3DXMATRIX					m_matTransform;
+	DirectX::SimpleMath::Matrix m_matTransform; // M2-PRTERRAIN-DX11-NATIVE-01: Migrated from D3DXMATRIX
 } TTerrainTexture;
 
 class CTextureSet

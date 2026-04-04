@@ -1,9 +1,11 @@
 #pragma once
 
 class CMapOutdoor;
+class CGraphicTexture;
 
 #include "PRTerrainLib/Terrain.h"
 #include "TerrainPatch.h"
+#include <vector>
 
 class CTerrain : public CTerrainImpl, public CGraphicBase
 {
@@ -72,13 +74,15 @@ class CTerrain : public CTerrainImpl, public CGraphicBase
 
 		// Shadow Texture
 		void				LoadShadowTexture(const char * c_pszFileName);
+		// M3-GAMELIB-TERRAIN-HEADER-68: GetShadowTexture() removed (WorldEditor-only; runtime uses m_ShadowGraphicImageInstance)
 
 		// Shadow Map
 		bool				LoadShadowMap(const char * c_pszFileName);
 
 		// MiniMap
 		void						LoadMiniMapTexture(const char * c_pszFileName);
-		inline LPDIRECT3DTEXTURE9	GetMiniMapTexture() { return m_lpMiniMapTexture; }
+		// M3-GAMELIB-TERRAIN-HEADER-68: GetMiniMapTexture() removed (WorldEditor-only; runtime uses GetMiniMapGraphicTexture())
+		inline CGraphicTexture*		GetMiniMapGraphicTexture() { return m_MiniMapGraphicImageInstance.GetTexturePointer(); }
 
 		// Marked Area
 		BOOL						IsMarked() { return m_bMarked; }
@@ -100,6 +104,7 @@ class CTerrain : public CTerrainImpl, public CGraphicBase
 
 		CMapOutdoor *	GetOwner() { return m_pOwnerOutdoorMap; }
 		void			RAW_GenerateSplat(bool bBGLoading = false);
+		bool			GetDX11SplatAlphaCache(BYTE byImageNum, const BYTE** ppData, UINT* pWidth, UINT* pHeight) const;
 
 	protected:
 		bool	Initialize();
@@ -107,7 +112,7 @@ class CTerrain : public CTerrainImpl, public CGraphicBase
 		void	RAW_DeallocateSplats(bool bBGLoading = false);
 		virtual void RAW_CountTiles();
 
-		LPDIRECT3DTEXTURE9 AddTexture32(BYTE byImageNum, BYTE * pbyImage, long lTextureWidth, long lTextureHeight);
+		ID3D11ShaderResourceView* AddTexture32(BYTE byImageNum, BYTE * pbyImage, long lTextureWidth, long lTextureHeight);
 		void PutImage32(BYTE * pbySrc, BYTE * pbyDst, long src_pitch, long dst_pitch, long lTextureWidth, long lTextureHeight, bool bResize = false);
 		void PutImage16(BYTE * pbySrc, BYTE * pbyDst, long src_pitch, long dst_pitch, long lTextureWidth, long lTextureHeight, bool bResize = false);
 
@@ -123,10 +128,12 @@ class CTerrain : public CTerrainImpl, public CGraphicBase
 		bool					m_bReady;
 
 		CGraphicImageInstance	m_ShadowGraphicImageInstance;
+		// M3-GAMELIB-TERRAIN-HEADER-68: m_lpShadowTexture removed (runtime uses m_ShadowGraphicImageInstance)
+		// M3-GAMELIB-TERRAIN-HEADER-68: m_lpAlphaTexture[] removed (using m_vecDX11SplatAlphaCache)
 
 		//MiniMap
 		CGraphicImageInstance	m_MiniMapGraphicImageInstance;
-		LPDIRECT3DTEXTURE9		m_lpMiniMapTexture;
+		// M3-GAMELIB-TERRAIN-HEADER-68: m_lpMiniMapTexture removed (runtime uses GetMiniMapGraphicTexture())
 
 
 		// Owner COutdoorMap poineter
@@ -142,7 +149,8 @@ class CTerrain : public CTerrainImpl, public CGraphicBase
 
 		BOOL					m_bMarked;
 		TTerrainSplatPatch		m_MarkedSplatPatch;
-		LPDIRECT3DTEXTURE9		m_lpMarkedTexture;
+		// M3-GAMELIB-TERRAIN-HEADER-68: m_lpMarkedTexture removed (already disabled for DX11)
+		std::vector<BYTE>		m_vecDX11SplatAlphaCache[MAXTERRAINTEXTURES];
 
 	public:
 		CTerrainPatch *	GetTerrainPatchPtr(BYTE byPatchNumX, BYTE byPatchNumY);

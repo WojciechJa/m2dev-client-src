@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GrpBase.h"
+#include <vector>
 
 class CGraphicIndexBuffer : public CGraphicBase
 {
@@ -25,7 +26,9 @@ public:
 
 	void SetIndices(int startIndex = 0) const;
 
-	LPDIRECT3DINDEXBUFFER9 GetD3DIndexBuffer() const;
+	ID3D11Buffer* GetD3DIndexBuffer() const;
+	// M2-GRPBASE-TYPE-CUT-73: DX11-native API (replaces legacy GetD3DIndexBuffer)
+	inline ID3D11Buffer* GetD3D11Buffer() const { return m_lpd3dIdxBuf; }
 
 	int GetIndexCount() const { return m_iidxCount; }
 
@@ -33,8 +36,10 @@ protected:
 	void Initialize();
 
 protected:
-	LPDIRECT3DINDEXBUFFER9	m_lpd3dIdxBuf;
+	ID3D11Buffer*	m_lpd3dIdxBuf;
 	DWORD					m_dwBufferSize;
 	D3DFORMAT				m_d3dFmt;
 	int						m_iidxCount;
+	std::vector<BYTE>		m_cpuShadowIndices;
+	mutable bool			m_bCpuLockActive;
 };

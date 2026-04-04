@@ -5,6 +5,26 @@
 
 #include "Mesh.h"
 
+// DX11 Migration: Vertex layout metadata to replace FVF flags
+struct SVertexLayoutMetadata
+{
+	DWORD dwVertexStride;
+	bool bHasPosition;
+	bool bHasNormal;
+	bool bHasTexCoord0;
+	bool bHasTexCoord1;
+
+	SVertexLayoutMetadata()
+		: dwVertexStride(0)
+		, bHasPosition(false)
+		, bHasNormal(false)
+		, bHasTexCoord0(false)
+		, bHasTexCoord1(false)
+	{}
+
+	static SVertexLayoutMetadata CreateFromFVF(DWORD dwFvF);
+};
+
 class CGrannyModel : public CReferenceObject
 {
 	public:
@@ -26,6 +46,7 @@ class CGrannyModel : public CReferenceObject
 		void Destroy();
 
 		int GetRigidVertexCount() const;
+		DWORD GetRigidVertexStride() const;
 		int GetDeformVertexCount() const;
 		int GetVertexCount() const;
 
@@ -38,15 +59,17 @@ class CGrannyModel : public CReferenceObject
 		granny_model * GetGrannyModelPointer();
 		const CGrannyMesh* GetMeshPointer(int iMesh) const;
 
-		LPDIRECT3DVERTEXBUFFER9 GetPNTD3DVertexBuffer() const;
-		LPDIRECT3DINDEXBUFFER9 GetD3DIndexBuffer() const;
+	ID3D11Buffer* GetPNTD3DVertexBuffer() const;
+	ID3D11Buffer* GetD3DIndexBuffer() const;
 
 		const CGrannyModel::TMeshNode*  GetMeshNodeList(CGrannyMesh::EType eMeshType, CGrannyMaterial::EType eMtrlType) const;
 
-		bool LockVertices(void** indicies, void** vertices) const;
-		void UnlockVertices() const;
+	// DX11 Model Sync M3-EGRN17.C: Lock/Unlock implementations in .cpp
+	// (CPU-shadow-backed in strict mode, compatibility path in hybrid mode).
+	bool LockVertices(void** indicies, void** vertices) const;
+	void UnlockVertices() const;
 
-		const CGrannyMaterialPalette& GetMaterialPalette() const;
+	const CGrannyMaterialPalette& GetMaterialPalette() const;
 
 	protected:
 		bool LoadMeshs();		
@@ -91,8 +114,14 @@ class CGrannyModel : public CReferenceObject
 	protected:
 		bool __LoadVertices();
 	protected:
-		DWORD m_dwFvF;
+		SVertexLayoutMetadata m_kVertexLayout;
 	// New members to support PNT2 type models
 	//////////////////////////////////////////////////////////////////////////
 
+	protected:
+		// CGrannyModel instances are owned by CGraphicThing's array allocation.
+		// They must not self-delete via CReferenceObject default OnSelfDestruct().
+		void OnSelfDestruct() override;
+
 };
+

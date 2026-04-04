@@ -179,10 +179,10 @@ bool CTextureSet::SetTexture(unsigned long ulIndex,
 	tex.Begin = usBegin;
 	tex.End = usEnd;
 	tex.ImageInstance.SetImagePointer(static_cast<CGraphicImage *>(pResource));
-	tex.pd3dTexture = tex.ImageInstance.GetTexturePointer()->GetD3DTexture();
-	
-	
-	D3DXMatrixScaling(&tex.m_matTransform, fTerrainTexCoordBase * tex.UScale, -fTerrainTexCoordBase * tex.VScale, 0.0f);
+	tex.pTextureSRV = tex.ImageInstance.GetTexturePointer()->GetD3D11TextureSRV(); // M2-PRTERRAIN-DX11-NATIVE-01: Get DX11 SRV instead of DX9 texture
+
+
+	tex.m_matTransform = DirectX::SimpleMath::Matrix::CreateScale(fTerrainTexCoordBase * tex.UScale, -fTerrainTexCoordBase * tex.VScale, 0.0f); // M2-PRTERRAIN-DX11-NATIVE-01: Use SimpleMath
 	tex.m_matTransform._41 = tex.UOffset;
 	tex.m_matTransform._42 = -tex.VOffset;
 	return true;
@@ -195,9 +195,9 @@ void CTextureSet::Reload(float fTerrainTexCoordBase)
 		TTerrainTexture & tex = m_Textures[dwIndex];
 
 		tex.ImageInstance.ReloadImagePointer((CGraphicImage *) CResourceManager::Instance().GetResourcePointer(tex.stFilename.c_str()));
-		tex.pd3dTexture = tex.ImageInstance.GetTexturePointer()->GetD3DTexture();
+		tex.pTextureSRV = tex.ImageInstance.GetTexturePointer()->GetD3D11TextureSRV(); // M2-PRTERRAIN-DX11-NATIVE-01: Get DX11 SRV instead of DX9 texture
 
-		D3DXMatrixScaling(&tex.m_matTransform, fTerrainTexCoordBase * tex.UScale, -fTerrainTexCoordBase * tex.VScale, 0.0f);
+		tex.m_matTransform = DirectX::SimpleMath::Matrix::CreateScale(fTerrainTexCoordBase * tex.UScale, -fTerrainTexCoordBase * tex.VScale, 0.0f); // M2-PRTERRAIN-DX11-NATIVE-01: Use SimpleMath
 		tex.m_matTransform._41 = tex.UOffset;
 		tex.m_matTransform._42 = -tex.VOffset;
 	}

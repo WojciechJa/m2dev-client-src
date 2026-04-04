@@ -3,6 +3,8 @@
 
 #include "EterLib/GrpVertexBuffer.h"
 #include "EterLib/GrpIndexBuffer.h"
+#include <d3d11.h>
+#include "EterLib/DirectXMathHelpers.h"
 
 #define TERRAIN_PATCHSIZE	16
 #define TERRAIN_SIZE		128
@@ -13,7 +15,8 @@ typedef struct
 {
 	long					Active;
 	long					NeedsUpdate;
-	LPDIRECT3DTEXTURE9		pd3dTexture;
+	ID3D11ShaderResourceView*		pd3dTexture;
+	ID3D11ShaderResourceView* pTextureSRV; // M2-PRTERRAIN-DX11-NATIVE-01: DX11 SRV instead of ID3D11ShaderResourceView*
 } TTerainSplat;
 
 typedef struct
@@ -60,7 +63,7 @@ typedef struct
 	long			DisableShadow;
 	long			ShadowMode;
 	long			OutsideVisible;
-	D3DXVECTOR3		SunLocation;
+	DirectX::SimpleMath::Vector3 SunLocation; // M2-PRTERRAIN-DX11-NATIVE-01: Migrated from D3DXVECTOR3
 } TTerrainGlobals;
 
 /* Converts a floating point number to an integer by truncation, using
