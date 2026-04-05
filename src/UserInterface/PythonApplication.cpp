@@ -11,6 +11,8 @@
 #include "config.h"
 #include "EterLib/GrpDeviceDX11.h"
 #include "EterLib/StateManager.h"
+#include "EterLib/GrpTextureDX11.h"  // M3-TEXTURE-ASYNC-10-RUNTIME
+#include "EterLib/SystemMemoryDetector.h"  // M3-TEXTURE-ASYNC-10-RUNTIME
 
 #include "ProcessScanner.h"
 
@@ -41,7 +43,9 @@ namespace
 	static const DWORD DX11_NATIVE_HEARTBEAT_INTERVAL_MS = 45000u;
 	static const DWORD DX11_WORLD_HEARTBEAT_INTERVAL_MS = 45000u;
 	static const DWORD DX11_BRIDGE_IO_HEARTBEAT_INTERVAL_MS = 45000u;
+	static const DWORD DX11_TEXTURE_ASYNC_HEARTBEAT_INTERVAL_MS = 45000u;  // M3-TEXTURE-ASYNC-10-RUNTIME
 	static const DWORD DX11_BLOCKER_REPEAT_LOG_INTERVAL_MS = 15000u;
+	static DWORD g_dwDX11TextureAsyncLogTick = 0;  // M3-TEXTURE-ASYNC-10-RUNTIME
 	static DWORD g_dwDX11ShadowPolicyLogTick = 0;
 
 	const char* DX11RuntimeCompatGraceReasonToString(int iReasonMask)
@@ -6169,6 +6173,19 @@ bool CPythonApplication::CreateDevice(int width, int height, int Windowed, int b
 		{
 			TraceError("DX11_EFFECT_RESOURCES init failed after DX11 device create (active DX11 backend).");
 		}
+		// M3-TEXTURE-ASYNC-10-RUNTIME: Automatic memory budget detection
+		TraceError("DX11_TEXTURE_BUDGET_INIT_START");
+		DWORD dwTotalRAM = CSystemMemoryDetector::GetTotalPhysicalMemoryMB();
+		TraceError("DX11_TEXTURE_BUDGET_INIT_RAM total_ram_mb=%u", dwTotalRAM);
+
+		DWORD dwOptimalBudget = CSystemMemoryDetector::DetectOptimalTextureBudgetMB();
+		TraceError("DX11_TEXTURE_BUDGET_INIT_CALCULATED budget_mb=%u", dwOptimalBudget);
+		CGraphicTextureDX11::SetMemoryBudgetMB(dwOptimalBudget);
+		TraceError("DX11_TEXTURE_BUDGET_AUTO_SET total_ram_mb=%u budget_mb=%u", dwTotalRAM, dwOptimalBudget);
+
+		DWORD dwVerifyMB = CGraphicTextureDX11::GetMemoryBudgetMB();
+		TraceError("DX11_TEXTURE_BUDGET_VERIFY_IMMEDIATE get_result=%u expected=%u match=%d",
+			dwVerifyMB, dwOptimalBudget, (dwVerifyMB == dwOptimalBudget) ? 1 : 0);
 		TraceError(
 			"DX11_RUNTIME_COMPAT legacy_dx9_device=%d reason=%s",
 			bUseDX9CompatDevice ? 1 : 0,
@@ -6237,6 +6254,63 @@ void CPythonApplication::Loop()
 
 		if (!Process())
 			break;
+
+		// M3-TEXTURE-ASYNC-10-RUNTIME: Process async texture loading results
+		CGraphicTextureDX11::ProcessAsyncResults();
+
+		// M3-SPEEDTREE-ATLAS-09: Report async texture stats to ImGui (every frame)
+		{
+			DWORD dwPending, dwCompleted, dwFailed;
+			CGraphicTextureDX11::GetAsyncStats(&dwPending, &dwCompleted, &dwFailed);
+
+			DWORD dwCacheSize, dwTotalLoads, dwCacheHits;
+			CGraphicTextureDX11::GetCacheStats(&dwCacheSize, &dwTotalLoads, &dwCacheHits);
+
+			DWORD dwBudgetMB = CGraphicTextureDX11::GetMemoryBudgetMB();
+			DWORD dwUsageMB = CGraphicTextureDX11::GetCurrentMemoryUsageMB();
+			DWORD dwCacheMisses = (dwTotalLoads > dwCacheHits) ? (dwTotalLoads - dwCacheHits) : 0;
+
+			ReportImGuiAsyncTextureStats(
+				dwPending,
+				dwCompleted,
+				dwFailed,
+				dwCacheSize,
+				dwCacheHits,
+				dwCacheMisses,
+				dwBudgetMB,
+				dwUsageMB);
+		}
+
+		// M3-TEXTURE-ASYNC-10-RUNTIME: Periodic memory adjustment (every 30s)
+		static DWORD s_dwLastMemoryCheck = 0;
+		DWORD dwNowCheck = ELTimer_GetMSec();
+		if (dwNowCheck - s_dwLastMemoryCheck > 30000)
+		{
+			CSystemMemoryDetector::AdjustBudgetIfNeeded();
+			s_dwLastMemoryCheck = dwNowCheck;
+		}
+
+#ifdef _DEBUG
+		// M3-TEXTURE-ASYNC-10-RUNTIME: Periodic async texture loading telemetry (every 45s)
+		if (0 == g_dwDX11TextureAsyncLogTick || dwNowCheck - g_dwDX11TextureAsyncLogTick >= DX11_TEXTURE_ASYNC_HEARTBEAT_INTERVAL_MS)
+		{
+			g_dwDX11TextureAsyncLogTick = dwNowCheck;
+			
+			DWORD dwCachedCount, dwTotalLoads, dwCacheHits;
+			CGraphicTextureDX11::GetCacheStats(&dwCachedCount, &dwTotalLoads, &dwCacheHits);
+			
+			DWORD dwPending, dwCompleted, dwFailed;
+			CGraphicTextureDX11::GetAsyncStats(&dwPending, &dwCompleted, &dwFailed);
+			
+			DWORD dwBudgetMB = CGraphicTextureDX11::GetMemoryBudgetMB();
+			DWORD dwUsageMB = CGraphicTextureDX11::GetCurrentMemoryUsageMB();
+			
+			TraceError("DX11_TEXTURE_ASYNC_HEARTBEAT budget_mb=%u usage_mb=%u pending=%u completed=%u failed=%u cached=%u total_loads=%u cache_hits=%u",
+				dwBudgetMB, dwUsageMB, dwPending, dwCompleted, dwFailed, dwCachedCount, dwTotalLoads, dwCacheHits);
+		}
+#endif
+
+
 
 #ifdef DX11_STRICT_ONLY
 		// DX11 Model Sync: Update ImGui metrics collector each frame
@@ -6550,6 +6624,40 @@ void CPythonApplication::Loop()
 						static_cast<unsigned int>(uWorldSubmitMismatchGateSubmitted),
 						static_cast<unsigned int>(uWorldSubmitMismatchGateApplicable),
 						static_cast<unsigned int>(uWorldSubmitMismatchGateCommitted));
+
+					// EffectLib runtime parity heartbeat for migration diagnostics:
+					// compares EffectManager local counters/resources against world submit telemetry.
+					const uint32_t uEffectActiveCount = m_kEftMgr.GetActiveEffectCount();
+					const uint32_t uParticleActiveCount = m_kEftMgr.GetActiveParticleCount();
+					const uint32_t uEffectMgrSubmitted = m_kEftMgr.GetDX11SubmittedEffectCount();
+					const uint32_t uEffectMgrParticleSubmitted = m_kEftMgr.GetDX11SubmittedParticleCount();
+					const uint32_t uEffectMgrMeshSubmitted = m_kEftMgr.GetDX11SubmittedMeshEffectCount();
+					const uint32_t uEffectResourcesReady = m_kEftMgr.IsDX11EffectResourcesReady() ? 1u : 0u;
+					const uint32_t uEffectDynamicVBCapacity = m_kEftMgr.GetDX11EffectDynamicVBCapacity();
+					const long long llDeltaEffects =
+						static_cast<long long>(uEffectMgrSubmitted) -
+						static_cast<long long>(rkWorldSubmitTelemetry.dwEffectSubmitted);
+					const long long llDeltaParticle =
+						static_cast<long long>(uEffectMgrParticleSubmitted) -
+						static_cast<long long>(rkWorldSubmitTelemetry.dwEffectParticleSubmitted);
+					const long long llDeltaMesh =
+						static_cast<long long>(uEffectMgrMeshSubmitted) -
+						static_cast<long long>(rkWorldSubmitTelemetry.dwEffectMeshSubmitted);
+					TraceError(
+						"DX11_EFFECT_RUNTIME_PARITY active_effects=%u active_particles=%u resources_ready=%u dynamic_vb_capacity=%u mgr_effects=%u mgr_particle=%u mgr_mesh=%u world_effects=%u world_particle=%u world_mesh=%u delta_effects=%lld delta_particle=%lld delta_mesh=%lld",
+						static_cast<unsigned int>(uEffectActiveCount),
+						static_cast<unsigned int>(uParticleActiveCount),
+						static_cast<unsigned int>(uEffectResourcesReady),
+						static_cast<unsigned int>(uEffectDynamicVBCapacity),
+						static_cast<unsigned int>(uEffectMgrSubmitted),
+						static_cast<unsigned int>(uEffectMgrParticleSubmitted),
+						static_cast<unsigned int>(uEffectMgrMeshSubmitted),
+						static_cast<unsigned int>(rkWorldSubmitTelemetry.dwEffectSubmitted),
+						static_cast<unsigned int>(rkWorldSubmitTelemetry.dwEffectParticleSubmitted),
+						static_cast<unsigned int>(rkWorldSubmitTelemetry.dwEffectMeshSubmitted),
+						llDeltaEffects,
+						llDeltaParticle,
+						llDeltaMesh);
 				}
 
 				// Forward metrics to ImGuiManager for rendering
@@ -8042,4 +8150,3 @@ void CPythonApplication::ShutdownImGui()
 	}
 }
 #endif
-

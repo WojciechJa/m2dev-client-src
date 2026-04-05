@@ -505,3 +505,29 @@ void ReportImGuiEffectsDrawCalls(UINT32 draws, UINT64 prims)
         CImGuiGraphicsMetrics::Instance()->ReportEffectsDrawCalls(draws, prims);
     }
 }
+
+// M3-SPEEDTREE-ATLAS-09: Global helper for async texture stats
+void ReportImGuiAsyncTextureStats(
+    UINT32 pending,
+    UINT32 completed,
+    UINT32 failed,
+    UINT32 cacheSize,
+    UINT32 cacheHits,
+    UINT32 cacheMisses,
+    UINT32 budgetMB,
+    UINT32 usageMB)
+{
+    if (CImGuiGraphicsMetrics::Instance())
+    {
+        SResourceStats stats = CImGuiGraphicsMetrics::Instance()->GetResourceStats();
+        stats.uiAsyncTexturePending = pending;
+        stats.uiAsyncTextureCompleted = completed;
+        stats.uiAsyncTextureFailed = failed;
+        stats.uiTextureCacheSize = cacheSize;
+        stats.uiTextureCacheHits = cacheHits;
+        stats.uiTextureCacheMisses = cacheMisses;
+        stats.uiTextureMemoryBudgetMB = budgetMB;
+        stats.uiTextureMemoryUsageMB = usageMB;
+        CImGuiGraphicsMetrics::Instance()->UpdateResourceStats(stats);
+    }
+}

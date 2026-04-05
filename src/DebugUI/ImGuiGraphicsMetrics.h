@@ -43,6 +43,17 @@ struct SResourceStats
     UINT32 uiTextureCount;       // Number of textures currently bound
     UINT64 uiTextureMemoryMB;    // Total texture memory in MB
 
+    // M3-SPEEDTREE-ATLAS-09: Async texture loading stats
+    UINT32 uiAsyncTexturePending;     // Textures pending async load
+    UINT32 uiAsyncTextureCompleted;   // Textures completed this frame
+    UINT32 uiAsyncTextureFailed;      // Textures that failed to load
+    UINT32 uiAsyncTextureTotal;       // Total async requests
+    UINT32 uiTextureCacheSize;        // Number of cached textures
+    UINT32 uiTextureCacheHits;        // Cache hit count (lifetime)
+    UINT32 uiTextureCacheMisses;      // Cache miss count (lifetime)
+    UINT32 uiTextureMemoryBudgetMB;   // Texture memory budget (MB)
+    UINT32 uiTextureMemoryUsageMB;    // Current texture memory usage (MB)
+
     // Buffer statistics
     UINT32 uiVertexBuffers;      // Bound vertex buffers
     UINT32 uiIndexBuffers;       // Bound index buffers
@@ -52,6 +63,15 @@ struct SResourceStats
     SResourceStats()
         : uiTextureCount(0)
         , uiTextureMemoryMB(0)
+        , uiAsyncTexturePending(0)
+        , uiAsyncTextureCompleted(0)
+        , uiAsyncTextureFailed(0)
+        , uiAsyncTextureTotal(0)
+        , uiTextureCacheSize(0)
+        , uiTextureCacheHits(0)
+        , uiTextureCacheMisses(0)
+        , uiTextureMemoryBudgetMB(0)
+        , uiTextureMemoryUsageMB(0)
         , uiVertexBuffers(0)
         , uiIndexBuffers(0)
         , uiConstantBuffers(0)
@@ -307,3 +327,14 @@ extern void ReportImGuiShadowDrawCalls(UINT32 draws, UINT64 prims = 0);
 
 // Global helper function for reporting Effects draw calls (called from EffectLib DX11 paths)
 extern void ReportImGuiEffectsDrawCalls(UINT32 draws, UINT64 prims = 0);
+
+// M3-SPEEDTREE-ATLAS-09: Global helper for async texture stats (called from GrpTextureDX11)
+extern void ReportImGuiAsyncTextureStats(
+    UINT32 pending,
+    UINT32 completed,
+    UINT32 failed,
+    UINT32 cacheSize,
+    UINT32 cacheHits,
+    UINT32 cacheMisses,
+    UINT32 budgetMB,
+    UINT32 usageMB);
