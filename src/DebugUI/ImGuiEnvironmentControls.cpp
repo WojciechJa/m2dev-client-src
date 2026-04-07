@@ -179,7 +179,7 @@ void CImGuiEnvironmentControls::CreateDayPreset()
 	preset.strDescription = "Bright clear day with full sun";
 
 	// Skybox
-	preset.v3SkyBoxScale = D3DXVECTOR3(1.0f, 1.0f, 1.0f);
+	preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // M3-SKY-SCALE-PERSIST: Optimal default scale
 	// FIX: Match gradient levels to actual color count (5 colors = 2 upper + 3 lower)
 	// This prevents NormalizeGradientVector from interpolating colors incorrectly
 	preset.bySkyBoxGradientLevelUpper = 2;  // Was 8
@@ -242,7 +242,7 @@ void CImGuiEnvironmentControls::CreateNightPreset()
 	preset.strDescription = "Dark night with no sun, heavy fog";
 
 	// Skybox
-	preset.v3SkyBoxScale = D3DXVECTOR3(1.0f, 1.0f, 1.0f);
+	preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // M3-SKY-SCALE-PERSIST: Optimal default scale
 	// FIX: Match gradient levels to actual color count (5 colors = 2 upper + 3 lower)
 	// This prevents NormalizeGradientVector from interpolating colors incorrectly
 	preset.bySkyBoxGradientLevelUpper = 2;  // Was 8
@@ -305,7 +305,7 @@ void CImGuiEnvironmentControls::CreateSunsetPreset()
 	preset.strDescription = "Orange/red sunset with sun low on horizon";
 
 	// Skybox
-	preset.v3SkyBoxScale = D3DXVECTOR3(1.0f, 1.0f, 1.0f);
+	preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // M3-SKY-SCALE-PERSIST: Optimal default scale
 	// FIX: Match gradient levels to actual color count (5 colors = 3 upper + 2 lower)
 	// This prevents NormalizeGradientVector from interpolating colors incorrectly
 	preset.bySkyBoxGradientLevelUpper = 3;  // Was 10 (incorrect)
@@ -368,7 +368,7 @@ void CImGuiEnvironmentControls::CreateOvercastPreset()
 	preset.strDescription = "Cloudy/overcast with no sun, grey atmosphere";
 
 	// Skybox
-	preset.v3SkyBoxScale = D3DXVECTOR3(1.0f, 1.0f, 1.0f);
+	preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // M3-SKY-SCALE-PERSIST: Optimal default scale
 	// FIX: Match gradient levels to actual color count (5 colors = 2 upper + 3 lower)
 	// This prevents NormalizeGradientVector from interpolating colors incorrectly
 	preset.bySkyBoxGradientLevelUpper = 2;  // Was 8
@@ -429,9 +429,15 @@ void CImGuiEnvironmentControls::ApplyPreset(int iPresetIndex)
 	if (iPresetIndex < 0 || iPresetIndex >= PRESET_COUNT)
 		return;
 
+	// M3-SKY-SCALE-PERSIST: Save current sky scale before applying preset
+	D3DXVECTOR3 v3SavedSkyScale = m_workingEnv.v3SkyBoxScale;
+
 	m_workingEnv = m_aPresets[iPresetIndex];
 	m_iCurrentPresetIndex = iPresetIndex;
 	++m_dwPresetSwitchCount;
+
+	// M3-SKY-SCALE-PERSIST: Restore saved sky scale (don't overwrite user's manual setting)
+	m_workingEnv.v3SkyBoxScale = v3SavedSkyScale;
 
 	// M3-SKY-PRESET-PERSIST-74: Store preset for re-application when environment data changes
 	m_lastAppliedPreset = m_aPresets[iPresetIndex];
