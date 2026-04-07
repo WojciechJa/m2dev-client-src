@@ -1,3 +1,90 @@
+## 2026-04-07 (local) - Model 3 (Sky Scale Persistence Fix) - ✅ COMPLETE
+- Stream: M3-SKY-SCALE-PERSIST
+- Status: COMPLETE
+- Context: Fix presets resetting sky scale to 1.0 instead of optimal 29000
+- Commit: 30928e5
+
+### User Report
+"po tych poprawkach niebo juz nie miga, ale problem jest w skyscale, optymalny parametr który ustawiam w debugui to 29000, i chciałbym aby to był punkt zero, bo przy tym najlepiej widać niebo, bo aktualnie presety to resetuja"
+
+Translation: After fixes sky no longer flickers ✅, but problem is in sky scale - optimal parameter is 29000 and I want this to be default, because at this setting sky is best visible, but currently presets reset it.
+
+### Root Cause
+- All 4 presets had `v3SkyBoxScale = D3DXVECTOR3(1.0f, 1.0f, 1.0f)` (too small)
+- `ApplyPreset()` copied entire preset including sky scale (line 432)
+- User's manual sky scale setting (29000) was overwritten when switching presets
+- Sky scale 1.0 makes sky too small/distant, 29000 is optimal for visibility
+
+### Changes
+
+#### src/DebugUI/ImGuiEnvironmentControls.cpp
+
+**1. Changed all 4 preset default sky scale** from 1.0 to 29000.0:
+```cpp
+// Day preset (line 182)
+preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // Was 1.0f
+
+// Night preset (line 245)
+preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // Was 1.0f
+
+// Sunset preset (line 308)
+preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // Was 1.0f
+
+// Overcast preset (line 371)
+preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // Was 1.0f
+```
+
+**2. ApplyPreset() now preserves user's sky scale** (lines 432-440):
+```cpp
+void CImGuiEnvironmentControls::ApplyPreset(int iPresetIndex)
+{
+    if (iPresetIndex < 0 || iPresetIndex >= PRESET_COUNT)
+        return;
+
+    // M3-SKY-SCALE-PERSIST: Save current sky scale before applying preset
+    D3DXVECTOR3 v3SavedSkyScale = m_workingEnv.v3SkyBoxScale;
+
+    m_workingEnv = m_aPresets[iPresetIndex];
+    m_iCurrentPresetIndex = iPresetIndex;
+    ++m_dwPresetSwitchCount;
+
+    // M3-SKY-SCALE-PERSIST: Restore saved sky scale (don't overwrite user's manual setting)
+    m_workingEnv.v3SkyBoxScale = v3SavedSkyScale;
+    
+    // ... rest of function
+}
+```
+
+### Behavior After Fix
+
+| Scenario | Before Fix | After Fix |
+|----------|-----------|-----------|
+| **First load any preset** | Sky Scale = 1.0 (too small) | Sky Scale = 29000 (optimal) ✅ |
+| **User sets Sky Scale to 35000** | User setting | User setting |
+| **Switch to another preset** | Resets to 1.0 ❌ | Stays at 35000 ✅ |
+| **Preset changes colors/fog** | Yes | Yes (only non-scale params) |
+
+**Key Improvements**:
+- ✅ First load: All presets start with optimal sky scale 29000
+- ✅ Manual adjustment: User can change sky scale to any value (e.g., 35000)
+- ✅ Preset switching: Sky scale stays at user's value, only colors/fog/lighting change
+- ✅ Reset to default: User can manually set to 29000 or any value, and it persists
+
+### Build Status
+- Debug: PASS (DebugUI)
+- 1 pre-existing warning (C4267 in MapOutdoor.h line 663)
+- 0 new warnings or errors
+
+### Testing Recommendation
+User should test in-game:
+1. Load any preset → verify Sky Scale = 29000 (not 1.0)
+2. Manually adjust Sky Scale to 35000 using slider
+3. Switch between presets (Day → Night → Sunset → Overcast)
+4. Verify Sky Scale stays at 35000 across all preset switches
+5. Verify sky remains visible and properly sized
+
+---
+
 ## 2026-04-07 (local) - Model 3 (Sky Blend Fix - Gradient Normalization Hotfix) - ✅ COMPLETE
 - Stream: M3-SKY-BLEND-FIX-74-HOTFIX
 - Status: COMPLETE
