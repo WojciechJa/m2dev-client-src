@@ -12,6 +12,7 @@
 #include "../GameLib/MapOutdoor.h"
 #include "../GameLib/MapType.h"
 #include "../UserInterface/PythonBackground.h"  // M3-SKY-BLEND-FIX-74: For CPythonBackground singleton
+#include "../UserInterface/config.h"  // M3-CONFIG-EXPORT: Runtime configuration constants
 #include "../EterLib/SkyBox.h"
 #include "../EterLib/LensFlare.h"
 #include "../EterBase/Timer.h"
@@ -174,12 +175,14 @@ void CImGuiEnvironmentControls::InitializePresets()
 
 void CImGuiEnvironmentControls::CreateDayPreset()
 {
+	using namespace DX11RuntimeConfig;  // M3-CONFIG-EXPORT: Use config.h constants
+
 	SEnvironmentPreset& preset = m_aPresets[0];
 	preset.strName = "Day";
 	preset.strDescription = "Bright clear day with full sun";
 
 	// Skybox
-	preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // M3-SKY-SCALE-PERSIST: Optimal default scale
+	preset.v3SkyBoxScale = D3DXVECTOR3(kEnvironmentSkyScaleDefault, kEnvironmentSkyScaleDefault, kEnvironmentSkyScaleDefault);
 	// FIX: Match gradient levels to actual color count (5 colors = 2 upper + 3 lower)
 	// This prevents NormalizeGradientVector from interpolating colors incorrectly
 	preset.bySkyBoxGradientLevelUpper = 2;  // Was 8
@@ -196,53 +199,67 @@ void CImGuiEnvironmentControls::CreateDayPreset()
     };
 
 	// Clouds
-	preset.v2CloudScale = D3DXVECTOR2(200.0f, 200.0f);
-	preset.fCloudHeight = 2000.0f;
-	preset.v2CloudTextureScale = D3DXVECTOR2(2.0f, 2.0f);
-	preset.v2CloudSpeed = D3DXVECTOR2(0.005f, 0.005f);
+	preset.v2CloudScale = D3DXVECTOR2(kEnvironmentCloudScaleX, kEnvironmentCloudScaleY);
+	preset.fCloudHeight = kEnvironmentCloudHeightDefault;
+	preset.v2CloudTextureScale = D3DXVECTOR2(kEnvironmentCloudTextureScale, kEnvironmentCloudTextureScale);
+	preset.v2CloudSpeed = D3DXVECTOR2(kEnvironmentCloudSpeedDay, kEnvironmentCloudSpeedDay);
 
 	// Fog
 	preset.bFogEnable = TRUE;
 	preset.bDensityFog = FALSE;
-	preset.fFogNearDistance = 5000.0f;
-	preset.fFogFarDistance = 15000.0f;
+	preset.fFogNearDistance = kEnvironmentFogNearDistanceDay;
+	preset.fFogFarDistance = kEnvironmentFogFarDistanceDay;
 	preset.FogColor = D3DXCOLOR(0.7f, 0.8f, 0.9f, 1.0f);  // Light blue
 	preset.bFogLevel = 3;  // Light fog
 
 	// Sun
 	preset.bLensFlareEnable = TRUE;
 	preset.LensFlareBrightnessColor = D3DXCOLOR(1.0f, 0.95f, 0.8f, 1.0f);  // Warm yellow
-	preset.fLensFlareMaxBrightness = 1.0f;
+	preset.fLensFlareMaxBrightness = kEnvironmentLensFlareBrightnessSun;
 	preset.bMainFlareEnable = TRUE;
-	preset.fMainFlareSize = 0.5f;
+	preset.fMainFlareSize = kEnvironmentMainFlareSizeSun;
 
 	// Lighting
 	preset.bDirLightBackground = TRUE;
 	preset.bDirLightCharacter = TRUE;
 	preset.v3DirLightBackgroundDirection = D3DXVECTOR3(-0.25f, -0.55f, -0.79f);
-	preset.kDirLightBackgroundAmbient = D3DXCOLOR(0.36f, 0.38f, 0.42f, 1.0f);
-	preset.kDirLightBackgroundDiffuse = D3DXCOLOR(0.92f, 0.90f, 0.84f, 1.0f);
+	preset.kDirLightBackgroundAmbient = D3DXCOLOR(
+		kEnvironmentDirLightDayAmbientR,
+		kEnvironmentDirLightDayAmbientG,
+		kEnvironmentDirLightDayAmbientB, 1.0f);
+	preset.kDirLightBackgroundDiffuse = D3DXCOLOR(
+		kEnvironmentDirLightDayDiffuseR,
+		kEnvironmentDirLightDayDiffuseG,
+		kEnvironmentDirLightDayDiffuseB, 1.0f);
 	preset.v3DirLightCharacterDirection = D3DXVECTOR3(-0.20f, -0.48f, -0.85f);
-	preset.kDirLightCharacterAmbient = D3DXCOLOR(0.30f, 0.32f, 0.36f, 1.0f);
-	preset.kDirLightCharacterDiffuse = D3DXCOLOR(0.95f, 0.92f, 0.86f, 1.0f);
+	preset.kDirLightCharacterAmbient = D3DXCOLOR(
+		kEnvironmentDirLightDayAmbientR - 0.06f,
+		kEnvironmentDirLightDayAmbientG - 0.06f,
+		kEnvironmentDirLightDayAmbientB - 0.06f, 1.0f);
+	preset.kDirLightCharacterDiffuse = D3DXCOLOR(
+		kEnvironmentDirLightDayDiffuseR + 0.03f,
+		kEnvironmentDirLightDayDiffuseG + 0.02f,
+		kEnvironmentDirLightDayDiffuseB + 0.02f, 1.0f);
 
-	// Screen Filter
+	// Screen Filter (disabled for day)
 	preset.bFilteringEnable = FALSE;
 	preset.FilteringColor = D3DXCOLOR(1.0f, 1.0f, 1.0f, 0.0f);
 
 	// Wind
-	preset.fWindStrength = 0.3f;
-	preset.fWindRandom = 0.2f;
+	preset.fWindStrength = kEnvironmentWindStrengthDay;
+	preset.fWindRandom = kEnvironmentWindRandomness;
 }
 
 void CImGuiEnvironmentControls::CreateNightPreset()
 {
+	using namespace DX11RuntimeConfig;  // M3-CONFIG-EXPORT: Use config.h constants
+
 	SEnvironmentPreset& preset = m_aPresets[1];
 	preset.strName = "Night";
-	preset.strDescription = "Dark night with no sun, heavy fog";
+	preset.strDescription = "Dark night with moon, dense fog, blue atmosphere";
 
 	// Skybox
-	preset.v3SkyBoxScale = D3DXVECTOR3(29000.0f, 29000.0f, 29000.0f);  // M3-SKY-SCALE-PERSIST: Optimal default scale
+	preset.v3SkyBoxScale = D3DXVECTOR3(kEnvironmentSkyScaleDefault, kEnvironmentSkyScaleDefault, kEnvironmentSkyScaleDefault);
 	// FIX: Match gradient levels to actual color count (5 colors = 2 upper + 3 lower)
 	// This prevents NormalizeGradientVector from interpolating colors incorrectly
 	preset.bySkyBoxGradientLevelUpper = 2;  // Was 8
@@ -259,43 +276,59 @@ void CImGuiEnvironmentControls::CreateNightPreset()
     };
 
 	// Clouds
-	preset.v2CloudScale = D3DXVECTOR2(200.0f, 200.0f);
-	preset.fCloudHeight = 2000.0f;
-	preset.v2CloudTextureScale = D3DXVECTOR2(2.0f, 2.0f);
-	preset.v2CloudSpeed = D3DXVECTOR2(0.002f, 0.002f);  // Slower at night
+	preset.v2CloudScale = D3DXVECTOR2(kEnvironmentCloudScaleX, kEnvironmentCloudScaleY);
+	preset.fCloudHeight = kEnvironmentCloudHeightDefault;
+	preset.v2CloudTextureScale = D3DXVECTOR2(kEnvironmentCloudTextureScale, kEnvironmentCloudTextureScale);
+	preset.v2CloudSpeed = D3DXVECTOR2(kEnvironmentCloudSpeedNight, kEnvironmentCloudSpeedNight);
 
 	// Fog
 	preset.bFogEnable = TRUE;
 	preset.bDensityFog = TRUE;
-	preset.fFogNearDistance = 500.0f;
-	preset.fFogFarDistance = 5000.0f;
+	preset.fFogNearDistance = kEnvironmentFogNearDistanceNight;
+	preset.fFogFarDistance = kEnvironmentFogFarDistanceNight;
 	preset.FogColor = D3DXCOLOR(0.1f, 0.1f, 0.15f, 1.0f);  // Dark blue
 	preset.bFogLevel = 8;  // Heavy fog
 
-	// Sun (disabled at night)
-	preset.bLensFlareEnable = FALSE;
-	preset.LensFlareBrightnessColor = D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f);
-	preset.fLensFlareMaxBrightness = 0.0f;
-	preset.bMainFlareEnable = FALSE;
-	preset.fMainFlareSize = 0.0f;
+	// Moon (lens flare with white/blue color, lower intensity)
+	preset.bLensFlareEnable = TRUE;
+	preset.LensFlareBrightnessColor = D3DXCOLOR(0.8f, 0.85f, 1.0f, 1.0f);  // Pale blue-white (moonlight)
+	preset.fLensFlareMaxBrightness = kEnvironmentLensFlareBrightnessMoon;
+	preset.bMainFlareEnable = TRUE;
+	preset.fMainFlareSize = kEnvironmentMainFlareSizeMoon;
 
-	// Lighting
+	// Lighting (darker, blue-ish for night)
 	preset.bDirLightBackground = TRUE;
 	preset.bDirLightCharacter = TRUE;
 	preset.v3DirLightBackgroundDirection = D3DXVECTOR3(-0.05f, -0.20f, -0.98f);
-	preset.kDirLightBackgroundAmbient = D3DXCOLOR(0.10f, 0.12f, 0.18f, 1.0f);
-	preset.kDirLightBackgroundDiffuse = D3DXCOLOR(0.20f, 0.24f, 0.35f, 1.0f);
+	preset.kDirLightBackgroundAmbient = D3DXCOLOR(
+		kEnvironmentDirLightNightAmbientR,
+		kEnvironmentDirLightNightAmbientG,
+		kEnvironmentDirLightNightAmbientB, 1.0f);
+	preset.kDirLightBackgroundDiffuse = D3DXCOLOR(
+		kEnvironmentDirLightNightDiffuseR,
+		kEnvironmentDirLightNightDiffuseG,
+		kEnvironmentDirLightNightDiffuseB, 1.0f);
 	preset.v3DirLightCharacterDirection = D3DXVECTOR3(-0.02f, -0.15f, -0.99f);
-	preset.kDirLightCharacterAmbient = D3DXCOLOR(0.12f, 0.14f, 0.20f, 1.0f);
-	preset.kDirLightCharacterDiffuse = D3DXCOLOR(0.24f, 0.28f, 0.40f, 1.0f);
+	preset.kDirLightCharacterAmbient = D3DXCOLOR(
+		kEnvironmentDirLightNightAmbientR + 0.02f,
+		kEnvironmentDirLightNightAmbientG + 0.02f,
+		kEnvironmentDirLightNightAmbientB + 0.02f, 1.0f);
+	preset.kDirLightCharacterDiffuse = D3DXCOLOR(
+		kEnvironmentDirLightNightDiffuseR + 0.04f,
+		kEnvironmentDirLightNightDiffuseG + 0.04f,
+		kEnvironmentDirLightNightDiffuseB + 0.04f, 1.0f);
 
-	// Screen Filter (dark blue tint)
+	// Screen Filter (subtle blue tint for night atmosphere)
 	preset.bFilteringEnable = TRUE;
-	preset.FilteringColor = D3DXCOLOR(0.3f, 0.3f, 0.5f, 0.3f);
+	preset.FilteringColor = D3DXCOLOR(
+		kScreenFilterNightColorR,
+		kScreenFilterNightColorG,
+		kScreenFilterNightColorB,
+		kScreenFilterNightAlpha);
 
-	// Wind
-	preset.fWindStrength = 0.5f;
-	preset.fWindRandom = 0.4f;
+	// Wind (stronger at night)
+	preset.fWindStrength = kEnvironmentWindStrengthNight;
+	preset.fWindRandom = kEnvironmentWindRandomness;
 }
 
 void CImGuiEnvironmentControls::CreateSunsetPreset()
