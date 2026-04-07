@@ -306,8 +306,10 @@ void CImGuiEnvironmentControls::CreateSunsetPreset()
 
 	// Skybox
 	preset.v3SkyBoxScale = D3DXVECTOR3(1.0f, 1.0f, 1.0f);
-	preset.bySkyBoxGradientLevelUpper = 10;
-	preset.bySkyBoxGradientLevelLower = 10;
+	// FIX: Match gradient levels to actual color count (5 colors = 3 upper + 2 lower)
+	// This prevents NormalizeGradientVector from interpolating colors incorrectly
+	preset.bySkyBoxGradientLevelUpper = 3;  // Was 10 (incorrect)
+	preset.bySkyBoxGradientLevelLower = 2;  // Was 10 (incorrect)
 	preset.bSkyBoxTextureRenderMode = TRUE;
 	preset.CloudGradientColor = MakeGradientColor(D3DXCOLOR(1.00f, 0.60f, 0.35f, 1.0f), D3DXCOLOR(0.82f, 0.32f, 0.18f, 1.0f));
 	preset.SkyBoxGradientColorVector =
@@ -638,7 +640,15 @@ void CImGuiEnvironmentControls::ApplyToGame()
         1u,
         static_cast<size_t>(m_workingEnv.bySkyBoxGradientLevelUpper) +
         static_cast<size_t>(m_workingEnv.bySkyBoxGradientLevelLower));
-    m_workingEnv.SkyBoxGradientColorVector = NormalizeGradientVector(m_workingEnv.SkyBoxGradientColorVector, uRequiredGradientCount);
+
+    // M3-SKY-BLEND-FIX-74: Only normalize if count doesn't match (prevents black sky bugs)
+    // Normalization interpolates colors and can cause dark sky if levels are set incorrectly
+    if (m_workingEnv.SkyBoxGradientColorVector.size() != uRequiredGradientCount)
+    {
+        TraceError("DX11_SKY_GRADIENT_MISMATCH current=%zu required=%zu normalizing=1",
+            m_workingEnv.SkyBoxGradientColorVector.size(), uRequiredGradientCount);
+        m_workingEnv.SkyBoxGradientColorVector = NormalizeGradientVector(m_workingEnv.SkyBoxGradientColorVector, uRequiredGradientCount);
+    }
 
     const bool bDistanceChanged =
         !NearlyEqualVec3(pEnvData->v3SkyBoxScale, m_workingEnv.v3SkyBoxScale) ||
@@ -895,13 +905,29 @@ void CImGuiEnvironmentControls::RenderSkyboxSection()
 		bChanged = true;
 	}
 
-	// Gradient levels
-	int iUpper = m_workingEnv.bySkyBoxGradientLevelUpper;
-	int iLower = m_workingEnv.bySkyBoxGradientLevelLower;
-	bChanged |= ImGui::SliderInt("Gradient Upper", &iUpper, 0, 20);
-	bChanged |= ImGui::SliderInt("Gradient Lower", &iLower, 0, 20);
-	m_workingEnv.bySkyBoxGradientLevelUpper = (BYTE)iUpper;
-	m_workingEnv.bySkyBoxGradientLevelLower = (BYTE)iLower;
+	// M3-SKY-BLEND-FIX-74: Gradient levels - AUTO-CALCULATED from color count
+	// Manual editing disabled to prevent gradient normalization bugs (black sky)
+	const size_t uCurrentGradientColorCount = m_workingEnv.SkyBoxGradientColorVector.size();
+
+	// Auto-calculate gradient levels from color count (prevents normalization bugs)
+	// Formula: For N colors, use upper=(N+1)/2, lower=N/2 to balance distribution
+	const BYTE byAutoUpper = static_cast<BYTE>((uCurrentGradientColorCount + 1) / 2);
+	const BYTE byAutoLower = static_cast<BYTE>(uCurrentGradientColorCount / 2);
+
+	m_workingEnv.bySkyBoxGradientLevelUpper = byAutoUpper;
+	m_workingEnv.bySkyBoxGradientLevelLower = byAutoLower;
+
+	// Display as read-only (manual editing causes black sky due to normalization)
+	ImGui::Text("Gradient Levels: Upper=%d, Lower=%d (auto from %zu colors)",
+		(int)byAutoUpper, (int)byAutoLower, uCurrentGradientColorCount);
+	ImGui::SameLine();
+	ImGui::TextDisabled("(?)");
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Gradient levels are auto-calculated from color count.\n"
+			"Manual editing disabled to prevent black sky bugs.\n"
+			"Current preset has %zu gradient colors.", uCurrentGradientColorCount);
+	}
 
 	// M3-SKY-BLEND-FIX-74: 3-state policy selector (was 2-state checkbox)
 	const char* szPolicyNames[] = { "Auto (MSENV)", "Force Gradient", "Force Texture" };
