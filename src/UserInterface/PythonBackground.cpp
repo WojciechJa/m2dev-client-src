@@ -1,12 +1,17 @@
-// PythonBackground.cpp: implementation of the CPythonBackground class.
+﻿// PythonBackground.cpp: implementation of the CPythonBackground class.
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
 #include "EterLib/CullingManager.h"
 #include "EterLib/Camera.h"
+#include "EterLib/StateManager.h"
+#include "EterLib/StateManager11.h"
+#include "EterLib/GrpDeviceDX11.h"
+#include "EterGrnLib/LODController.h"
 #include "PackLib/PackManager.h"
 #include "GameLib/MapOutDoor.h"
+#include "GameLib/Area.h"
 #include "GameLib/PropertyLoader.h"
 
 #include "PythonBackground.h"
@@ -14,8 +19,14 @@
 #include "PythonNetworkStream.h"
 #include "PythonMiniMap.h"
 #include "PythonSystem.h"
+#include "config.h"
 
 std::string g_strEffectName = "d:/ymir work/effect/etc/direction/direction_land.mse";
+namespace
+{
+constexpr float kDX11ViewDistanceFarClipFixed = DX11RuntimeConfig::kViewDistanceFarClipMax;
+constexpr float kDX11ViewDistanceMinFarClip = DX11RuntimeConfig::kViewDistanceFarClipMin;
+}
 
 DWORD CPythonBackground::GetRenderShadowTime()
 {
@@ -74,6 +85,38 @@ void CPythonBackground::RefreshShadowLevel()
 	SetShadowLevel(CPythonSystem::Instance().GetShadowLevel());
 }
 
+void CPythonBackground::SetDrawShadow(bool bEnable)
+{
+	if (!m_pkMap)
+		return;
+
+	CMapOutdoor& rkMap = GetMapOutdoorRef();
+	rkMap.SetDrawShadow(bEnable);
+}
+
+void CPythonBackground::SetDrawCharacterShadow(bool bEnable)
+{
+	if (!m_pkMap)
+		return;
+
+	CMapOutdoor& rkMap = GetMapOutdoorRef();
+	rkMap.SetDrawCharacterShadow(bEnable);
+}
+
+bool CPythonBackground::IsSoftwareTilingEnable() const
+{
+	return m_bSoftwareTilingReserved;
+}
+
+void CPythonBackground::ReserveSoftwareTilingEnable(bool isEnable)
+{
+	if (m_bSoftwareTilingReserved == isEnable)
+		return;
+
+	m_bSoftwareTilingReserved = isEnable;
+	TraceError("DX11_SOFTWARE_TILING_COMPAT reserved=%d", isEnable ? 1 : 0);
+}
+
 bool CPythonBackground::SetShadowLevel(int eLevel)
 {
 	if (!m_pkMap)
@@ -129,45 +172,81 @@ bool CPythonBackground::SetShadowLevel(int eLevel)
 
 void CPythonBackground::SelectViewDistanceNum(int eNum)
 {
-	if (!m_pkMap)
-		return;
-	
-	CMapOutdoor& rkMap=GetMapOutdoorRef();
+    if (!m_pkMap)
+        return;
 
-	if (!mc_pcurEnvironmentData)
-	{
-		TraceError("CPythonBackground::SelectViewDistanceNum(int eNum=%d) mc_pcurEnvironmentData is NULL", eNum);
-		return;
-	}
+    CMapOutdoor& rkMap = GetMapOutdoorRef();
 
-	m_eViewDistanceNum = eNum;
+    if (!mc_pcurEnvironmentData)
+    {
+        TraceError("CPythonBackground::SelectViewDistanceNum(int eNum=%d) mc_pcurEnvironmentData is NULL", eNum);
+        return;
+    }
 
-	TEnvironmentData * env = ((TEnvironmentData *) mc_pcurEnvironmentData);
+    m_eViewDistanceNum = eNum;
+    TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
 
-	// 게임 분위기를 바꿔놓을 수 있으므로 reserve로 되어있으면 고치지 않는다.
-	if (env->bReserve)
-	{
-		env->m_fFogNearDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogStart;
-		env->m_fFogFarDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogEnd;
-		env->v3SkyBoxScale = m_ViewDistanceSet[m_eViewDistanceNum].m_v3SkyBoxScale;
-		rkMap.SetEnvironmentSkyBox();
-	}
+    const bool bDX11Active = (CGraphicDeviceDX11::GetActiveDevice() != nullptr);
+    if (env->bReserve || bDX11Active)
+    {
+        env->m_fFogNearDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogStart;
+        env->m_fFogFarDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogEnd;
+        env->v3SkyBoxScale = m_ViewDistanceSet[m_eViewDistanceNum].m_v3SkyBoxScale;
+        rkMap.ApplyEnvironmentDistanceOnly();
+    }
 }
 
 void CPythonBackground::SetViewDistanceSet(int eNum, float fFarClip)
 {
-	if (!m_pkMap)
-		return;
-	
-	m_ViewDistanceSet[eNum].m_fFogStart		= fFarClip * 0.5f;//0.3333333f;
-	m_ViewDistanceSet[eNum].m_fFogEnd		= fFarClip * 0.7f;//0.6666667f;
-	
-	float fSkyBoxScale						= fFarClip * 0.6f;//0.5773502f;
-	m_ViewDistanceSet[eNum].m_v3SkyBoxScale	= D3DXVECTOR3(fSkyBoxScale, fSkyBoxScale, fSkyBoxScale);
-	m_ViewDistanceSet[eNum].m_fFarClip		= fFarClip;
+    if (!m_pkMap)
+        return;
 
-	if (eNum == m_eViewDistanceNum)
-		SelectViewDistanceNum(eNum);
+    const float fClampedFarClip = fMAX(kDX11ViewDistanceMinFarClip, fMIN(kDX11ViewDistanceFarClipFixed, fFarClip));
+    const float fFogStart = fClampedFarClip * DX11RuntimeConfig::kViewDistanceFogStartRatio;
+    const float fFogEnd = fClampedFarClip * DX11RuntimeConfig::kViewDistanceFogEndRatio;
+    const float fSkyBoxScale = fClampedFarClip * DX11RuntimeConfig::kViewDistanceSkyScaleRatio;
+
+    const float fPrevFarClip = m_ViewDistanceSet[eNum].m_fFarClip;
+    const float fPrevFogStart = m_ViewDistanceSet[eNum].m_fFogStart;
+    const float fPrevFogEnd = m_ViewDistanceSet[eNum].m_fFogEnd;
+    const DirectX::SimpleMath::Vector3 v3PrevSkyScale = m_ViewDistanceSet[eNum].m_v3SkyBoxScale;
+
+    CGrannyLODController::SetGlobalLODDistanceFromFarClip(fClampedFarClip);
+    m_ViewDistanceSet[eNum].m_fFogStart = fFogStart;
+    m_ViewDistanceSet[eNum].m_fFogEnd = fFogEnd;
+    m_ViewDistanceSet[eNum].m_v3SkyBoxScale = DirectX::SimpleMath::Vector3(fSkyBoxScale, fSkyBoxScale, fSkyBoxScale);
+    m_ViewDistanceSet[eNum].m_fFarClip = fClampedFarClip;
+
+    auto AbsDiff = [](float a, float b) -> float
+    {
+        const float d = a - b;
+        return (d >= 0.0f) ? d : -d;
+    };
+
+    const bool bDistanceChanged =
+        (AbsDiff(fPrevFarClip, fClampedFarClip) > 0.01f) ||
+        (AbsDiff(fPrevFogStart, fFogStart) > 0.01f) ||
+        (AbsDiff(fPrevFogEnd, fFogEnd) > 0.01f) ||
+        (AbsDiff(v3PrevSkyScale.x, fSkyBoxScale) > 0.01f) ||
+        (AbsDiff(v3PrevSkyScale.y, fSkyBoxScale) > 0.01f) ||
+        (AbsDiff(v3PrevSkyScale.z, fSkyBoxScale) > 0.01f);
+
+    static DWORD s_dwViewDistanceLogTick = 0u;
+    const DWORD dwNow = ELTimer_GetMSec();
+    if (0u == s_dwViewDistanceLogTick || (dwNow - s_dwViewDistanceLogTick) >= 2000u)
+    {
+        s_dwViewDistanceLogTick = dwNow;
+        TraceError("DX11_VIEWDIST_CONFIG far_clip=%.1f fog_start=%.1f fog_end=%.1f sky_scale=%.1f requested_far=%.1f changed=%u",
+            m_ViewDistanceSet[eNum].m_fFarClip,
+            m_ViewDistanceSet[eNum].m_fFogStart,
+            m_ViewDistanceSet[eNum].m_fFogEnd,
+            fSkyBoxScale,
+            fFarClip,
+            bDistanceChanged ? 1u : 0u);
+    }
+
+    if (eNum == m_eViewDistanceNum && bDistanceChanged)
+        SelectViewDistanceNum(eNum);
 }
 
 float CPythonBackground::GetFarClip()
@@ -178,7 +257,7 @@ float CPythonBackground::GetFarClip()
 	if (m_ViewDistanceSet[m_eViewDistanceNum].m_fFarClip==0.0f)
 	{
 		TraceError("CPythonBackground::GetFarClip m_eViewDistanceNum=%d", m_eViewDistanceNum);
-		m_ViewDistanceSet[m_eViewDistanceNum].m_fFarClip=25600.0f;
+		m_ViewDistanceSet[m_eViewDistanceNum].m_fFarClip=kDX11ViewDistanceFarClipFixed;
 	}
 
 	return m_ViewDistanceSet[m_eViewDistanceNum].m_fFarClip;
@@ -191,7 +270,7 @@ void CPythonBackground::GetDistanceSetInfo(int * peNum, float * pfStart, float *
 		*peNum = 4;
 		*pfStart= 10000.0f;
 		*pfEnd= 15000.0f;
-		*pfFarClip = 50000.0f;
+		*pfFarClip = kDX11ViewDistanceFarClipFixed;
 		return;
 	}
 	*peNum = m_eViewDistanceNum;
@@ -215,14 +294,20 @@ CPythonBackground::CPythonBackground()
 	m_dwBaseY=0;
 	m_strMapName="";
 	m_iDayMode = DAY_MODE_LIGHT;
+	m_bSnowEnvironmentEnabled = false;
+	m_bRainEnvironmentEnabled = false;
+	m_bStormEnvironmentEnabled = false;
+	m_iWeatherMonth = 1;
+	m_fRainIntensity = 0.0f;
 	m_iXMasTreeGrade = 0;
 	m_bVisibleGuildArea = FALSE;
+	m_bSoftwareTilingReserved = false;
 
-	SetViewDistanceSet(4, 25600.0f);
-	SetViewDistanceSet(3, 25600.0f);
-	SetViewDistanceSet(2, 25600.0f);
-	SetViewDistanceSet(1, 25600.0f);
-	SetViewDistanceSet(0, 25600.0f);
+	SetViewDistanceSet(4, kDX11ViewDistanceFarClipFixed);
+	SetViewDistanceSet(3, kDX11ViewDistanceFarClipFixed);
+	SetViewDistanceSet(2, kDX11ViewDistanceFarClipFixed);
+	SetViewDistanceSet(1, kDX11ViewDistanceFarClipFixed);
+	SetViewDistanceSet(0, kDX11ViewDistanceFarClipFixed);
 	Initialize();
 }
 
@@ -236,6 +321,7 @@ void CPythonBackground::Initialize()
 	std::string stAtlasInfoFileName(GetLocalePath());
 	stAtlasInfoFileName += "/AtlasInfo.txt";
 	SetAtlasInfoFileName(stAtlasInfoFileName.c_str());
+	m_kDX11WorldSubmitTelemetry = SDX11WorldSubmitTelemetry();
 	CMapManager::Initialize();
 }
 
@@ -248,25 +334,25 @@ void CPythonBackground::__CreateProperty()
 // Normal Functions
 //////////////////////////////////////////////////////////////////////
 
-bool CPythonBackground::GetPickingPoint(D3DXVECTOR3 * v3IntersectPt)
+bool CPythonBackground::GetPickingPoint(DirectX::SimpleMath::Vector3 * v3IntersectPt)
 {
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 	return rkMap.GetPickingPoint(v3IntersectPt);
 }
 
-bool CPythonBackground::GetPickingPointWithRay(const CRay & rRay, D3DXVECTOR3 * v3IntersectPt)
+bool CPythonBackground::GetPickingPointWithRay(const CRay & rRay, DirectX::SimpleMath::Vector3 * v3IntersectPt)
 {
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 	return rkMap.GetPickingPointWithRay(rRay, v3IntersectPt);
 }
 
-bool CPythonBackground::GetPickingPointWithRayOnlyTerrain(const CRay & rRay, D3DXVECTOR3 * v3IntersectPt)
+bool CPythonBackground::GetPickingPointWithRayOnlyTerrain(const CRay & rRay, DirectX::SimpleMath::Vector3 * v3IntersectPt)
 {
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 	return rkMap.GetPickingPointWithRayOnlyTerrain(rRay, v3IntersectPt);
 }
 
-BOOL CPythonBackground::GetLightDirection(D3DXVECTOR3 & rv3LightDirection)
+BOOL CPythonBackground::GetLightDirection(DirectX::SimpleMath::Vector3 & rv3LightDirection)
 {
 	if (!mc_pcurEnvironmentData)
 		return FALSE;
@@ -284,7 +370,10 @@ void CPythonBackground::Destroy()
 {
 	CMapManager::Destroy();
 	m_SnowEnvironment.Destroy();
+	m_RainEnvironment.Destroy();
+	m_StormEnvironment.Destroy();
 	m_bVisibleGuildArea = FALSE;
+	m_kDX11WorldSubmitTelemetry = SDX11WorldSubmitTelemetry();
 }
 
 void CPythonBackground::Create()
@@ -300,6 +389,8 @@ void CPythonBackground::Create()
 	CMapManager::Create();
 
 	m_SnowEnvironment.Create();
+	m_RainEnvironment.Create();
+	m_StormEnvironment.Create();
 }
 
 struct FGetPortalID
@@ -339,7 +430,16 @@ void CPythonBackground::Update(float fCenterX, float fCenterY, float fCenterZ)
 #ifdef __PERFORMANCE_CHECKER__
 	DWORD t3=ELTimer_GetMSec();
 #endif
-	m_SnowEnvironment.Update(D3DXVECTOR3(fCenterX, -fCenterY, fCenterZ));
+	__SyncDX11EnvironmentBridgeState();
+	m_SnowEnvironment.Update(DirectX::SimpleMath::Vector3(fCenterX, -fCenterY, fCenterZ));
+	m_RainEnvironment.Update(DirectX::SimpleMath::Vector3(fCenterX, -fCenterY, fCenterZ));
+
+	// Calculate elapsed time for storm (in seconds)
+	static long s_lLastStormTime = CTimer::Instance().GetCurrentMillisecond();
+	long lcurStormTime = CTimer::Instance().GetCurrentMillisecond();
+	float fStormElapsedTime = float(lcurStormTime - s_lLastStormTime) / 1000.0f;
+	s_lLastStormTime = lcurStormTime;
+	m_StormEnvironment.Update(fStormElapsedTime);
 
 #ifdef __PERFORMANCE_CHECKER__
 	{
@@ -456,19 +556,349 @@ bool CPythonBackground::__IsSame(std::set<int> & rleft, std::set<int> & rright)
 void CPythonBackground::Render()
 {
 	if (!IsMapReady())
-		return;	
+		return;
 
 	m_SnowEnvironment.Deform();
+	m_RainEnvironment.Deform();
 
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
+
+	// DX11 native world path owns terrain/object/water rendering. Running legacy rkMap.Render()
+	// here replays a second world pass and can overwrite native water output.
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsUsingNativeWorldPresentPath())
+	{
+		if (m_bVisibleGuildArea)
+			rkMap.RenderMarkedArea();
+
+		static bool s_bLoggedLegacyRenderBypass = false;
+		if (!s_bLoggedLegacyRenderBypass)
+		{
+			s_bLoggedLegacyRenderBypass = true;
+			TraceError("DX11_BG_RENDER_BYPASS mode=native_world_present reason=avoid_legacy_world_overdraw");
+		}
+		return;
+	}
+
 	rkMap.Render();
 	if (m_bVisibleGuildArea)
 		rkMap.RenderMarkedArea();
 }
 
+bool CPythonBackground::RenderTerrainDX11(
+	ID3D11Device* pDevice,
+	ID3D11DeviceContext* pContext,
+	uint32_t* pdwOutWorldPortMaskObserved,
+	uint32_t* pdwOutWorldPortMaskSubmitted,
+	uint32_t* pdwOutWorldPortMaskApplicable)
+{
+	uint32_t dwWorldPortMaskObserved = CGraphicDeviceDX11::WORLD_TERRAIN_DX11;
+	uint32_t dwWorldPortMaskSubmitted = 0u;
+	uint32_t dwWorldPortMaskApplicable = CGraphicDeviceDX11::WORLD_TERRAIN_DX11;
+	auto PublishSubmitTelemetry = [&](uint32_t dwObservedMask, uint32_t dwSubmittedMask, uint32_t dwApplicableMask)
+	{
+		m_kDX11WorldSubmitTelemetry = SDX11WorldSubmitTelemetry();
+		m_kDX11WorldSubmitTelemetry.dwObservedMask = dwObservedMask;
+		m_kDX11WorldSubmitTelemetry.dwSubmittedMask = dwSubmittedMask;
+		m_kDX11WorldSubmitTelemetry.dwApplicableMask = dwApplicableMask;
+		m_kDX11WorldSubmitTelemetry.dwCommittedMask = 0u;
+		if (pdwOutWorldPortMaskObserved)
+			*pdwOutWorldPortMaskObserved = dwObservedMask;
+		if (pdwOutWorldPortMaskSubmitted)
+			*pdwOutWorldPortMaskSubmitted = dwSubmittedMask;
+		if (pdwOutWorldPortMaskApplicable)
+			*pdwOutWorldPortMaskApplicable = dwApplicableMask;
+	};
+	if (!IsMapReady())
+	{
+		PublishSubmitTelemetry(dwWorldPortMaskObserved, dwWorldPortMaskSubmitted, 0u);
+		return true;
+	}
+
+	if (!pDevice || !pContext)
+	{
+		PublishSubmitTelemetry(dwWorldPortMaskObserved, dwWorldPortMaskSubmitted, 0u);
+		return false;
+	}
+
+	CMapOutdoor& rkMap = GetMapOutdoorRef();
+	if (!rkMap.InitializeDX11TerrainResources(pDevice))
+	{
+		PublishSubmitTelemetry(dwWorldPortMaskObserved, dwWorldPortMaskSubmitted, 0u);
+		return false;
+	}
+
+	// Water path is optional for runtime stability; init failures should not block terrain.
+	static DWORD s_dwDX11WaterInitRetryAfterMS = 0;
+	static DWORD s_dwDX11WaterInitFailLogTick = 0;
+	static DWORD s_dwDX11ShadowInitRetryAfterMS = 0;
+	static DWORD s_dwDX11ShadowInitFailLogTick = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (!rkMap.IsDX11WaterReady() && dwNow >= s_dwDX11WaterInitRetryAfterMS)
+	{
+		if (!rkMap.InitializeDX11WaterResources(pDevice))
+		{
+			s_dwDX11WaterInitRetryAfterMS = dwNow + 2000u;
+			if (0 == s_dwDX11WaterInitFailLogTick || dwNow - s_dwDX11WaterInitFailLogTick >= 30000u)
+			{
+				s_dwDX11WaterInitFailLogTick = dwNow;
+				TraceError("DX11_WATER_RUNTIME state=init_failed retry_after_ms=2000");
+			}
+		}
+		else
+		{
+			s_dwDX11WaterInitRetryAfterMS = 0;
+			TraceError("DX11_WATER_RUNTIME state=ready");
+		}
+	}
+
+	// Dynamic shadows are optional for frame safety, but must use real DX11 resources when enabled.
+	if (!rkMap.IsDX11DynamicShadowsReady() && dwNow >= s_dwDX11ShadowInitRetryAfterMS)
+	{
+		if (!rkMap.InitializeDX11ShadowResources(pDevice))
+		{
+			s_dwDX11ShadowInitRetryAfterMS = dwNow + 2000u;
+			if (0 == s_dwDX11ShadowInitFailLogTick || dwNow - s_dwDX11ShadowInitFailLogTick >= 30000u)
+			{
+				s_dwDX11ShadowInitFailLogTick = dwNow;
+				TraceError("DX11_DYNAMIC_SHADOW_RUNTIME state=init_failed retry_after_ms=2000");
+			}
+		}
+		else
+		{
+			s_dwDX11ShadowInitRetryAfterMS = 0u;
+			TraceError("DX11_DYNAMIC_SHADOW_RUNTIME state=ready");
+		}
+	}
+
+	// Build DX11 terrain VBs once per loaded map (or until first success).
+	static CMapOutdoor* s_pLastMapOutdoor = NULL;
+	static bool s_bDX11TerrainVBReadyLatched = false;
+	if (s_pLastMapOutdoor != &rkMap)
+	{
+		s_pLastMapOutdoor = &rkMap;
+		s_bDX11TerrainVBReadyLatched = false;
+	}
+	if (!s_bDX11TerrainVBReadyLatched)
+	{
+		if (rkMap.BuildDX11TerrainVertexBuffers(pDevice))
+			s_bDX11TerrainVBReadyLatched = true;
+	}
+
+	// Register visible character instances every frame.
+	// Runtime DX11 world color pass also consumes this list, so it cannot depend on shadow readiness.
+	rkMap.ClearCharacterShadowCasters();
+	CPythonCharacterManager& rkChrMgr = CPythonCharacterManager::Instance();
+	std::vector<CGraphicThingInstance*> kVisibleCharacterThings;
+	rkChrMgr.CollectVisibleThingInstancesDX11(kVisibleCharacterThings);
+	for (auto* pThingInstance : kVisibleCharacterThings)
+	{
+		if (pThingInstance)
+			rkMap.RegisterCharacterShadowCaster(pThingInstance);
+	}
+
+	// S2: Register object/dungeon shadow casters when dynamic shadow resources are active.
+	if (rkMap.IsDX11DynamicShadowsReady())
+	{
+		// Register visible static object instances as shadow casters.
+		// Priority order:
+		// 1) authored shadow-flag object instances,
+		// 2) currently collected visible thing instances (opaque+blend) as compatibility feed.
+		std::set<CGraphicThingInstance*> kRegisteredObjectCasters;
+		std::vector<CGraphicThingInstance*> kOpaqueThingCandidates;
+		std::vector<CGraphicThingInstance*> kBlendThingCandidates;
+		kOpaqueThingCandidates.reserve(512);
+		kBlendThingCandidates.reserve(256);
+
+		DWORD dwAreaObjectInstances = 0;
+		DWORD dwAreaThingPointers = 0;
+		DWORD dwAreaDungeonPointers = 0;
+		DWORD dwShadowFlagEligible = 0;
+
+		auto RegisterThingCaster = [&](CGraphicThingInstance* pThingInstance) -> bool
+		{
+			if (!pThingInstance || !pThingInstance->isShow())
+				return false;
+
+			DirectX::SimpleMath::Vector3 v3BBoxMin, v3BBoxMax;
+			if (!pThingInstance->GetBoundingAABB(v3BBoxMin, v3BBoxMax))
+				return false;
+
+			const float fHeight = fabsf(v3BBoxMax.z - v3BBoxMin.z);
+			if (!rkMap.IsDynamicShadowCaster(fHeight))
+				return false;
+
+			if (!kRegisteredObjectCasters.insert(pThingInstance).second)
+				return false;
+
+			rkMap.RegisterObjectShadowCaster(pThingInstance);
+			return true;
+		};
+
+		for (int iAreaIndex = 0; iAreaIndex < AROUND_AREA_NUM; ++iAreaIndex)
+		{
+			CArea* pArea = nullptr;
+			if (!rkMap.GetAreaPointer(static_cast<BYTE>(iAreaIndex), &pArea) || !pArea)
+				continue;
+
+			// Compatibility feed: collect currently visible render candidates from area lists.
+			pArea->CollectRenderingObject(kOpaqueThingCandidates);
+			pArea->CollectBlendRenderingObject(kBlendThingCandidates);
+
+			const DWORD dwObjectCount = pArea->GetObjectInstanceCount();
+			dwAreaObjectInstances += dwObjectCount;
+
+			for (DWORD dwObjectIndex = 0; dwObjectIndex < dwObjectCount; ++dwObjectIndex)
+			{
+				const CArea::TObjectInstance* pObjectInstance = nullptr;
+				if (!pArea->GetObjectInstancePointer(dwObjectIndex, &pObjectInstance) || !pObjectInstance)
+					continue;
+
+				if (pObjectInstance->pThingInstance)
+					++dwAreaThingPointers;
+				if (pObjectInstance->pDungeonBlock)
+					++dwAreaDungeonPointers;
+
+				// Authored path
+				if (pObjectInstance->isShadowFlag && RegisterThingCaster(pObjectInstance->pThingInstance))
+					++dwShadowFlagEligible;
+			}
+		}
+
+		// Compatibility path for maps without authored flags: visible thing instances.
+		for (auto* pThingInstance : kOpaqueThingCandidates)
+			RegisterThingCaster(pThingInstance);
+		for (auto* pThingInstance : kBlendThingCandidates)
+			RegisterThingCaster(pThingInstance);
+
+		static DWORD s_dwObjectCasterFeedLogTick = 0;
+		const DWORD dwNowObjectCaster = ELTimer_GetMSec();
+		if (0 == s_dwObjectCasterFeedLogTick || dwNowObjectCaster - s_dwObjectCasterFeedLogTick >= 5000u)
+		{
+			s_dwObjectCasterFeedLogTick = dwNowObjectCaster;
+			TraceError(
+				"DX11_OBJECT_CASTER_FEED area_objects=%u thing_ptr=%u dungeon_ptr=%u opaque=%u blend=%u flagged=%u registered=%u",
+				dwAreaObjectInstances,
+				dwAreaThingPointers,
+				dwAreaDungeonPointers,
+				static_cast<unsigned int>(kOpaqueThingCandidates.size()),
+				static_cast<unsigned int>(kBlendThingCandidates.size()),
+				dwShadowFlagEligible,
+				static_cast<unsigned int>(kRegisteredObjectCasters.size()));
+		}
+	}
+
+	// Native-present path bypasses CPythonBackground::Render(); run full world color passes here.
+	rkMap.RenderArea();
+	rkMap.RenderTree();
+	rkMap.RenderTerrainDX11(
+		pDevice,
+		pContext,
+		&dwWorldPortMaskObserved,
+		&dwWorldPortMaskSubmitted,
+		&dwWorldPortMaskApplicable);
+	rkMap.RenderBlendArea();
+
+	const bool bObjectsReady = rkMap.ProbeDX11ObjectsReady();
+	if (bObjectsReady)
+	{
+		dwWorldPortMaskApplicable |= CGraphicDeviceDX11::WORLD_OBJECTS_DX11;
+		dwWorldPortMaskObserved |= CGraphicDeviceDX11::WORLD_OBJECTS_DX11;
+		if (rkMap.GetDX11LastSubmittedObjectCount() > 0u)
+			dwWorldPortMaskSubmitted |= CGraphicDeviceDX11::WORLD_OBJECTS_DX11;
+	}
+
+	rkMap.RenderEffect();
+
+	const bool bEffectsReady = rkMap.ProbeDX11EffectsReady();
+	if (bEffectsReady)
+	{
+		dwWorldPortMaskApplicable |= CGraphicDeviceDX11::WORLD_EFFECTS_DX11;
+		dwWorldPortMaskObserved |= CGraphicDeviceDX11::WORLD_EFFECTS_DX11;
+		if (rkMap.GetDX11LastSubmittedEffectCount() > 0u)
+			dwWorldPortMaskSubmitted |= CGraphicDeviceDX11::WORLD_EFFECTS_DX11;
+	}
+
+	const bool bSpeedTreeReady = rkMap.ProbeDX11SpeedTreeReady();
+	if (bSpeedTreeReady)
+	{
+		dwWorldPortMaskApplicable |= CGraphicDeviceDX11::WORLD_SPEEDTREE_DX11;
+		dwWorldPortMaskObserved |= CGraphicDeviceDX11::WORLD_SPEEDTREE_DX11;
+		if (rkMap.GetDX11LastSubmittedSpeedTreeCount() > 0u)
+			dwWorldPortMaskSubmitted |= CGraphicDeviceDX11::WORLD_SPEEDTREE_DX11;
+	}
+
+	int iRenderedWaterPatches = 0;
+	int iObservedWaterPatches = 0;
+	if (rkMap.IsDX11WaterReady())
+	{
+		rkMap.RenderWaterDX11(pDevice, pContext);
+		iRenderedWaterPatches = rkMap.GetDX11LastRenderedWaterPatchCount();
+		iObservedWaterPatches = rkMap.GetDX11LastObservedWaterPatchCount();
+		if (iObservedWaterPatches > 0)
+		{
+			dwWorldPortMaskApplicable |= CGraphicDeviceDX11::WORLD_WATER_DX11;
+			dwWorldPortMaskObserved |= CGraphicDeviceDX11::WORLD_WATER_DX11;
+		}
+		if (iRenderedWaterPatches > 0)
+			dwWorldPortMaskSubmitted |= CGraphicDeviceDX11::WORLD_WATER_DX11;
+	}
+	int iRenderedTerrainPatches = 0;
+	int iRenderedTerrainSplats = 0;
+	float fRenderedTerrainSplatRatio = 0.0f;
+	rkMap.GetRenderedSplatNum(&iRenderedTerrainPatches, &iRenderedTerrainSplats, &fRenderedTerrainSplatRatio);
+
+	m_kDX11WorldSubmitTelemetry.iTerrainPatches = iRenderedTerrainPatches;
+	m_kDX11WorldSubmitTelemetry.iTerrainSplats = iRenderedTerrainSplats;
+	m_kDX11WorldSubmitTelemetry.iWaterPatches = rkMap.GetDX11LastRenderedWaterPatchCount();
+	m_kDX11WorldSubmitTelemetry.dwObjectSubmitted = rkMap.GetDX11LastSubmittedObjectCount();
+	m_kDX11WorldSubmitTelemetry.dwEffectSubmitted = rkMap.GetDX11LastSubmittedEffectCount();
+	m_kDX11WorldSubmitTelemetry.dwEffectParticleSubmitted = rkMap.GetDX11LastSubmittedEffectParticleCount();
+	m_kDX11WorldSubmitTelemetry.dwEffectMeshSubmitted = rkMap.GetDX11LastSubmittedEffectMeshCount();
+	m_kDX11WorldSubmitTelemetry.dwSpeedTreeSubmitted = rkMap.GetDX11LastSubmittedSpeedTreeCount();
+	m_kDX11WorldSubmitTelemetry.dwObservedMask = dwWorldPortMaskObserved;
+	m_kDX11WorldSubmitTelemetry.dwSubmittedMask = dwWorldPortMaskSubmitted;
+	m_kDX11WorldSubmitTelemetry.dwApplicableMask = dwWorldPortMaskApplicable;
+	m_kDX11WorldSubmitTelemetry.dwCommittedMask = 0u;
+
+	static DWORD s_dwWorldPassOrderLogTick = 0u;
+	if (0u == s_dwWorldPassOrderLogTick || (dwNow - s_dwWorldPassOrderLogTick) >= 5000u)
+	{
+		s_dwWorldPassOrderLogTick = dwNow;
+		TraceError(
+			"DX11_WORLD_PASS_ORDER frame_ms=%u terrain_submit=%d water_submit=%d object_blend_submit=%u",
+			static_cast<unsigned int>(dwNow),
+			(iRenderedTerrainPatches > 0) ? 1 : 0,
+			(iRenderedWaterPatches > 0) ? 1 : 0,
+			static_cast<unsigned int>(rkMap.GetDX11LastSubmittedObjectCount()));
+	}
+	if (pdwOutWorldPortMaskObserved)
+		*pdwOutWorldPortMaskObserved = dwWorldPortMaskObserved;
+	if (pdwOutWorldPortMaskSubmitted)
+		*pdwOutWorldPortMaskSubmitted = dwWorldPortMaskSubmitted;
+	if (pdwOutWorldPortMaskApplicable)
+		*pdwOutWorldPortMaskApplicable = dwWorldPortMaskApplicable;
+	return true;
+}
+
+void CPythonBackground::SetDX11WorldSubmitCommittedMask(uint32_t dwCommittedMask)
+{
+	m_kDX11WorldSubmitTelemetry.dwCommittedMask = dwCommittedMask;
+}
+
 void CPythonBackground::RenderSnow()
 {
 	m_SnowEnvironment.Render();
+}
+
+void CPythonBackground::RenderRain()
+{
+	m_RainEnvironment.Render();
+}
+
+void CPythonBackground::RenderStorm()
+{
+	m_StormEnvironment.Render();
 }
 
 void CPythonBackground::RenderPCBlocker()
@@ -506,8 +936,13 @@ void CPythonBackground::RenderCharacterShadowToTexture()
 		m_eShadowLevel == SHADOW_ALL_MAX ||
 		m_eShadowLevel == SHADOW_GROUND_AND_SOLO)
 	{
-		D3DXMATRIX matWorld;
-		STATEMANAGER.GetTransform(D3DTS_WORLD, &matWorld);
+		CStateManager* pStateManager = CStateManager::InstancePtr();
+		// DX11-only mode: Skip if StateManager/device is not initialized
+		if (!pStateManager || !pStateManager->GetDevice())
+			return;
+
+		DirectX::SimpleMath::Matrix matWorld;
+	pStateManager->GetTransform(GRP_TS_WORLD, &matWorld);
 
 		bool canRender=rkMap.BeginRenderCharacterShadowToTexture();
 		if (canRender)
@@ -521,7 +956,7 @@ void CPythonBackground::RenderCharacterShadowToTexture()
 		}
 		rkMap.EndRenderCharacterShadowToTexture();
 
-		STATEMANAGER.SetTransform(D3DTS_WORLD, &matWorld);
+	pStateManager->SetTransform(GRP_TS_WORLD, &matWorld);
 	}
 
 	DWORD t2=ELTimer_GetMSec();
@@ -651,6 +1086,15 @@ void CPythonBackground::RenderAfterLensFlare()
 	rkMap.RenderAfterLensFlare();
 }
 
+void CPythonBackground::RenderScreenFiltering()
+{
+	if (!IsMapReady())
+		return;
+
+	CMapOutdoor& rkMap=GetMapOutdoorRef();
+	rkMap.RenderScreenFiltering();
+}
+
 void CPythonBackground::ClearGuildArea()
 {
 	if (!IsMapReady())
@@ -677,7 +1121,33 @@ void CPythonBackground::SetCharacterDirLight()
 	if (!mc_pcurEnvironmentData)
 		return;
 
-	STATEMANAGER.SetLight(0, &mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_CHARACTER]);
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid())
+	{
+		CStateManager11* pStateManager11 = CStateManager11::InstancePtr();
+		if (!pStateManager11)
+		{
+			static bool s_bLoggedCharacterDirLightStateManager11Missing = false;
+			if (!s_bLoggedCharacterDirLightStateManager11Missing)
+			{
+				s_bLoggedCharacterDirLightStateManager11Missing = true;
+				TraceError("DX11_LIGHT_BIND_FAIL pass=python_character_light reason=state_manager11_unavailable");
+			}
+			return;
+		}
+
+		pStateManager11->SetLight(0, &mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_CHARACTER]);
+		pStateManager11->SetLightEnable(0, TRUE);
+		return;
+	}
+
+	static bool s_bLoggedCharacterDirLightDX11Unavailable = false;
+	if (!s_bLoggedCharacterDirLightDX11Unavailable)
+	{
+		s_bLoggedCharacterDirLightDX11Unavailable = true;
+		TraceError("DX11_LIGHT_BIND_FAIL pass=python_character_light reason=dx11_device_unavailable");
+	}
+	return;
 }
 
 void CPythonBackground::SetBackgroundDirLight()
@@ -687,7 +1157,33 @@ void CPythonBackground::SetBackgroundDirLight()
 	if (!mc_pcurEnvironmentData)
 		return;
 
-	STATEMANAGER.SetLight(0, &mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND]);
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid())
+	{
+		CStateManager11* pStateManager11 = CStateManager11::InstancePtr();
+		if (!pStateManager11)
+		{
+			static bool s_bLoggedBackgroundDirLightStateManager11Missing = false;
+			if (!s_bLoggedBackgroundDirLightStateManager11Missing)
+			{
+				s_bLoggedBackgroundDirLightStateManager11Missing = true;
+				TraceError("DX11_LIGHT_BIND_FAIL pass=python_background_light reason=state_manager11_unavailable");
+			}
+			return;
+		}
+
+		pStateManager11->SetLight(0, &mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND]);
+		pStateManager11->SetLightEnable(0, TRUE);
+		return;
+	}
+
+	static bool s_bLoggedBackgroundDirLightDX11Unavailable = false;
+	if (!s_bLoggedBackgroundDirLightDX11Unavailable)
+	{
+		s_bLoggedBackgroundDirLightDX11Unavailable = true;
+		TraceError("DX11_LIGHT_BIND_FAIL pass=python_background_light reason=dx11_device_unavailable");
+	}
+	return;
 }
 
 void CPythonBackground::GlobalPositionToLocalPosition(int32_t& rGlobalX, int32_t& rGlobalY)
@@ -769,6 +1265,7 @@ void CPythonBackground::Warp(DWORD dwX, DWORD dwY)
 	m_kSet_iShowingPortalID.clear();
 	m_kMap_dwTargetID_dwChrID.clear();
 	m_kMap_dwID_kReserveTargetEffect.clear();
+	__SyncDX11EnvironmentBridgeState();
 }
 
 void CPythonBackground::VisibleGuildArea()
@@ -801,24 +1298,124 @@ const char * CPythonBackground::GetWarpMapName()
 void CPythonBackground::ChangeToDay()
 {
 	m_iDayMode = DAY_MODE_LIGHT;
+	__SyncDX11EnvironmentBridgeState();
 }
 
 void CPythonBackground::ChangeToNight()
 {
 	m_iDayMode = DAY_MODE_DARK;
+	__SyncDX11EnvironmentBridgeState();
 }
 
 void CPythonBackground::EnableSnowEnvironment()
 {
+	m_bSnowEnvironmentEnabled = true;
 	m_SnowEnvironment.Enable();
+	__SyncDX11EnvironmentBridgeState();
 }
 
 void CPythonBackground::DisableSnowEnvironment()
 {
+	m_bSnowEnvironmentEnabled = false;
 	m_SnowEnvironment.Disable();
+	__SyncDX11EnvironmentBridgeState();
 }
 
-const D3DXVECTOR3 c_v3TreePos = D3DXVECTOR3(76500.0f, -60900.0f, 20215.0f);
+void CPythonBackground::EnableRainEnvironment()
+{
+	m_bRainEnvironmentEnabled = true;
+	m_RainEnvironment.Enable();
+	__SyncDX11EnvironmentBridgeState();
+}
+
+void CPythonBackground::DisableRainEnvironment()
+{
+	m_bRainEnvironmentEnabled = false;
+	m_RainEnvironment.Disable();
+	__SyncDX11EnvironmentBridgeState();
+}
+
+void CPythonBackground::EnableStormEnvironment()
+{
+	m_bStormEnvironmentEnabled = true;
+
+	// Link storm to rain environment
+	m_StormEnvironment.SetRainEnvironment(&m_RainEnvironment);
+
+	// Enable rain if not already enabled (storm requires rain)
+	if (!m_bRainEnvironmentEnabled)
+	{
+		EnableRainEnvironment();
+	}
+
+	m_StormEnvironment.Enable();
+	__SyncDX11EnvironmentBridgeState();
+}
+
+void CPythonBackground::DisableStormEnvironment()
+{
+	m_bStormEnvironmentEnabled = false;
+	m_StormEnvironment.Disable();
+	__SyncDX11EnvironmentBridgeState();
+}
+
+// Public getters for weather environments (for DebugUI)
+CSnowEnvironment* CPythonBackground::GetSnowEnvironment()
+{
+	return &m_SnowEnvironment;
+}
+
+CRainEnvironment* CPythonBackground::GetRainEnvironment()
+{
+	return &m_RainEnvironment;
+}
+
+CStormEnvironment* CPythonBackground::GetStormEnvironment()
+{
+	return &m_StormEnvironment;
+}
+
+void CPythonBackground::SetWeatherMonth(int iMonth)
+{
+	if (iMonth < 1)
+		iMonth = 1;
+	if (iMonth > 12)
+		iMonth = 12;
+
+	m_iWeatherMonth = iMonth;
+	__SyncDX11EnvironmentBridgeState();
+}
+
+void CPythonBackground::SetRainIntensity(float fIntensity)
+{
+	if (fIntensity < 0.0f)
+		fIntensity = 0.0f;
+	if (fIntensity > 1.0f)
+		fIntensity = 1.0f;
+
+	m_fRainIntensity = fIntensity;
+
+	// Map intensity 0.0-1.0 to particle count 0-10000
+	DWORD dwParticleCount = (DWORD)(fIntensity * 10000.0f);
+	m_RainEnvironment.SetParticleCount(dwParticleCount);
+
+	__SyncDX11EnvironmentBridgeState();
+}
+
+void CPythonBackground::__SyncDX11EnvironmentBridgeState()
+{
+	if (!IsMapReady())
+		return;
+
+	CMapOutdoor& rkMap = GetMapOutdoorRef();
+	rkMap.UpdateDX11EnvironmentBridgeState(
+		m_bSnowEnvironmentEnabled,
+		m_iDayMode,
+		m_iWeatherMonth,
+		m_fRainIntensity);
+}
+
+const DirectX::SimpleMath::Vector3 c_v3TreePos = DirectX::SimpleMath::Vector3(76500.0f, -60900.0f, 20215.0f);
 
 void CPythonBackground::SetXMaxTree(int iGrade)
 {
@@ -859,6 +1456,103 @@ void CPythonBackground::SetXMaxTree(int iGrade)
 		"d:/ymir work/effect/etc/christmas_tree/tree_3s.mse",
 	};
 	rkMap.XMasTree_Set(c_v3TreePos.x, c_v3TreePos.y, c_v3TreePos.z, s_strTreeName[iGrade].c_str(), s_strEffectName[iGrade].c_str());
+}
+
+//////////////////////////////////////////////////////////////////////
+// Sun Position Control
+//////////////////////////////////////////////////////////////////////
+
+void CPythonBackground::SetSunDirection(float x, float y, float z)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	// Cast to non-const to modify environment data
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+	// Normalize direction vector
+	D3DXVECTOR3 v3Dir(x, y, z);
+	D3DXVec3Normalize(&v3Dir, &v3Dir);
+
+	// Set background light direction (sun)
+	env->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction = v3Dir;
+
+	// Update light in DX11 immediately
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::SetSunAzimuth(float fAzimuthDegrees)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	// Cast to non-const to modify environment data
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+	// Get current elevation (preserve it)
+	D3DXVECTOR3 v3CurrentDir = env->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction;
+	D3DXVec3Normalize(&v3CurrentDir, &v3CurrentDir);
+
+	// Calculate current elevation from Y component
+	float fElevationRadians = asinf(std::max(-1.0f, std::min(1.0f, v3CurrentDir.y)));
+
+	// Convert azimuth to radians
+	float fAzimuthRadians = D3DXToRadian(fAzimuthDegrees);
+
+	// Convert spherical (azimuth, elevation) to cartesian coordinates
+	// Azimuth: 0°=N, 90°=E, 180°=S, 270°=W
+	// Elevation: -90°=zenith, 0°=horizon, +90°=nadir
+	v3CurrentDir.x = cos(fElevationRadians) * sin(fAzimuthRadians);
+	v3CurrentDir.y = sin(fElevationRadians);
+	v3CurrentDir.z = cos(fElevationRadians) * cos(fAzimuthRadians);
+
+	D3DXVec3Normalize(&v3CurrentDir, &v3CurrentDir);
+	env->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction = v3CurrentDir;
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::SetSunElevation(float fElevationDegrees)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	// Cast to non-const to modify environment data
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+	// Get current azimuth (preserve it)
+	D3DXVECTOR3 v3CurrentDir = env->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction;
+	D3DXVec3Normalize(&v3CurrentDir, &v3CurrentDir);
+
+	// Calculate current azimuth from X and Z components
+	float fAzimuthRadians = atan2f(v3CurrentDir.x, v3CurrentDir.z);
+
+	// Convert elevation to radians
+	float fElevationRadians = D3DXToRadian(fElevationDegrees);
+
+	// Clamp elevation to valid range (-85° to +85° to avoid gimbal lock)
+	fElevationRadians = std::max(-1.483f, std::min(1.483f, fElevationRadians));
+
+	// Convert spherical to cartesian
+	v3CurrentDir.x = cos(fElevationRadians) * sin(fAzimuthRadians);
+	v3CurrentDir.y = sin(fElevationRadians);
+	v3CurrentDir.z = cos(fElevationRadians) * cos(fAzimuthRadians);
+
+	D3DXVec3Normalize(&v3CurrentDir, &v3CurrentDir);
+	env->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction = v3CurrentDir;
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::GetSunDirection(float& x, float& y, float& z) const
+{
+	if (!mc_pcurEnvironmentData)
+	{
+		x = y = z = 0.0f;
+		return;
+	}
+
+	x = mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction.x;
+	y = mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction.y;
+	z = mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction.z;
 }
 
 void CPythonBackground::CreateTargetEffect(DWORD dwID, DWORD dwChrVID)
@@ -919,3 +1613,11 @@ void CPythonBackground::DeleteSpecialEffect(DWORD dwID)
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 	rkMap.SpecialEffect_Delete(dwID);
 }
+
+
+
+
+
+
+
+

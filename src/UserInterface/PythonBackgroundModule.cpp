@@ -41,6 +41,116 @@ PyObject * backgroundEnableSnow(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildNone();
 }
 
+PyObject * backgroundEnableRain(PyObject * poSelf, PyObject * poArgs)
+{
+	int nIsEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &nIsEnable))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG=CPythonBackground::Instance();
+	if (nIsEnable)
+		rkBG.EnableRainEnvironment();
+	else
+		rkBG.DisableRainEnvironment();
+
+	return Py_BuildNone();
+}
+
+PyObject * backgroundEnableStorm(PyObject * poSelf, PyObject * poArgs)
+{
+	int nIsEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &nIsEnable))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG=CPythonBackground::Instance();
+	if (nIsEnable)
+		rkBG.EnableStormEnvironment();
+	else
+		rkBG.DisableStormEnvironment();
+
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetWeatherMonth(PyObject * poSelf, PyObject * poArgs)
+{
+	int iMonth;
+	if (!PyTuple_GetInteger(poArgs, 0, &iMonth))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	rkBG.SetWeatherMonth(iMonth);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundGetWeatherMonth(PyObject * poSelf, PyObject * poArgs)
+{
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	return Py_BuildValue("i", rkBG.GetWeatherMonth());
+}
+
+PyObject * backgroundSetRainIntensity(PyObject * poSelf, PyObject * poArgs)
+{
+	float fIntensity;
+	if (!PyTuple_GetFloat(poArgs, 0, &fIntensity))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	rkBG.SetRainIntensity(fIntensity);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundGetRainIntensity(PyObject * poSelf, PyObject * poArgs)
+{
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	return Py_BuildValue("f", rkBG.GetRainIntensity());
+}
+
+// Sun position control
+PyObject * backgroundSetSunDirection(PyObject * poSelf, PyObject * poArgs)
+{
+	float x, y, z;
+	if (!PyTuple_GetFloat(poArgs, 0, &x))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &y))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &z))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	rkBG.SetSunDirection(x, y, z);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetSunAzimuth(PyObject * poSelf, PyObject * poArgs)
+{
+	float fAzimuth;
+	if (!PyTuple_GetFloat(poArgs, 0, &fAzimuth))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	rkBG.SetSunAzimuth(fAzimuth);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetSunElevation(PyObject * poSelf, PyObject * poArgs)
+{
+	float fElevation;
+	if (!PyTuple_GetFloat(poArgs, 0, &fElevation))
+		return Py_BadArgument();
+
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	rkBG.SetSunElevation(fElevation);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundGetSunDirection(PyObject * poSelf, PyObject * poArgs)
+{
+	CPythonBackground& rkBG = CPythonBackground::Instance();
+	float x, y, z;
+	rkBG.GetSunDirection(x, y, z);
+	return Py_BuildValue("(fff)", x, y, z);
+}
+
 PyObject * backgroundLoadMap(PyObject * poSelf, PyObject * poArgs)
 {
 	char * pszMapPathName;
@@ -94,7 +204,7 @@ PyObject * backgroundRegisterEnvironmentData(PyObject * poSelf, PyObject * poArg
 	{
 		TraceError("background.RegisterEnvironmentData(iIndex=%d, szEnvironmentFileName=%s)", iIndex, pszEnvironmentFileName);
 
-		// TODO:
+		// Fallback:
 		// 디폴트 환경 설정 작업을 해주자
 	}
 
@@ -237,6 +347,12 @@ PyObject * backgroundRenderBeforeLensFlare(PyObject * poSelf, PyObject * poArgs)
 PyObject * backgroundRenderAfterLensFlare(PyObject * poSelf, PyObject * poArgs)
 {
 	CPythonBackground::Instance().RenderAfterLensFlare();
+	return Py_BuildNone();
+}
+
+PyObject * backgroundRenderScreenFiltering(PyObject * poSelf, PyObject * poArgs)
+{
+	CPythonBackground::Instance().RenderScreenFiltering();
 	return Py_BuildNone();
 }
 
@@ -419,16 +535,6 @@ PyObject * backgroundSetBGLoading(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildNone();
 }
 
-PyObject * backgroundSetRenderSort(PyObject * poSelf, PyObject * poArgs)
-{
-	int eSort;
-	if (!PyTuple_GetInteger(poArgs, 0, &eSort))
-		return Py_BadArgument();
-
-	CPythonBackground::Instance().SetTerrainRenderSort((CMapOutdoor::ETerrainRenderSort) eSort);
-	return Py_BuildNone();
-}
-
 PyObject * backgroundSetTransparentTree(PyObject * poSelf, PyObject * poArgs)
 {
 	int bTransparent;
@@ -528,8 +634,14 @@ void initBackground()
 	static PyMethodDef s_methods[] =
 	{
 		{ "IsSoftwareTiling",					backgroundIsSoftwareTiling,					METH_VARARGS }, 
-		{ "EnableSoftwareTiling",				backgroundEnableSoftwareTiling,				METH_VARARGS }, 
-		{ "EnableSnow",							backgroundEnableSnow,						METH_VARARGS }, 
+		{ "EnableSoftwareTiling",				backgroundEnableSoftwareTiling,				METH_VARARGS },
+		{ "EnableSnow",							backgroundEnableSnow,						METH_VARARGS },
+		{ "EnableRain",							backgroundEnableRain,						METH_VARARGS },
+		{ "EnableStorm",						backgroundEnableStorm,						METH_VARARGS },
+		{ "SetWeatherMonth",					backgroundSetWeatherMonth,					METH_VARARGS },
+		{ "GetWeatherMonth",					backgroundGetWeatherMonth,					METH_VARARGS },
+		{ "SetRainIntensity",					backgroundSetRainIntensity,					METH_VARARGS },
+		{ "GetRainIntensity",					backgroundGetRainIntensity,					METH_VARARGS },
 		{ "GlobalPositionToLocalPosition",		backgroundGlobalPositionToLocalPosition,	METH_VARARGS }, 
 		{ "GlobalPositionToMapInfo",			backgroundGlobalPositionToMapInfo,			METH_VARARGS }, 
 		{ "GetRenderShadowTime",				backgroundGetRenderShadowTime,				METH_VARARGS },
@@ -556,6 +668,7 @@ void initBackground()
 		{ "RenderEffect",						backgroundRenderEffect,						METH_VARARGS },
 		{ "RenderBeforeLensFlare",				backgroundRenderBeforeLensFlare,			METH_VARARGS },
 		{ "RenderAfterLensFlare",				backgroundRenderAfterLensFlare,				METH_VARARGS },
+		{ "RenderScreenFiltering",				backgroundRenderScreenFiltering,			METH_VARARGS },
 		{ "RenderCharacterShadowToTexture",		backgroundRenderCharacterShadowToTexture,	METH_VARARGS },
 		{ "RenderDungeon",						backgroundRenderDungeon,					METH_VARARGS },
 		{ "GetHeight",							backgroundGetHeight,						METH_VARARGS },
@@ -566,13 +679,19 @@ void initBackground()
 		{ "GetShadowMapColor",					backgroundGetShadowMapcolor,				METH_VARARGS },
 		{ "SetSplatLimit",						backgroundSetSpaltLimit,					METH_VARARGS },
 		{ "GetRenderedSplatNum",				backgroundGetRenderedSplatNum,				METH_VARARGS },
+
+		// Sun position control
+		{ "SetSunDirection",					backgroundSetSunDirection,					METH_VARARGS },
+		{ "SetSunAzimuth",						backgroundSetSunAzimuth,					METH_VARARGS },
+		{ "SetSunElevation",					backgroundSetSunElevation,					METH_VARARGS },
+		{ "GetSunDirection",					backgroundGetSunDirection,					METH_VARARGS },
+
 		{ "GetRenderedGraphicThingInstanceNum",	backgroundGetRenderedGTINum,				METH_VARARGS },
 		{ "SelectViewDistanceNum",				backgroundSelectViewDistanceNum,			METH_VARARGS },
 		{ "SetViewDistanceSet",					backgroundSetViewDistanceSet,				METH_VARARGS },
 		{ "GetFarClip",							backgroundGetFarClip,						METH_VARARGS },
 		{ "GetDistanceSetInfo",					backgroundGetDistanceSetInfo,				METH_VARARGS },
 		{ "SetBGLoading",						backgroundSetBGLoading,						METH_VARARGS },
-		{ "SetRenderSort",						backgroundSetRenderSort,					METH_VARARGS },
 		{ "SetTransparentTree",					backgroundSetTransparentTree,				METH_VARARGS },
 		{ "SetXMasTree",						backgroundSetXMasTree,						METH_VARARGS },
 		{ "RegisterDungeonMapName",				backgroundRegisterDungeonMapName,			METH_VARARGS },
@@ -613,7 +732,4 @@ void initBackground()
 	PyModule_AddIntConstant(poModule, "DISTANCE2", CPythonBackground::DISTANCE2);
 	PyModule_AddIntConstant(poModule, "DISTANCE3", CPythonBackground::DISTANCE3);
 	PyModule_AddIntConstant(poModule, "DISTANCE4", CPythonBackground::DISTANCE4);
-
-	PyModule_AddIntConstant(poModule, "DISTANCE_SORT", CMapOutdoor::DISTANCE_SORT);
-	PyModule_AddIntConstant(poModule, "TEXTURE_SORT", CMapOutdoor::TEXTURE_SORT);
 }

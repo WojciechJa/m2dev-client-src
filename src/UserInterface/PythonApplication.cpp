@@ -254,7 +254,11 @@ m_uDX11WorldSubmitMaskMismatchTelemetryCommitted(0u),
 m_uDX11WorldSubmitMaskMismatchGateObserved(0u),
 m_uDX11WorldSubmitMaskMismatchGateSubmitted(0u),
 m_uDX11WorldSubmitMaskMismatchGateApplicable(0u),
-m_uDX11WorldSubmitMaskMismatchGateCommitted(0u)
+m_uDX11WorldSubmitMaskMismatchGateCommitted(0u),
+m_uDX11WorldSubmitMaskMismatchLastReasonMask(0u),
+m_uDX11WorldSubmitMaskMismatchLastPhaseActive(0u),
+m_dwDX11WorldSubmitMaskMismatchLastFrame(0u),
+m_dwDX11WorldSubmitMaskMismatchLastElapsedMS(0u)
 {
 #ifndef _DEBUG
 	SetEterExceptionHandler();
@@ -610,6 +614,10 @@ void CPythonApplication::RenderGame()
 		m_pyBackground.RenderWater();
 	if (!bDX11HandoffReducedFrame)
 		m_pyBackground.RenderSnow();
+	if (!bDX11HandoffReducedFrame)
+		m_pyBackground.RenderRain();
+	if (!bDX11HandoffReducedFrame)
+		m_pyBackground.RenderStorm();
 
 	// Reset effect submit/render counters after world pass consumed previous-frame values
 	// and before any current-frame effect draws start.
@@ -636,6 +644,12 @@ void CPythonApplication::RenderGame()
 
 	if (!bDX11HandoffReducedFrame)
 		m_pyBackground.RenderAfterLensFlare();
+
+	// M3-SCREEN-FILTER-FIX: Render screen filter overlay (night tint, atmospheric effects)
+	// Must be rendered LAST, after all other world rendering (as final fullscreen overlay)
+	if (!bDX11HandoffReducedFrame)
+		m_pyBackground.RenderScreenFiltering();
+
 	m_dwPerfMapMS += ELTimer_GetMSec() - dwMapStart;
 }
 
@@ -1624,10 +1638,14 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 		m_uDX11WorldSubmitMaskMismatchTelemetrySubmitted = 0u;
 		m_uDX11WorldSubmitMaskMismatchTelemetryApplicable = 0u;
 		m_uDX11WorldSubmitMaskMismatchTelemetryCommitted = 0u;
-		m_uDX11WorldSubmitMaskMismatchGateObserved = 0u;
-		m_uDX11WorldSubmitMaskMismatchGateSubmitted = 0u;
-		m_uDX11WorldSubmitMaskMismatchGateApplicable = 0u;
-		m_uDX11WorldSubmitMaskMismatchGateCommitted = 0u;
+			m_uDX11WorldSubmitMaskMismatchGateObserved = 0u;
+			m_uDX11WorldSubmitMaskMismatchGateSubmitted = 0u;
+			m_uDX11WorldSubmitMaskMismatchGateApplicable = 0u;
+			m_uDX11WorldSubmitMaskMismatchGateCommitted = 0u;
+			m_uDX11WorldSubmitMaskMismatchLastReasonMask = 0u;
+			m_uDX11WorldSubmitMaskMismatchLastPhaseActive = 0u;
+			m_dwDX11WorldSubmitMaskMismatchLastFrame = 0u;
+			m_dwDX11WorldSubmitMaskMismatchLastElapsedMS = 0u;
 		m_bDX11WorldNativePass2Mode = false;
 		m_bDX11WorldNativePass3Mode = false;
 		m_bDX11WorldNativePass4Mode = false;
@@ -4792,6 +4810,31 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 					(dwTelemetrySubmittedMask == dwDX11WorldPortMaskSubmittedFrameMasked) &&
 					(dwTelemetryApplicableMask == dwDX11WorldPortMaskApplicableMasked) &&
 					(dwTelemetryCommittedMask == dwDX11WorldPortMaskCommitted);
+				uint32_t uWorldSubmitMismatchReasonMask = 0u;
+				if (dwTelemetryObservedMask != dwDX11WorldPortMaskObservedMasked)
+					uWorldSubmitMismatchReasonMask |= 0x01u;
+				if (dwTelemetrySubmittedMask != dwDX11WorldPortMaskSubmittedFrameMasked)
+					uWorldSubmitMismatchReasonMask |= 0x02u;
+				if (dwTelemetryApplicableMask != dwDX11WorldPortMaskApplicableMasked)
+					uWorldSubmitMismatchReasonMask |= 0x04u;
+				if (dwTelemetryCommittedMask != dwDX11WorldPortMaskCommitted)
+					uWorldSubmitMismatchReasonMask |= 0x08u;
+				const bool bWorldSubmitParityPhaseActive =
+					bDX11WorldNativeDrawCommitted &&
+					bDX11WorldTerrainRenderResult &&
+					bDX11NativeVisibleActive &&
+					bDX11NativeWorldMinimalRequested &&
+					bDX11NativeWorldMinimalActive &&
+					bDX11WorldDryRunReady &&
+					bDX11NativeWorldApplicableReady &&
+					bDX11NativeWorldSubmittedReady &&
+					bDX11NativeWorldCommittedReady &&
+					bDX11NativePresentConfidenceReady &&
+					!m_bDX11WorldHandoffProbeMode &&
+					!m_bDX11RuntimeCompatGraceMode &&
+					!bDX11WorldAutoPresentCooldownActiveNow &&
+					!bDX11StrictNativePresentBackoffActiveNow;
+				const char* c_szWorldSubmitParityPhase = bWorldSubmitParityPhaseActive ? "active" : "warmup";
 
 				m_uDX11WorldSubmitMaskMismatchTelemetryObserved = dwTelemetryObservedMask;
 				m_uDX11WorldSubmitMaskMismatchTelemetrySubmitted = dwTelemetrySubmittedMask;
@@ -4804,33 +4847,80 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 
 				if (!bWorldSubmitMaskParity)
 				{
-					if (!m_bDX11WorldSubmitMaskMismatchActive)
-						++m_dwDX11WorldSubmitMaskMismatchCount;
+					m_uDX11WorldSubmitMaskMismatchLastReasonMask = uWorldSubmitMismatchReasonMask;
+					m_uDX11WorldSubmitMaskMismatchLastPhaseActive = bWorldSubmitParityPhaseActive ? 1u : 0u;
+					m_dwDX11WorldSubmitMaskMismatchLastFrame = m_dwDX11RuntimeCompatFrameCount;
+					m_dwDX11WorldSubmitMaskMismatchLastElapsedMS = m_dwDX11RuntimeCompatElapsedMS;
 
-					if (!m_bDX11WorldSubmitMaskMismatchActive || (0u == m_dwDX11WorldSubmitMaskMismatchLastLogMS) ||
-						(dwVisibleNow - m_dwDX11WorldSubmitMaskMismatchLastLogMS) >= 5000u)
+					if (bWorldSubmitParityPhaseActive)
 					{
-						m_dwDX11WorldSubmitMaskMismatchLastLogMS = dwVisibleNow;
-						TraceError(
-							"DX11_WORLD_SUBMIT_MASK_MISMATCH telemetry_obs=0x%02X telemetry_sub=0x%02X telemetry_app=0x%02X telemetry_com=0x%02X gate_obs=0x%02X gate_sub=0x%02X gate_app=0x%02X gate_com=0x%02X frame=%u elapsed_ms=%u",
-							static_cast<unsigned int>(dwTelemetryObservedMask),
-							static_cast<unsigned int>(dwTelemetrySubmittedMask),
-							static_cast<unsigned int>(dwTelemetryApplicableMask),
-							static_cast<unsigned int>(dwTelemetryCommittedMask),
-							static_cast<unsigned int>(dwDX11WorldPortMaskObservedMasked),
-							static_cast<unsigned int>(dwDX11WorldPortMaskSubmittedFrameMasked),
-							static_cast<unsigned int>(dwDX11WorldPortMaskApplicableMasked),
-							static_cast<unsigned int>(dwDX11WorldPortMaskCommitted),
-							m_dwDX11RuntimeCompatFrameCount,
-							m_dwDX11RuntimeCompatElapsedMS);
+						if (!m_bDX11WorldSubmitMaskMismatchActive)
+							++m_dwDX11WorldSubmitMaskMismatchCount;
+
+						if (!m_bDX11WorldSubmitMaskMismatchActive || (0u == m_dwDX11WorldSubmitMaskMismatchLastLogMS) ||
+							(dwVisibleNow - m_dwDX11WorldSubmitMaskMismatchLastLogMS) >= 5000u)
+						{
+							m_dwDX11WorldSubmitMaskMismatchLastLogMS = dwVisibleNow;
+							TraceError(
+								"DX11_WORLD_SUBMIT_MASK_MISMATCH phase=%s reason_mask=0x%02X telemetry_obs=0x%02X telemetry_sub=0x%02X telemetry_app=0x%02X telemetry_com=0x%02X gate_obs=0x%02X gate_sub=0x%02X gate_app=0x%02X gate_com=0x%02X frame=%u elapsed_ms=%u",
+								c_szWorldSubmitParityPhase,
+								static_cast<unsigned int>(uWorldSubmitMismatchReasonMask),
+								static_cast<unsigned int>(dwTelemetryObservedMask),
+								static_cast<unsigned int>(dwTelemetrySubmittedMask),
+								static_cast<unsigned int>(dwTelemetryApplicableMask),
+								static_cast<unsigned int>(dwTelemetryCommittedMask),
+								static_cast<unsigned int>(dwDX11WorldPortMaskObservedMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskSubmittedFrameMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskApplicableMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskCommitted),
+								m_dwDX11RuntimeCompatFrameCount,
+								m_dwDX11RuntimeCompatElapsedMS);
+						}
+						m_bDX11WorldSubmitMaskMismatchActive = true;
 					}
-					m_bDX11WorldSubmitMaskMismatchActive = true;
+					else
+					{
+						if (m_bDX11WorldSubmitMaskMismatchActive)
+						{
+							m_bDX11WorldSubmitMaskMismatchActive = false;
+							TraceError(
+								"DX11_WORLD_SUBMIT_MASK_MISMATCH_RECOVERED phase=%s obs=0x%02X sub=0x%02X app=0x%02X com=0x%02X frame=%u elapsed_ms=%u",
+								c_szWorldSubmitParityPhase,
+								static_cast<unsigned int>(dwDX11WorldPortMaskObservedMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskSubmittedFrameMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskApplicableMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskCommitted),
+								m_dwDX11RuntimeCompatFrameCount,
+								m_dwDX11RuntimeCompatElapsedMS);
+						}
+
+						static DWORD s_dwWorldSubmitWarmupParityLogTick = 0u;
+						if (0u == s_dwWorldSubmitWarmupParityLogTick || (dwVisibleNow - s_dwWorldSubmitWarmupParityLogTick) >= 5000u)
+						{
+							s_dwWorldSubmitWarmupParityLogTick = dwVisibleNow;
+							TraceError(
+								"DX11_WORLD_SUBMIT_MASK_PARITY_WARMUP phase=%s reason_mask=0x%02X telemetry_obs=0x%02X telemetry_sub=0x%02X telemetry_app=0x%02X telemetry_com=0x%02X gate_obs=0x%02X gate_sub=0x%02X gate_app=0x%02X gate_com=0x%02X frame=%u elapsed_ms=%u",
+								c_szWorldSubmitParityPhase,
+								static_cast<unsigned int>(uWorldSubmitMismatchReasonMask),
+								static_cast<unsigned int>(dwTelemetryObservedMask),
+								static_cast<unsigned int>(dwTelemetrySubmittedMask),
+								static_cast<unsigned int>(dwTelemetryApplicableMask),
+								static_cast<unsigned int>(dwTelemetryCommittedMask),
+								static_cast<unsigned int>(dwDX11WorldPortMaskObservedMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskSubmittedFrameMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskApplicableMasked),
+								static_cast<unsigned int>(dwDX11WorldPortMaskCommitted),
+								m_dwDX11RuntimeCompatFrameCount,
+								m_dwDX11RuntimeCompatElapsedMS);
+						}
+					}
 				}
 				else if (m_bDX11WorldSubmitMaskMismatchActive)
 				{
 					m_bDX11WorldSubmitMaskMismatchActive = false;
 					TraceError(
-						"DX11_WORLD_SUBMIT_MASK_MISMATCH_RECOVERED obs=0x%02X sub=0x%02X app=0x%02X com=0x%02X frame=%u elapsed_ms=%u",
+						"DX11_WORLD_SUBMIT_MASK_MISMATCH_RECOVERED phase=%s obs=0x%02X sub=0x%02X app=0x%02X com=0x%02X frame=%u elapsed_ms=%u",
+						c_szWorldSubmitParityPhase,
 						static_cast<unsigned int>(dwDX11WorldPortMaskObservedMasked),
 						static_cast<unsigned int>(dwDX11WorldPortMaskSubmittedFrameMasked),
 						static_cast<unsigned int>(dwDX11WorldPortMaskApplicableMasked),
@@ -6390,6 +6480,10 @@ void CPythonApplication::Loop()
 			const uint32_t uWorldSubmitMismatchGateSubmitted = m_uDX11WorldSubmitMaskMismatchGateSubmitted;
 			const uint32_t uWorldSubmitMismatchGateApplicable = m_uDX11WorldSubmitMaskMismatchGateApplicable;
 			const uint32_t uWorldSubmitMismatchGateCommitted = m_uDX11WorldSubmitMaskMismatchGateCommitted;
+			const uint32_t uWorldSubmitMismatchLastReasonMask = m_uDX11WorldSubmitMaskMismatchLastReasonMask;
+			const uint32_t uWorldSubmitMismatchLastPhaseActive = m_uDX11WorldSubmitMaskMismatchLastPhaseActive;
+			const uint32_t uWorldSubmitMismatchLastFrame = m_dwDX11WorldSubmitMaskMismatchLastFrame;
+			const uint32_t uWorldSubmitMismatchLastElapsedMS = m_dwDX11WorldSubmitMaskMismatchLastElapsedMS;
 			if (CStateManager* pStateManager = CStateManager::InstancePtr())
 			{
 				const CStateManager::SDebugDrawDiagnostics& rkStateDrawDiag = pStateManager->GetDebugDrawDiagnostics();
@@ -6434,6 +6528,7 @@ void CPythonApplication::Loop()
 				uPSConstUploadStartRegister = rkStateDrawDiag.uPSConstUploadStartRegister;
 				uPSConstUploadEndRegister = rkStateDrawDiag.uPSConstUploadEndRegister;
 			}
+			const CEffectManager::SDX11TargetRingDiagnostics& rkTargetDiag = m_kEftMgr.GetDX11TargetRingDiagnostics();
 			CImGuiMetricsCollector::Instance()->SetDX11Metrics(
 				uFeatureLevel,
 				uWorldPortMask,
@@ -6458,6 +6553,15 @@ void CPythonApplication::Loop()
 				rkWorldSubmitTelemetry.dwEffectSubmitted,
 				rkWorldSubmitTelemetry.dwEffectParticleSubmitted,
 				rkWorldSubmitTelemetry.dwEffectMeshSubmitted,
+				rkTargetDiag.dwActiveInstanceCount,
+				rkTargetDiag.dwSubmittedCount,
+				rkTargetDiag.dwSkippedCount,
+				rkTargetDiag.dwLastEffectCRC,
+				rkTargetDiag.dwLastTimestampMS,
+				rkTargetDiag.dwLastBlendState,
+				rkTargetDiag.dwLastPipelineFlags,
+				m_kEftMgr.GetDX11TargetRingAlphaClipThreshold(),
+				rkTargetDiag.szLastReason,
 				rkWorldSubmitTelemetry.dwSpeedTreeSubmitted,
 				uNoRTVWithPSCount,
 				uNoRTVWithPSIndexedCount,
@@ -6548,7 +6652,7 @@ void CPythonApplication::Loop()
 				{
 					s_dwDX11ImGuiMetricsParityLogTick = dwNow;
 					TraceError(
-						"DX11_IMGUI_METRICS_PARITY draw_device=%u draw_subsystems=%u draw_effective=%u prim_device=%u prim_subsystems=%u prim_effective=%u entities=%u world_passes=%u submitted_mask=0x%02X observed_mask=0x%02X applicable_mask=0x%02X committed_mask=0x%02X terrain=%u splats=%u water=%u objects=%u effects=%u effects_particle=%u effects_mesh=%u speedtree=%u light_req=%u light_bound=%u light_clip=%u light_cap=%u light_skip=%u no_rtv_ps=%u no_rtv_ps_idx=%u no_rtv_ps_non=%u no_rtv_ps_last_topo=%u no_rtv_ps_last_elem=%u no_rtv_ps_last_depth=%u unsupported_rs=%u unsupported_rs_last_type=%u unsupported_rs_last_value=%u fog_en=%u fog_mode=%u fog_range=%u fog_color=0x%08X fog_density=0x%08X fog_start=0x%08X fog_end=0x%08X vs_const_clamp=%u vs_const_last=%u/%u/%u vs_const_set=%u/%u/%u/%u vs_const_upload=%u/%u/%u-%u ps_const_clamp=%u ps_const_last=%u/%u/%u ps_const_set=%u/%u/%u/%u ps_const_upload=%u/%u/%u-%u world_mask_mismatch_cnt=%u world_mask_mismatch_active=%u world_mask_mismatch_tele=0x%02X/0x%02X/0x%02X/0x%02X world_mask_mismatch_gate=0x%02X/0x%02X/0x%02X/0x%02X",
+						"DX11_IMGUI_METRICS_PARITY draw_device=%u draw_subsystems=%u draw_effective=%u prim_device=%u prim_subsystems=%u prim_effective=%u entities=%u world_passes=%u submitted_mask=0x%02X observed_mask=0x%02X applicable_mask=0x%02X committed_mask=0x%02X terrain=%u splats=%u water=%u objects=%u effects=%u effects_particle=%u effects_mesh=%u speedtree=%u light_req=%u light_bound=%u light_clip=%u light_cap=%u light_skip=%u no_rtv_ps=%u no_rtv_ps_idx=%u no_rtv_ps_non=%u no_rtv_ps_last_topo=%u no_rtv_ps_last_elem=%u no_rtv_ps_last_depth=%u unsupported_rs=%u unsupported_rs_last_type=%u unsupported_rs_last_value=%u fog_en=%u fog_mode=%u fog_range=%u fog_color=0x%08X fog_density=0x%08X fog_start=0x%08X fog_end=0x%08X vs_const_clamp=%u vs_const_last=%u/%u/%u vs_const_set=%u/%u/%u/%u vs_const_upload=%u/%u/%u-%u ps_const_clamp=%u ps_const_last=%u/%u/%u ps_const_set=%u/%u/%u/%u ps_const_upload=%u/%u/%u-%u world_mask_mismatch_cnt=%u world_mask_mismatch_active=%u world_mask_mismatch_tele=0x%02X/0x%02X/0x%02X/0x%02X world_mask_mismatch_gate=0x%02X/0x%02X/0x%02X/0x%02X world_mask_mismatch_last=0x%02X/%u/%u/%u",
 						uDeviceDrawCalls,
 						uSubsystemDrawCalls,
 						uEffectiveDrawCalls,
@@ -6623,7 +6727,11 @@ void CPythonApplication::Loop()
 						static_cast<unsigned int>(uWorldSubmitMismatchGateObserved),
 						static_cast<unsigned int>(uWorldSubmitMismatchGateSubmitted),
 						static_cast<unsigned int>(uWorldSubmitMismatchGateApplicable),
-						static_cast<unsigned int>(uWorldSubmitMismatchGateCommitted));
+						static_cast<unsigned int>(uWorldSubmitMismatchGateCommitted),
+						static_cast<unsigned int>(uWorldSubmitMismatchLastReasonMask),
+						static_cast<unsigned int>(uWorldSubmitMismatchLastPhaseActive),
+						static_cast<unsigned int>(uWorldSubmitMismatchLastFrame),
+						static_cast<unsigned int>(uWorldSubmitMismatchLastElapsedMS));
 
 					// EffectLib runtime parity heartbeat for migration diagnostics:
 					// compares EffectManager local counters/resources against world submit telemetry.
@@ -6658,6 +6766,18 @@ void CPythonApplication::Loop()
 						llDeltaEffects,
 						llDeltaParticle,
 						llDeltaMesh);
+
+					TraceError(
+						"DX11_TARGETFX_RUNTIME active=%u submit=%u skip=%u last_crc=0x%08X last_ts=%u blend=0x%08X pipeline=0x%08X alpha_clip=%.6f reason=%s",
+						static_cast<unsigned int>(rkTargetDiag.dwActiveInstanceCount),
+						static_cast<unsigned int>(rkTargetDiag.dwSubmittedCount),
+						static_cast<unsigned int>(rkTargetDiag.dwSkippedCount),
+						static_cast<unsigned int>(rkTargetDiag.dwLastEffectCRC),
+						static_cast<unsigned int>(rkTargetDiag.dwLastTimestampMS),
+						static_cast<unsigned int>(rkTargetDiag.dwLastBlendState),
+						static_cast<unsigned int>(rkTargetDiag.dwLastPipelineFlags),
+						static_cast<double>(m_kEftMgr.GetDX11TargetRingAlphaClipThreshold()),
+						rkTargetDiag.szLastReason[0] ? rkTargetDiag.szLastReason : "none");
 				}
 
 				// Forward metrics to ImGuiManager for rendering
@@ -7996,6 +8116,10 @@ bool CPythonApplication::InitializeImGui()
 		const uint32_t uWorldSubmitMismatchGateSubmitted = m_uDX11WorldSubmitMaskMismatchGateSubmitted;
 		const uint32_t uWorldSubmitMismatchGateApplicable = m_uDX11WorldSubmitMaskMismatchGateApplicable;
 		const uint32_t uWorldSubmitMismatchGateCommitted = m_uDX11WorldSubmitMaskMismatchGateCommitted;
+		const uint32_t uWorldSubmitMismatchLastReasonMask = m_uDX11WorldSubmitMaskMismatchLastReasonMask;
+		const uint32_t uWorldSubmitMismatchLastPhaseActive = m_uDX11WorldSubmitMaskMismatchLastPhaseActive;
+		const uint32_t uWorldSubmitMismatchLastFrame = m_dwDX11WorldSubmitMaskMismatchLastFrame;
+		const uint32_t uWorldSubmitMismatchLastElapsedMS = m_dwDX11WorldSubmitMaskMismatchLastElapsedMS;
 		if (CStateManager* pStateManager = CStateManager::InstancePtr())
 		{
 			const CStateManager::SDebugDrawDiagnostics& rkStateDrawDiag = pStateManager->GetDebugDrawDiagnostics();
@@ -8041,6 +8165,7 @@ bool CPythonApplication::InitializeImGui()
 			uPSConstUploadEndRegister = rkStateDrawDiag.uPSConstUploadEndRegister;
 		}
 
+		const CEffectManager::SDX11TargetRingDiagnostics& rkTargetDiag = m_kEftMgr.GetDX11TargetRingDiagnostics();
 		CImGuiMetricsCollector::Instance()->SetDX11Metrics(
 			uFeatureLevel,
 			uWorldPortMask,
@@ -8065,6 +8190,15 @@ bool CPythonApplication::InitializeImGui()
 			rkWorldSubmitTelemetry.dwEffectSubmitted,
 			rkWorldSubmitTelemetry.dwEffectParticleSubmitted,
 			rkWorldSubmitTelemetry.dwEffectMeshSubmitted,
+			rkTargetDiag.dwActiveInstanceCount,
+			rkTargetDiag.dwSubmittedCount,
+			rkTargetDiag.dwSkippedCount,
+			rkTargetDiag.dwLastEffectCRC,
+			rkTargetDiag.dwLastTimestampMS,
+			rkTargetDiag.dwLastBlendState,
+			rkTargetDiag.dwLastPipelineFlags,
+			m_kEftMgr.GetDX11TargetRingAlphaClipThreshold(),
+			rkTargetDiag.szLastReason,
 			rkWorldSubmitTelemetry.dwSpeedTreeSubmitted,
 			uNoRTVWithPSCount,
 			uNoRTVWithPSIndexedCount,
