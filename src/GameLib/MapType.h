@@ -4,6 +4,7 @@
 class CProperty;
 
 #include "EterLib/SkyBox.h"
+#include "EterLib/LightDesc.h"
 #include "AudioLib/SoundEngine.h"
 
 /////////////////////////////////////////////////////////////////
@@ -116,21 +117,30 @@ namespace prt
 /////////////////////////////////////////////////////////////////
 // Environment
 //
-enum 
+enum
 {
 	ENV_DIRLIGHT_BACKGROUND,
 	ENV_DIRLIGHT_CHARACTER,
 	ENV_DIRLIGHT_NUM
 };
 
+// M3-SKY-BLEND-FIX-74: Skybox render policy system
+// Controls how skybox rendering mode is determined
+enum ESkyRenderPolicy
+{
+	POLICY_AUTO_FROM_MSENV = 0,  // Use bSkyBoxTextureRenderMode from .msenv file
+	POLICY_FORCE_GRADIENT = 1,   // Force diffuse/gradient mode regardless of available textures
+	POLICY_FORCE_TEXTURE = 2     // Force texture mode if textures are available
+};
+
 typedef struct SEnvironmentData
 {
 	// Light
 	BOOL		bDirLightsEnable[ENV_DIRLIGHT_NUM];
-	D3DLIGHT9	DirLights[ENV_DIRLIGHT_NUM];
+	SLightDesc	DirLights[ENV_DIRLIGHT_NUM];
 
 	// Material
-	D3DMATERIAL9 Material;
+	GrpMaterial Material;
 
 	// Fog
 	BOOL bFogEnable;

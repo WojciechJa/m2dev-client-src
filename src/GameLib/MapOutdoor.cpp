@@ -1,15 +1,147 @@
-#include "StdAfx.h"
-#include "EterLib/StateManager.h"
+﻿#include "StdAfx.h"
 #include "EterLib/Camera.h"
+#include "EterLib/GrpLightManager.h"
+#include "EterLib/StateManager.h"
 #include "PRTerrainLib/StdAfx.h"
 #include "EffectLib/EffectManager.h"
 
 #include "MapOutdoor.h"
 #include "TerrainPatch.h"
 #include "AreaTerrain.h"
+#include "UserInterface/PythonSystem.h"
+#include "UserInterface/config.h"
+
+// DX11 support
+#include <d3d11.h>
+#include <d3dcompiler.h>
+#include <cmath>
+#include <cstring>
 
 //#define USE_LEVEL
 // unsigned int uiNumSplat;
+
+namespace
+{
+	inline int ClampWeatherMonth(int iMonth)
+	{
+		if (iMonth < 1)
+			return 1;
+		if (iMonth > 12)
+			return 12;
+		return iMonth;
+	}
+
+	inline float ClampRainIntensity(float fRainIntensity)
+	{
+		if (fRainIntensity < 0.0f)
+			return 0.0f;
+		if (fRainIntensity > 1.0f)
+			return 1.0f;
+		return fRainIntensity;
+	}
+
+	inline int ClampFogLevel(int iFogLevel)
+	{
+		if (iFogLevel < 0)
+			return 0;
+		if (iFogLevel > 2)
+			return 2;
+		return iFogLevel;
+	}
+
+	inline float GetLinearFogScaleByLevel(int iFogLevel)
+	{
+		static constexpr float kFogScaleByLevel[3] =
+		{
+			DX11RuntimeConfig::kFogLinearScaleLight,
+			DX11RuntimeConfig::kFogLinearScaleMiddle,
+			DX11RuntimeConfig::kFogLinearScaleDense
+		};
+		return kFogScaleByLevel[ClampFogLevel(iFogLevel)];
+	}
+
+	inline float ClampFogNearDistance(float fFogNear)
+	{
+		return fMAX(DX11RuntimeConfig::kFogNearMinDistance, fFogNear);
+	}
+
+	inline float ClampFogFarDistance(float fFogFar)
+	{
+		return fMAX(
+			DX11RuntimeConfig::kFogFarMinDistance,
+			fMIN(DX11RuntimeConfig::kFogFarMaxDistance, fFogFar));
+	}
+
+	inline uint64_t SkyHashInit()
+	{
+		return 1469598103934665603ull;
+	}
+
+	inline void SkyHashBytes(uint64_t& h, const void* pData, size_t uSize)
+	{
+		const unsigned char* pBytes = reinterpret_cast<const unsigned char*>(pData);
+		for (size_t i = 0; i < uSize; ++i)
+		{
+			h ^= static_cast<uint64_t>(pBytes[i]);
+			h *= 1099511628211ull;
+		}
+	}
+
+	template <typename T>
+	inline void SkyHashValue(uint64_t& h, const T& rValue)
+	{
+		SkyHashBytes(h, &rValue, sizeof(T));
+	}
+
+	inline uint64_t BuildSkyConfigRevision(const TEnvironmentData* pEnvData, bool bUseDiffuseMode, int iDayMode)
+	{
+		if (!pEnvData)
+			return 0ull;
+
+		uint64_t h = SkyHashInit();
+		SkyHashValue(h, bUseDiffuseMode);
+		SkyHashValue(h, pEnvData->bSkyBoxTextureRenderMode);
+		SkyHashValue(h, pEnvData->v3SkyBoxScale.x);
+		SkyHashValue(h, pEnvData->v3SkyBoxScale.y);
+		SkyHashValue(h, pEnvData->v3SkyBoxScale.z);
+		SkyHashValue(h, pEnvData->bySkyBoxGradientLevelUpper);
+		SkyHashValue(h, pEnvData->bySkyBoxGradientLevelLower);
+		SkyHashValue(h, iDayMode);  // FIX: Include day/night mode in skybox revision
+		SkyHashValue(h, pEnvData->v2CloudScale.x);
+		SkyHashValue(h, pEnvData->v2CloudScale.y);
+		SkyHashValue(h, pEnvData->fCloudHeight);
+		SkyHashValue(h, pEnvData->v2CloudTextureScale.x);
+		SkyHashValue(h, pEnvData->v2CloudTextureScale.y);
+		SkyHashValue(h, pEnvData->v2CloudSpeed.x);
+		SkyHashValue(h, pEnvData->v2CloudSpeed.y);
+		SkyHashValue(h, pEnvData->CloudGradientColor.m_FirstColor);
+		SkyHashValue(h, pEnvData->CloudGradientColor.m_SecondColor);
+
+		for (int i = 0; i < 6; ++i)
+		{
+			const std::string& rFace = pEnvData->strSkyBoxFaceFileName[i];
+			const uint32_t uLen = static_cast<uint32_t>(rFace.size());
+			SkyHashValue(h, uLen);
+			if (uLen > 0u)
+				SkyHashBytes(h, rFace.data(), uLen);
+		}
+
+		const uint32_t uCloudLen = static_cast<uint32_t>(pEnvData->strCloudTextureFileName.size());
+		SkyHashValue(h, uCloudLen);
+		if (uCloudLen > 0u)
+			SkyHashBytes(h, pEnvData->strCloudTextureFileName.data(), uCloudLen);
+
+		const uint32_t uGradientCount = static_cast<uint32_t>(pEnvData->SkyBoxGradientColorVector.size());
+		SkyHashValue(h, uGradientCount);
+		for (uint32_t i = 0u; i < uGradientCount; ++i)
+		{
+			SkyHashValue(h, pEnvData->SkyBoxGradientColorVector[i].m_FirstColor);
+			SkyHashValue(h, pEnvData->SkyBoxGradientColorVector[i].m_SecondColor);
+		}
+
+		return h;
+	}
+}
 
 struct FGetObjectHeight
 {
@@ -119,6 +251,7 @@ bool CMapOutdoor::Initialize()
 		m_IndexBuffer[i].Destroy();
 
 	m_bSettingTerrainVisible = false;
+	m_bDX11TerrainUsePositiveYForFrustum = false;
 	m_bDrawWireFrame	= false;
 	m_bDrawShadow		= false;
 	m_bDrawChrShadow	= false;
@@ -129,19 +262,11 @@ bool CMapOutdoor::Initialize()
 
 	m_pRootNode = NULL;
 	
-	//////////////////////////////////////////////////////////////////////////
-	// Character Shadow
-	m_lpCharacterShadowMapTexture = NULL;
-	m_lpCharacterShadowMapRenderTargetSurface = NULL;
-	m_lpCharacterShadowMapDepthSurface = NULL;
-
-	m_lpBackupRenderTargetSurface = NULL;
-	m_lpBackupDepthSurface = NULL;
-	// Character Shadow
-	//////////////////////////////////////////////////////////////////////////
-
 	m_iRenderedPatchNum = 0;
 	m_iRenderedSplatNum = 0;
+	m_iRenderedSplatNumSqSum = 0;
+	m_dwRenderedCRCNum = 0;
+	m_dwRenderedGraphicThingInstanceNum = 0;
 
 	//////////////////////////////////////////////////////////////////////////
 	m_fOpaqueWaterDepth = 400.0f;
@@ -159,10 +284,9 @@ bool CMapOutdoor::Initialize()
 	//////////////////////////////////////////////////////////////////////////	
 	
 	m_PatchVector.clear();
-	
-	// 2004.10.14.myevan.TEMP_CAreaLoaderThread
-	//m_bBGLoadingEnable = false;
-	m_eTerrainRenderSort = DISTANCE_SORT;
+	m_DX11LastNonEmptyPatchVector.clear();
+	m_dwDX11LastNonEmptyPatchVectorMS = 0u;
+	m_lDX11LastNonEmptyPatchTotalCount = 0;
 
 	D3DXMatrixIdentity(&m_matWorldForCommonUse);
 	
@@ -184,6 +308,110 @@ bool CMapOutdoor::Initialize()
 	m_bEnablePortal = FALSE;
 
 	m_wShadowMapSize = 512;
+
+	// DX11 terrain resources initialization
+	m_bDX11TerrainResourcesReady = false;
+	m_pDX11Device = nullptr;
+	m_pDX11TerrainVertexShader = nullptr;
+	m_pDX11TerrainPixelShader = nullptr;
+	m_pDX11TerrainInputLayout = nullptr;
+	m_pDX11TerrainConstantBuffer = nullptr;
+	m_pDX11TerrainIndexBuffer = nullptr;
+	m_uDX11TerrainIndexCount = 0u;
+	m_pDX11TerrainSamplerState = nullptr;
+	m_pDX11TerrainDefaultTexture = nullptr;
+	m_pDX11TerrainDefaultTextureSRV = nullptr;
+	m_pDX11TerrainMissingTexture = nullptr;
+	m_pDX11TerrainMissingTextureSRV = nullptr;
+	m_pDX11CommonStates = nullptr; // Phase 2: DirectXTK CommonStates
+
+	// DX11 object rendering resources initialization (W4.1)
+	m_pDX11ObjectVS = nullptr;
+	m_pDX11ObjectPS = nullptr;
+	m_pDX11ObjectInputLayout = nullptr;
+	m_pDX11ObjectConstantBuffer = nullptr;
+	m_pDX11ObjectSamplerState = nullptr;
+
+	// DX11 terrain splat resources initialization
+	m_bDX11TerrainSplatResourcesReady = false;
+	m_pDX11TerrainSplatVertexShader = nullptr;
+	m_pDX11TerrainSplatPixelShader = nullptr;
+	m_pDX11TerrainSplatBlendState = nullptr;
+	m_pDX11TerrainSplatAlphaSamplerState = nullptr;
+
+	// DX11 water resources initialization
+	m_bDX11WaterResourcesReady = false;
+	m_pDX11WaterVertexShader = nullptr;
+	m_pDX11WaterPixelShader = nullptr;
+	m_pDX11WaterInputLayout = nullptr;
+	m_pDX11WaterConstantBuffer = nullptr;
+	m_pDX11WaterBlendState = nullptr;
+	m_pDX11WaterDepthState = nullptr;
+	m_pDX11WaterRasterState = nullptr;
+	m_pDX11WaterSamplerState = nullptr;
+	for (int i = 0; i < 30; ++i)
+		m_apDX11WaterTextureSRV[i] = nullptr;
+	m_iDX11LastRenderedWaterPatchCount = 0;
+	m_iDX11LastObservedWaterPatchCount = 0;
+	m_dwDX11LastSubmittedObjectCount = 0;
+	m_dwDX11LastSubmittedEffectCount = 0;
+	m_dwDX11LastSubmittedEffectParticleCount = 0;
+	m_dwDX11LastSubmittedEffectMeshCount = 0;
+	m_dwDX11LastSubmittedSpeedTreeCount = 0;
+
+	// DX11 dynamic shadow resources initialization
+	m_bDX11ShadowResourcesReady = false;
+	m_bDX11ShadowReceiverActive = false;
+	m_bDX11ShadowFallbackActive = false;
+	m_dwDX11ShadowLastFallbackLogMS = 0;
+	m_uDX11ShadowMapSize = 2048u;
+	m_pDX11ShadowMapTextureArray = nullptr;
+	for (int i = 0; i < 3; ++i)
+		m_apDX11ShadowCascadeDSV[i] = nullptr;
+	m_pDX11ShadowMapArraySRV = nullptr;
+	m_pDX11ShadowFrameConstantBuffer = nullptr;
+	m_pDX11ShadowObjectConstantBuffer = nullptr;
+	m_pDX11ShadowComparisonSampler = nullptr;
+	m_pDX11ShadowRasterizerState = nullptr;
+	m_pDX11ShadowDepthState = nullptr;
+	m_pDX11ShadowCasterVertexShader = nullptr;
+	m_pDX11ShadowCasterPixelShader = nullptr;
+	m_pDX11ShadowReceiverVertexShader = nullptr;
+	m_pDX11ShadowReceiverPixelShader = nullptr;
+	for (int i = 0; i < 3; ++i)
+		D3DXMatrixIdentity(&m_akDX11ShadowLightViewProj[i]);
+	const float fShadowDistanceScale = fMAX(0.25f, fMIN(6.0f, DX11RuntimeConfig::kShadowCascadeDistanceScale));
+	m_afDX11ShadowCascadeSplits[0] = 80.0f * fShadowDistanceScale;
+	m_afDX11ShadowCascadeSplits[1] = 240.0f * fShadowDistanceScale;
+	m_afDX11ShadowCascadeSplits[2] = 720.0f * fShadowDistanceScale;
+	m_afDX11ShadowCascadeSplits[3] = 1800.0f * fShadowDistanceScale;
+	m_dwDX11ShadowLastCasterActors = 0;
+	m_dwDX11ShadowLastCasterObjects = 0;
+	m_dwDX11ShadowLastCasterSpeedTree = 0;
+	m_dwDX11ShadowLastSubmittedSpeedTreeCount = 0;
+	m_dwDX11ShadowLastFilteredFlat = 0;
+	m_v3DX11ShadowLightDir = D3DXVECTOR3(-0.577f, -0.577f, 0.577f);
+	m_kDX11EnvironmentBridgeState.bValid = false;
+	m_kDX11EnvironmentBridgeState.bSnowEnabled = false;
+	m_kDX11EnvironmentBridgeState.iDayMode = 0;
+	m_kDX11EnvironmentBridgeState.iWeatherMonth = 1;
+	m_kDX11EnvironmentBridgeState.fRainIntensity = 0.0f;
+	m_kDX11EnvironmentBridgeState.fWindStrength = 0.0f;
+	m_kDX11EnvironmentBridgeState.dwFogColor = 0;
+	m_kDX11EnvironmentBridgeState.fFogNear = 0.0f;
+	m_kDX11EnvironmentBridgeState.fFogFar = 0.0f;
+	m_kDX11EnvironmentBridgeState.v3BackgroundLightDirection = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+	m_kDX11EnvironmentBridgeState.kBackgroundLightAmbient = D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f);
+	m_kDX11EnvironmentBridgeState.kBackgroundLightDiffuse = D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f);
+	m_kDX11EnvironmentBridgeState.dwLastUpdateMS = 0u;
+	m_dwDX11EnvironmentBridgeLastLogMS = 0u;
+	m_uDX11SkyboxAppliedRevision = 0ull;
+	m_dwDX11SkyboxLastRevisionLogMS = 0u;
+	m_bDX11LensFlareInitialized = false;
+
+	// M3-SKY-BLEND-FIX-74: Skybox render policy defaults to Auto/MSENV mode
+	m_eSkyRenderPolicyOverride = POLICY_AUTO_FROM_MSENV;
+
 	return true;
 }
 
@@ -193,11 +421,23 @@ bool CMapOutdoor::Destroy()
 	m_bEnableTerrainOnlyForHeight = FALSE;
 	m_bEnablePortal = FALSE;
 
+	// DX11 terrain resources cleanup
+	DestroyDX11TerrainResources();
+
+	// DX11 water resources cleanup
+	DestroyDX11WaterResources();
+
+	// DX11 dynamic shadow resources cleanup
+	DestroyDX11ShadowResources();
+
 	XMasTree_Destroy();
 
 	DestroyTerrain();
  	DestroyArea();
 	DestroyTerrainPatchProxyList();
+	m_DX11LastNonEmptyPatchVector.clear();
+	m_dwDX11LastNonEmptyPatchVectorMS = 0u;
+	m_lDX11LastNonEmptyPatchTotalCount = 0;
 
 	FreeQuadTree();
 	ReleaseCharacterShadowTexture();
@@ -209,7 +449,13 @@ bool CMapOutdoor::Destroy()
 
 	m_rkList_kGuildArea.clear();
 	m_kPool_kMonsterAreaInfo.Destroy();
+	CSpeedTreeForestDirectX::Instance().SetGrassMapOutdoor(nullptr);
+	CSpeedTreeForestDirectX::Instance().DestroyDX11SpeedTreeResources();
 	CSpeedTreeForestDirectX::Instance().Clear();
+
+	// Reset dynamic light registry on map teardown to avoid stale effect lights
+	// leaking across Load() transitions (Destroy() is called at the start of every Load()).
+	CLightManager::Instance().Initialize();
 
 	return true;
 }
@@ -217,8 +463,8 @@ bool CMapOutdoor::Destroy()
 void CMapOutdoor::Clear()
 {
 	UnloadWaterTexture();
-	Destroy();		// 해제
-	Initialize();	// 초기화
+	Destroy();		// í•´ì œ
+	Initialize();	// ì´ˆê¸°í™”
 }
 
 bool CMapOutdoor::SetTerrainCount(short sTerrainCountX, short sTerrainCountY)
@@ -241,28 +487,42 @@ void CMapOutdoor::OnBeginEnvironment()
 
 	CSpeedTreeForestDirectX& rkForest=CSpeedTreeForestDirectX::Instance();
 
-	const D3DLIGHT9& c_rkLight = mc_pEnvironmentData->DirLights[ENV_DIRLIGHT_CHARACTER];
-	rkForest.SetLight(
-		(const float *)&c_rkLight.Direction,
-		(const float *)&c_rkLight.Ambient, 
-		(const float *)&c_rkLight.Diffuse);
+	const SLightDesc& c_rkLight = mc_pEnvironmentData->DirLights[ENV_DIRLIGHT_CHARACTER];
+	rkForest.SetLight(c_rkLight);
 	
 	rkForest.SetWindStrength(mc_pEnvironmentData->fWindStrength);
+	UpdateDX11EnvironmentBridgeState(
+		m_kDX11EnvironmentBridgeState.bSnowEnabled,
+		m_kDX11EnvironmentBridgeState.iDayMode,
+		m_kDX11EnvironmentBridgeState.iWeatherMonth,
+		m_kDX11EnvironmentBridgeState.fRainIntensity);
 }
 
 void CMapOutdoor::OnSetEnvironmentDataPtr()
 {
+	m_uDX11SkyboxAppliedRevision = 0ull;
 	SetEnvironmentScreenFilter();
 	SetEnvironmentSkyBox();
 	SetEnvironmentLensFlare();
+	UpdateDX11EnvironmentBridgeState(
+		m_kDX11EnvironmentBridgeState.bSnowEnabled,
+		m_kDX11EnvironmentBridgeState.iDayMode,
+		m_kDX11EnvironmentBridgeState.iWeatherMonth,
+		m_kDX11EnvironmentBridgeState.fRainIntensity);
 }
 
 void CMapOutdoor::OnResetEnvironmentDataPtr()
 {
 	m_SkyBox.Unload();
+	m_uDX11SkyboxAppliedRevision = 0ull;
 	SetEnvironmentScreenFilter();
 	SetEnvironmentSkyBox();
 	SetEnvironmentLensFlare();
+	UpdateDX11EnvironmentBridgeState(
+		m_kDX11EnvironmentBridgeState.bSnowEnabled,
+		m_kDX11EnvironmentBridgeState.iDayMode,
+		m_kDX11EnvironmentBridgeState.iWeatherMonth,
+		m_kDX11EnvironmentBridgeState.fRainIntensity);
 }
 
 void CMapOutdoor::SetEnvironmentScreenFilter()
@@ -275,38 +535,149 @@ void CMapOutdoor::SetEnvironmentScreenFilter()
 	m_ScreenFilter.SetColor(mc_pEnvironmentData->FilteringColor);
 }
 
-void CMapOutdoor::SetEnvironmentSkyBox()
+void CMapOutdoor::ApplyEnvironmentDistanceOnly()
 {
 	if (!mc_pEnvironmentData)
 		return;
 
 	m_SkyBox.SetSkyBoxScale(mc_pEnvironmentData->v3SkyBoxScale);
-	m_SkyBox.SetGradientLevel(mc_pEnvironmentData->bySkyBoxGradientLevelUpper, mc_pEnvironmentData->bySkyBoxGradientLevelLower);
-	m_SkyBox.SetRenderMode( (mc_pEnvironmentData->bSkyBoxTextureRenderMode == TRUE) ? CSkyObject::SKY_RENDER_MODE_TEXTURE : CSkyObject::SKY_RENDER_MODE_DIFFUSE);
-
-	for( int i = 0; i < 6; ++i )
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (0u == m_dwDX11SkyboxLastRevisionLogMS || (dwNow - m_dwDX11SkyboxLastRevisionLogMS) >= 2000u)
 	{
-		if (!mc_pEnvironmentData->strSkyBoxFaceFileName[i].empty())
-			m_SkyBox.SetFaceTexture( mc_pEnvironmentData->strSkyBoxFaceFileName[i].c_str(), i );
+		m_dwDX11SkyboxLastRevisionLogMS = dwNow;
+		TraceError("DX11_SKY_APPLY_TRIGGER reason=distance changed_mask=fog_scale");
+	}
+}
+
+// M3-SKY-BLEND-FIX-74: Skybox render policy controls
+void CMapOutdoor::SetSkyRenderPolicyOverride(ESkyRenderPolicy ePolicy)
+{
+	m_eSkyRenderPolicyOverride = ePolicy;
+	// Force skybox refresh when policy changes
+	m_uDX11SkyboxAppliedRevision = 0ull;
+}
+
+ESkyRenderPolicy CMapOutdoor::GetSkyRenderPolicyOverride() const
+{
+	return m_eSkyRenderPolicyOverride;
+}
+
+void CMapOutdoor::SetEnvironmentSkyBox()
+{
+    if (!mc_pEnvironmentData)
+        return;
+
+    bool bHasSkyboxTextures = false;
+    for (int i = 0; i < 6; ++i)
+    {
+        if (!mc_pEnvironmentData->strSkyBoxFaceFileName[i].empty())
+        {
+            bHasSkyboxTextures = true;
+            break;
+        }
+    }
+
+    // M3-SKY-BLEND-FIX-74: Policy-based render mode selection
+    bool bUseDiffuseMode = false;
+    const char* szPolicyName = "unknown";
+    const char* szResolvedMode = "unknown";
+
+    switch (m_eSkyRenderPolicyOverride)
+    {
+    case POLICY_AUTO_FROM_MSENV:
+        szPolicyName = "auto_msenv";
+        // Use bSkyBoxTextureRenderMode from .msenv, fallback to gradient if no textures
+        bUseDiffuseMode = !mc_pEnvironmentData->bSkyBoxTextureRenderMode || !bHasSkyboxTextures;
+        break;
+
+    case POLICY_FORCE_GRADIENT:
+        szPolicyName = "force_gradient";
+        // Always use gradient/diffuse mode
+        bUseDiffuseMode = true;
+        break;
+
+    case POLICY_FORCE_TEXTURE:
+        szPolicyName = "force_texture";
+        // Use texture mode if available, otherwise fallback to gradient
+        bUseDiffuseMode = !bHasSkyboxTextures;
+        break;
+
+    default:
+        szPolicyName = "invalid";
+        // Safe fallback to gradient mode
+        bUseDiffuseMode = true;
+        break;
+    }
+
+    szResolvedMode = bUseDiffuseMode ? "diffuse_gradient" : "texture";
+
+    // Override from compile-time debug flag (deprecated, use POLICY_FORCE_GRADIENT instead)
+    if (DX11RuntimeConfig::kSkyDebugForceDiffuseGradient)
+    {
+        bUseDiffuseMode = true;
+        szPolicyName = "deprecated_compile_time_override";
+        szResolvedMode = "diffuse_gradient_forced";
+    }
+    const uint64_t uSkyRevision = BuildSkyConfigRevision(mc_pEnvironmentData, bUseDiffuseMode, m_kDX11EnvironmentBridgeState.iDayMode);
+    if (uSkyRevision == m_uDX11SkyboxAppliedRevision)
+    {
+        const DWORD dwNow = ELTimer_GetMSec();
+        if (0u == m_dwDX11SkyboxLastRevisionLogMS || (dwNow - m_dwDX11SkyboxLastRevisionLogMS) >= 2000u)
+        {
+            m_dwDX11SkyboxLastRevisionLogMS = dwNow;
+            TraceError("DX11_SKY_REBUILD skipped=1 reason=no_revision_change");
+        }
+        return;
+    }
+
+    m_uDX11SkyboxAppliedRevision = uSkyRevision;
+    const DWORD dwNow = ELTimer_GetMSec();
+    if (0u == m_dwDX11SkyboxLastRevisionLogMS || (dwNow - m_dwDX11SkyboxLastRevisionLogMS) >= 250u)
+    {
+        m_dwDX11SkyboxLastRevisionLogMS = dwNow;
+        TraceError("DX11_SKY_APPLY_TRIGGER reason=map_load_or_preset changed_mask=sky_structural policy=%s resolved=%s has_textures=%d msenv_mode=%d",
+            szPolicyName, szResolvedMode, bHasSkyboxTextures ? 1 : 0, mc_pEnvironmentData->bSkyBoxTextureRenderMode ? 1 : 0);
+    }
+
+    m_SkyBox.SetSkyBoxScale(mc_pEnvironmentData->v3SkyBoxScale);
+    m_SkyBox.SetGradientLevel(mc_pEnvironmentData->bySkyBoxGradientLevelUpper, mc_pEnvironmentData->bySkyBoxGradientLevelLower);
+    m_SkyBox.SetRenderMode(bUseDiffuseMode ? CSkyObject::SKY_RENDER_MODE_DIFFUSE : CSkyObject::SKY_RENDER_MODE_TEXTURE);
+
+    for (int i = 0; i < 6; ++i)
+    {
+        if (!mc_pEnvironmentData->strSkyBoxFaceFileName[i].empty())
+            m_SkyBox.SetFaceTexture(mc_pEnvironmentData->strSkyBoxFaceFileName[i].c_str(), i);
+    }
+
+    if (!mc_pEnvironmentData->strCloudTextureFileName.empty())
+        m_SkyBox.SetCloudTexture(mc_pEnvironmentData->strCloudTextureFileName.c_str());
+
+    m_SkyBox.SetCloudScale(mc_pEnvironmentData->v2CloudScale);
+    m_SkyBox.SetCloudHeight(mc_pEnvironmentData->fCloudHeight);
+    m_SkyBox.SetCloudTextureScale(mc_pEnvironmentData->v2CloudTextureScale);
+    m_SkyBox.SetCloudScrollSpeed(mc_pEnvironmentData->v2CloudSpeed);
+    m_SkyBox.Refresh();
+    const DWORD dwTransitionMS = (DX11RuntimeConfig::kEnvironmentTransitionDurationMs > 0)
+		? static_cast<DWORD>(DX11RuntimeConfig::kEnvironmentTransitionDurationMs)
+		: 1u;
+
+	if (DX11RuntimeConfig::kSkyDebugForceCloudTexture && mc_pEnvironmentData->strCloudTextureFileName.empty())
+	{
+		static bool s_bCloudTextureMissingLogged = false;
+		if (!s_bCloudTextureMissingLogged)
+		{
+			s_bCloudTextureMissingLogged = true;
+			TraceError("DX11_ENV_CONTROL_UNBOUND control=cloud_texture reason=missing_cloud_texture_asset");
+		}
 	}
 
-	if (!mc_pEnvironmentData->strCloudTextureFileName.empty())
-		m_SkyBox.SetCloudTexture(mc_pEnvironmentData->strCloudTextureFileName.c_str());
+    m_SkyBox.SetCloudColor(mc_pEnvironmentData->CloudGradientColor, mc_pEnvironmentData->CloudGradientColor, dwTransitionMS);
 
-	m_SkyBox.SetCloudScale(mc_pEnvironmentData->v2CloudScale);
-	m_SkyBox.SetCloudHeight(mc_pEnvironmentData->fCloudHeight);
-	m_SkyBox.SetCloudTextureScale(mc_pEnvironmentData->v2CloudTextureScale);
-	m_SkyBox.SetCloudScrollSpeed(mc_pEnvironmentData->v2CloudSpeed);
-	m_SkyBox.Refresh();
+    if (!mc_pEnvironmentData->SkyBoxGradientColorVector.empty())
+        m_SkyBox.SetSkyColor(mc_pEnvironmentData->SkyBoxGradientColorVector, mc_pEnvironmentData->SkyBoxGradientColorVector, static_cast<long>(dwTransitionMS));
 
-	// Temporary
-	m_SkyBox.SetCloudColor(mc_pEnvironmentData->CloudGradientColor, mc_pEnvironmentData->CloudGradientColor, 1);
-
-	if (!mc_pEnvironmentData->SkyBoxGradientColorVector.empty())
-		m_SkyBox.SetSkyColor(mc_pEnvironmentData->SkyBoxGradientColorVector, mc_pEnvironmentData->SkyBoxGradientColorVector, 1);
-	// Temporary
-
-	m_SkyBox.StartTransition();
+    m_SkyBox.StartTransition();
+    TraceError("DX11_SKY_TRANSITION_START revision=%llu cause=sky_structural", static_cast<unsigned long long>(uSkyRevision));
 }
 
 void CMapOutdoor::SetEnvironmentLensFlare()
@@ -324,6 +695,69 @@ void CMapOutdoor::SetEnvironmentLensFlare()
 	if (!mc_pEnvironmentData->strMainFlareTextureFileName.empty())
 		m_LensFlare.SetMainFlare(mc_pEnvironmentData->strMainFlareTextureFileName.c_str(),
 								 mc_pEnvironmentData->fMainFlareSize);
+}
+
+// M3-SKY-BLEND-FIX-74: Apply fog parameters to GPU render state pipeline
+void CMapOutdoor::__ApplyFogToGPU()
+{
+	// Disable fog if no environment data
+	if (!mc_pEnvironmentData)
+	{
+		STATEMANAGER.SetRenderState(GRP_RS_FOGENABLE, FALSE);
+		return;
+	}
+
+	// Apply fog enable state
+		STATEMANAGER.SetRenderState(GRP_RS_FOGENABLE, mc_pEnvironmentData->bFogEnable);
+
+	// Early exit if fog is disabled
+	if (!mc_pEnvironmentData->bFogEnable)
+		return;
+
+	// Apply fog color
+		STATEMANAGER.SetRenderState(GRP_RS_FOGCOLOR, mc_pEnvironmentData->FogColor);
+
+	// Get user fog level preference (0=light, 1=medium, 2=dense)
+	const int iFogLevel = ClampFogLevel(CPythonSystem::Instance().GetFogLevel());
+
+	// Check if using density fog (exponential) or linear fog
+	if (mc_pEnvironmentData->bDensityFog && (mc_pEnvironmentData->bFogLevel != 0))
+	{
+		// Density fog (exponential) - good for volumetric effects
+		const float fDensityBase = mc_pEnvironmentData->bFogLevel / 255.0f;
+		const float fFogScale[3] = {
+			DX11RuntimeConfig::kFogDensityLight,
+			DX11RuntimeConfig::kFogDensityMiddle,
+			DX11RuntimeConfig::kFogDensityDense
+		};
+		const float fDensity = fDensityBase * fFogScale[iFogLevel];
+
+			STATEMANAGER.SetRenderState(GRP_RS_FOGVERTEXMODE, GRP_FOG_NONE);
+			STATEMANAGER.SetRenderState(GRP_RS_FOGTABLEMODE, GRP_FOG_EXP2);
+			STATEMANAGER.SetRenderState(GRP_RS_FOGDENSITY, *((DWORD*)&fDensity));
+
+		TraceError("FOG_APPLY_GPU mode=density level=%d density=%.6f", iFogLevel, fDensity);
+	}
+	else
+	{
+		// Linear fog (range-based) - default for most environments
+		const float fFogScale = GetLinearFogScaleByLevel(iFogLevel);
+
+		float fNear = ClampFogNearDistance(mc_pEnvironmentData->GetFogNearDistance() * fFogScale);
+		float fFar = ClampFogFarDistance(mc_pEnvironmentData->GetFogFarDistance() * fFogScale);
+
+		// Ensure far is always greater than near
+		if (fFar <= fNear)
+			fFar = ClampFogFarDistance(fNear + 1000.0f);
+
+			STATEMANAGER.SetRenderState(GRP_RS_FOGVERTEXMODE, GRP_FOG_NONE);
+			STATEMANAGER.SetRenderState(GRP_RS_FOGTABLEMODE, GRP_FOG_LINEAR);
+			STATEMANAGER.SetRenderState(GRP_RS_FOGSTART, *((DWORD*)&fNear));
+			STATEMANAGER.SetRenderState(GRP_RS_FOGEND, *((DWORD*)&fFar));
+
+		TraceError("FOG_APPLY_GPU mode=linear level=%d scale=%.2f near=%.1f far=%.1f",
+			iFogLevel, fFogScale, fNear, fFar);
+	}
 }
 
 void CMapOutdoor::SetWireframe(bool bWireFrame)
@@ -1232,9 +1666,198 @@ void CMapOutdoor::SetBaseXY(DWORD dwBaseX, DWORD dwBaseY)
 	m_dwBaseY = dwBaseY;
 }
 
+bool CMapOutdoor::ProbeDX11ObjectsReady()
+{
+	if (!IsVisiblePart(PART_OBJECT))
+		return false;
+
+	if (!m_pDX11ObjectVS || !m_pDX11ObjectPS || !m_pDX11ObjectInputLayout || !m_pDX11ObjectConstantBuffer || !m_pDX11ObjectSamplerState)
+		return false;
+
+	if (m_dwDX11LastSubmittedObjectCount > 0u)
+		return true;
+
+	for (int i = 0; i < AROUND_AREA_NUM; ++i)
+	{
+		CArea* pArea = nullptr;
+		if (!GetAreaPointer(static_cast<BYTE>(i), &pArea) || !pArea)
+			continue;
+
+		const DWORD dwObjectCount = pArea->GetObjectInstanceCount();
+		for (DWORD dwObjectIndex = 0; dwObjectIndex < dwObjectCount; ++dwObjectIndex)
+		{
+			const CArea::TObjectInstance* pObjectInstance = nullptr;
+			if (!pArea->GetObjectInstancePointer(dwObjectIndex, &pObjectInstance) || !pObjectInstance)
+				continue;
+
+			if ((pObjectInstance->pThingInstance && pObjectInstance->pThingInstance->isShow()) ||
+				(pObjectInstance->pDungeonBlock && pObjectInstance->pDungeonBlock->isShow()))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool CMapOutdoor::ProbeDX11EffectsReady()
+{
+	if (!IsVisiblePart(PART_OBJECT))
+		return false;
+
+	CEffectManager& rkEffectManager = CEffectManager::Instance();
+	m_dwDX11LastSubmittedEffectCount = rkEffectManager.GetDX11SubmittedEffectCount();
+	m_dwDX11LastSubmittedEffectParticleCount = rkEffectManager.GetDX11SubmittedParticleCount();
+	m_dwDX11LastSubmittedEffectMeshCount = rkEffectManager.GetDX11SubmittedMeshEffectCount();
+	if (!rkEffectManager.EnsureDX11EffectResourcesReady())
+		return false;
+
+	if (m_dwDX11LastSubmittedEffectCount > 0u)
+		return true;
+
+	return rkEffectManager.GetActiveEffectCount() > 0u;
+}
+
+bool CMapOutdoor::ProbeDX11SpeedTreeReady()
+{
+	if (!IsVisiblePart(PART_TREE))
+		return false;
+
+	CSpeedTreeForestDirectX& rkForest = CSpeedTreeForestDirectX::Instance();
+	m_dwDX11LastSubmittedSpeedTreeCount = rkForest.GetLastDX11SubmittedInstanceCount();
+	if (!rkForest.IsDX11SpeedTreeResourcesReady())
+		return false;
+
+	if (m_dwDX11LastSubmittedSpeedTreeCount > 0u || rkForest.GetLastRenderedVisibleInstanceCount() > 0u)
+		return true;
+
+	for (int i = 0; i < AROUND_AREA_NUM; ++i)
+	{
+		CArea* pArea = nullptr;
+		if (!GetAreaPointer(static_cast<BYTE>(i), &pArea) || !pArea)
+			continue;
+
+		const DWORD dwObjectCount = pArea->GetObjectInstanceCount();
+		for (DWORD dwObjectIndex = 0; dwObjectIndex < dwObjectCount; ++dwObjectIndex)
+		{
+			const CArea::TObjectInstance* pObjectInstance = nullptr;
+			if (!pArea->GetObjectInstancePointer(dwObjectIndex, &pObjectInstance) || !pObjectInstance)
+				continue;
+
+			if (pObjectInstance->pTree && pObjectInstance->pTree->isShow())
+				return true;
+		}
+	}
+
+	return false;
+}
+
 void CMapOutdoor::SetEnvironmentDataName(const std::string& strEnvironmentDataName)
 {
 	m_envDataName = strEnvironmentDataName;
+}
+
+void CMapOutdoor::UpdateDX11EnvironmentBridgeState(bool bSnowEnabled, int iDayMode, int iWeatherMonth, float fRainIntensity)
+{
+	const SDX11EnvironmentBridgeState kPreviousState = m_kDX11EnvironmentBridgeState;
+
+	SDX11EnvironmentBridgeState& rkState = m_kDX11EnvironmentBridgeState;
+	rkState.bSnowEnabled = bSnowEnabled;
+	rkState.iDayMode = iDayMode;
+	rkState.iWeatherMonth = ClampWeatherMonth(iWeatherMonth);
+	rkState.fRainIntensity = ClampRainIntensity(fRainIntensity);
+	rkState.dwLastUpdateMS = ELTimer_GetMSec();
+
+	if (mc_pEnvironmentData)
+	{
+	const SLightDesc& rkBackgroundLight = mc_pEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND];
+		const int iFogLevel = ClampFogLevel(CPythonSystem::Instance().GetFogLevel());
+		rkState.bValid = true;
+		rkState.fWindStrength = mc_pEnvironmentData->fWindStrength;
+		rkState.dwFogColor = mc_pEnvironmentData->FogColor;
+		if (mc_pEnvironmentData->bDensityFog && (mc_pEnvironmentData->bFogLevel != 0))
+		{
+			const float fDensityBaseByLevel[3] =
+			{
+				DX11RuntimeConfig::kFogDensityLight,
+				DX11RuntimeConfig::kFogDensityMiddle,
+				DX11RuntimeConfig::kFogDensityDense
+			};
+			const float fDensity = mc_pEnvironmentData->bFogLevel * fDensityBaseByLevel[iFogLevel];
+			rkState.fFogNear = 0.0f;
+			rkState.fFogFar = ClampFogFarDistance(DX11RuntimeConfig::kFogDensityFarApproxFactor / fMAX(0.0000001f, fDensity));
+		}
+		else
+		{
+			const float fFogScale = GetLinearFogScaleByLevel(iFogLevel);
+			rkState.fFogNear = ClampFogNearDistance(mc_pEnvironmentData->GetFogNearDistance() * fFogScale);
+			rkState.fFogFar = ClampFogFarDistance(mc_pEnvironmentData->GetFogFarDistance() * fFogScale);
+			if (rkState.fFogFar <= rkState.fFogNear)
+				rkState.fFogFar = ClampFogFarDistance(rkState.fFogNear + 1000.0f);
+		}
+		rkState.v3BackgroundLightDirection = rkBackgroundLight.Direction;
+		rkState.kBackgroundLightAmbient = D3DXCOLOR(
+			rkBackgroundLight.Ambient.r,
+			rkBackgroundLight.Ambient.g,
+			rkBackgroundLight.Ambient.b,
+			rkBackgroundLight.Ambient.a);
+		rkState.kBackgroundLightDiffuse = D3DXCOLOR(
+			rkBackgroundLight.Diffuse.r,
+			rkBackgroundLight.Diffuse.g,
+			rkBackgroundLight.Diffuse.b,
+			rkBackgroundLight.Diffuse.a);
+	}
+	else
+	{
+		rkState.bValid = false;
+		rkState.fWindStrength = 0.0f;
+		rkState.dwFogColor = 0;
+		rkState.fFogNear = 0.0f;
+		rkState.fFogFar = 0.0f;
+		rkState.v3BackgroundLightDirection = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+		rkState.kBackgroundLightAmbient = D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f);
+		rkState.kBackgroundLightDiffuse = D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f);
+	}
+
+	const bool bStateChanged =
+		(kPreviousState.bValid != rkState.bValid) ||
+		(kPreviousState.bSnowEnabled != rkState.bSnowEnabled) ||
+		(kPreviousState.iDayMode != rkState.iDayMode) ||
+		(kPreviousState.iWeatherMonth != rkState.iWeatherMonth) ||
+		(fabsf(kPreviousState.fRainIntensity - rkState.fRainIntensity) > 0.001f) ||
+		(fabsf(kPreviousState.fWindStrength - rkState.fWindStrength) > 0.001f) ||
+		(kPreviousState.dwFogColor != rkState.dwFogColor) ||
+		(fabsf(kPreviousState.fFogNear - rkState.fFogNear) > 0.5f) ||
+		(fabsf(kPreviousState.fFogFar - rkState.fFogFar) > 0.5f);
+
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (bStateChanged || 0u == m_dwDX11EnvironmentBridgeLastLogMS || dwNow - m_dwDX11EnvironmentBridgeLastLogMS >= 5000u)
+	{
+		m_dwDX11EnvironmentBridgeLastLogMS = dwNow;
+		TraceError(
+			"DX11_ENV_BRIDGE valid=%d day_mode=%d snow=%d month=%d rain=%.2f fog_near=%.1f fog_far=%.1f wind=%.2f",
+			rkState.bValid ? 1 : 0,
+			rkState.iDayMode,
+			rkState.bSnowEnabled ? 1 : 0,
+			rkState.iWeatherMonth,
+			rkState.fRainIntensity,
+			rkState.fFogNear,
+			rkState.fFogFar,
+			rkState.fWindStrength);
+	}
+
+	// FIX: Invalidate skybox revision when day mode changes to force rebuild
+	// This prevents sky flickering when changing between day/night
+	const bool bDayModeChanged = (kPreviousState.iDayMode != rkState.iDayMode);
+	if (bDayModeChanged)
+	{
+		// Mark for deferred rebuild - don't call SetEnvironmentSkyBox() immediately
+		// Immediate rebuild causes race condition and flickering
+		m_uDX11SkyboxAppliedRevision = 0ull;
+		TraceError("SKYBOX: Day mode changed from %d to %d, marking for deferred rebuild",
+			kPreviousState.iDayMode, rkState.iDayMode);
+	}
 }
 
 void CMapOutdoor::__XMasTree_Initialize()
@@ -1488,3 +2111,11 @@ void CMapOutdoor::ConvertToMapCoords(float fx, float fy, int *iCellX, int *iCell
 	*pucSubCellX = (*pucSubCellX) % CTerrainImpl::HEIGHT_TILE_XRATIO;
 	*pucSubCellY = (*pucSubCellY) % CTerrainImpl::HEIGHT_TILE_YRATIO;
 }
+
+
+
+
+
+
+
+

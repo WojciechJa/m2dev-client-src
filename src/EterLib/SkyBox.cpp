@@ -1,10 +1,557 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "SkyBox.h"
 #include "Camera.h"
-#include "StateManager.h"
 #include "ResourceManager.h"
+#include "GrpDeviceDX11.h"
+#include "GrpTextureDX11.h"
+#include "UserInterface/config.h"
 
 #include "EterBase/Timer.h"
+#include <algorithm>
+#include <d3dcompiler.h>
+
+#ifndef SAFE_RELEASE
+#define SAFE_RELEASE(p) do { if ((p) != NULL) { (p)->Release(); (p) = NULL; } } while (0)
+#endif
+
+namespace
+{
+struct SBootstrapUIVertex
+{
+	float x, y, z;
+	float r, g, b, a;
+	float u, v;
+};
+
+static D3DXMATRIX gs_matSkyDX11World = CGraphicBase::GetIdentityMatrix();
+static float gs_fSkyDX11UOffset = 0.0f;
+static float gs_fSkyDX11VOffset = 0.0f;
+static ID3D11BlendState* gs_pSkyDX11BlendState = NULL;
+static UINT gs_uSkyDX11ExpectedQuads = 0u;
+static UINT gs_uSkyDX11SubmittedQuads = 0u;
+static DWORD gs_dwSkyParityLogTick = 0u;
+static DWORD gs_dwCloudParityLogTick = 0u;
+static bool gs_bSkyDX11TextureBound = false;
+static UINT gs_uSkyDX11SampledAlphaHint = 0u;
+static bool gs_bSkyDX11ClampSampler = false;
+static const char* gs_szSkyDX11Mode = "texture";
+static bool gs_bSkyDX11DiffuseSampled = false;
+static float gs_fSkyDX11DiffuseMin = 1.0f;
+static float gs_fSkyDX11DiffuseMax = 0.0f;
+static ID3D11SamplerState* gs_pSkyDX11ClampSamplerState = NULL;
+static ID3D11PixelShader* gs_pSkyDX11CloudCombinePixelShader = NULL;
+static ID3D11VertexShader* gs_pSkyDX11WorldVertexShader = NULL;
+static ID3D11Buffer* gs_pSkyDX11WorldVSConstantBuffer = NULL;
+
+enum ESkyDX11ShadingMode
+{
+	SKY_DX11_SHADING_TEXTURE = 0,
+	SKY_DX11_SHADING_DIFFUSE = 1,
+	SKY_DX11_SHADING_CLOUD_COMBINE = 2,
+};
+
+static ESkyDX11ShadingMode gs_eSkyDX11ShadingMode = SKY_DX11_SHADING_TEXTURE;
+
+inline TColor LerpSkyColor(const TColor& c_rLeft, const TColor& c_rRight, float fT)
+{
+	const float fClampedT = std::min(1.0f, std::max(0.0f, fT));
+	const float fInvT = 1.0f - fClampedT;
+	return TColor(
+		c_rLeft.r * fInvT + c_rRight.r * fClampedT,
+		c_rLeft.g * fInvT + c_rRight.g * fClampedT,
+		c_rLeft.b * fInvT + c_rRight.b * fClampedT,
+		c_rLeft.a * fInvT + c_rRight.a * fClampedT);
+}
+
+inline TGradientColor LerpSkyGradient(const TGradientColor& c_rLeft, const TGradientColor& c_rRight, float fT)
+{
+	TGradientColor kOut = {};
+	kOut.m_FirstColor = LerpSkyColor(c_rLeft.m_FirstColor, c_rRight.m_FirstColor, fT);
+	kOut.m_SecondColor = LerpSkyColor(c_rLeft.m_SecondColor, c_rRight.m_SecondColor, fT);
+	return kOut;
+}
+
+inline TGradientColor GetDefaultSkyGradient()
+{
+	TGradientColor kOut = {};
+	kOut.m_FirstColor = TColor(0.18f, 0.28f, 0.55f, 1.0f);
+	kOut.m_SecondColor = TColor(0.04f, 0.08f, 0.20f, 1.0f);
+	return kOut;
+}
+
+inline TGradientColor SampleSkyGradientNormalized(const TVectorGradientColor& rkSource, float fT)
+{
+	if (rkSource.empty())
+		return GetDefaultSkyGradient();
+	if (rkSource.size() == 1u)
+		return rkSource[0];
+
+	const float fClampedT = std::min(1.0f, std::max(0.0f, fT));
+	const float fPos = fClampedT * static_cast<float>(rkSource.size() - 1u);
+	const size_t uLeftIndex = static_cast<size_t>(fPos);
+	const size_t uRightIndex = std::min(uLeftIndex + 1u, rkSource.size() - 1u);
+	const float fLerp = fPos - static_cast<float>(uLeftIndex);
+	return LerpSkyGradient(rkSource[uLeftIndex], rkSource[uRightIndex], fLerp);
+}
+
+inline TVectorGradientColor BuildSkyGradientLUT(const TVectorGradientColor& rkSource, size_t uRequiredSamples)
+{
+	const size_t uCount = std::max<size_t>(1u, uRequiredSamples);
+	TVectorGradientColor rkOut;
+	rkOut.resize(uCount);
+	for (size_t i = 0; i < uCount; ++i)
+	{
+		const float fT = (uCount <= 1u) ? 0.0f : (static_cast<float>(i) / static_cast<float>(uCount - 1u));
+		rkOut[i] = SampleSkyGradientNormalized(rkSource, fT);
+	}
+	return rkOut;
+}
+
+bool EnsureSkyDX11ClampSampler(ID3D11Device* pDevice)
+{
+	if (!pDevice)
+		return false;
+
+	if (gs_pSkyDX11ClampSamplerState)
+		return true;
+
+	D3D11_SAMPLER_DESC kSamplerDesc = {};
+	kSamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	kSamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+	kSamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+	kSamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	kSamplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	kSamplerDesc.MinLOD = 0.0f;
+	kSamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
+	const HRESULT hResult = pDevice->CreateSamplerState(&kSamplerDesc, &gs_pSkyDX11ClampSamplerState);
+	if (FAILED(hResult) || !gs_pSkyDX11ClampSamplerState)
+	{
+		static DWORD s_dwSamplerFailLogTick = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwSamplerFailLogTick || (dwNow - s_dwSamplerFailLogTick) >= 2000u)
+		{
+			s_dwSamplerFailLogTick = dwNow;
+			TraceError("DX11_SKYENV_DRAW_FAIL stage=sky reason=clamp_sampler_create_failed hr=0x%08x", static_cast<unsigned int>(hResult));
+		}
+		return false;
+	}
+
+	return true;
+}
+
+bool EnsureSkyDX11CloudCombineShader(ID3D11Device* pDevice)
+{
+	if (!pDevice)
+		return false;
+
+	if (gs_pSkyDX11CloudCombinePixelShader)
+		return true;
+
+	char szCloudCombinePS[1024] = {};
+	sprintf_s(
+		szCloudCombinePS,
+		"Texture2D tx0 : register(t0);"
+		"SamplerState smp0 : register(s0);"
+		"struct PSIn { float4 pos : SV_POSITION; float4 col : COLOR0; float2 uv : TEXCOORD0; };"
+		"float4 main(PSIn input) : SV_TARGET"
+		"{"
+		"    float4 texel = tx0.Sample(smp0, input.uv);"
+		"    float vertexAlpha = saturate(input.col.a);"
+		"    float cloudBlend = saturate(%0.5ff);"
+		"    float minTex = saturate(%0.5ff);"
+		"    float alphaFloor = saturate(%0.5ff);"
+		"    float vertexFloor = saturate(%0.5ff);"
+		"    float textureContribution = max(minTex, cloudBlend * vertexAlpha);"
+		"    float3 tint = input.col.rgb;"
+		"    float3 rgb = lerp(tint, texel.rgb * tint, textureContribution);"
+		"    float alpha = saturate(max(texel.a, alphaFloor) * max(vertexAlpha, vertexFloor));"
+		"    return float4(rgb, alpha);"
+		"}",
+		DX11RuntimeConfig::kSkyCloudTextureBlendWeight,
+		DX11RuntimeConfig::kSkyCloudTextureMinContribution,
+		DX11RuntimeConfig::kSkyCloudAlphaMin,
+		DX11RuntimeConfig::kSkyCloudVertexAlphaFloor);
+
+	ID3DBlob* pCloudPSBlob = NULL;
+	ID3DBlob* pErrorBlob = NULL;
+	const HRESULT hCompile = D3DCompile(
+		szCloudCombinePS, strlen(szCloudCombinePS),
+		NULL, NULL, NULL,
+		"main", "ps_4_0",
+		0, 0, &pCloudPSBlob, &pErrorBlob);
+	if (FAILED(hCompile) || !pCloudPSBlob)
+	{
+		static DWORD s_dwCompileFailLogTick = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwCompileFailLogTick || (dwNow - s_dwCompileFailLogTick) >= 2000u)
+		{
+			s_dwCompileFailLogTick = dwNow;
+			if (pErrorBlob && pErrorBlob->GetBufferPointer())
+			{
+				TraceError("DX11_SKYENV_DRAW_FAIL stage=cloud reason=cloud_shader_compile_failed msg=%s",
+					reinterpret_cast<const char*>(pErrorBlob->GetBufferPointer()));
+			}
+			else
+			{
+				TraceError("DX11_SKYENV_DRAW_FAIL stage=cloud reason=cloud_shader_compile_failed hr=0x%08x",
+					static_cast<unsigned int>(hCompile));
+			}
+		}
+		if (pErrorBlob)
+			pErrorBlob->Release();
+		if (pCloudPSBlob)
+			pCloudPSBlob->Release();
+		return false;
+	}
+	if (pErrorBlob)
+		pErrorBlob->Release();
+
+	const HRESULT hCreate = pDevice->CreatePixelShader(
+		pCloudPSBlob->GetBufferPointer(),
+		pCloudPSBlob->GetBufferSize(),
+		NULL,
+		&gs_pSkyDX11CloudCombinePixelShader);
+	if (pCloudPSBlob)
+		pCloudPSBlob->Release();
+	if (FAILED(hCreate) || !gs_pSkyDX11CloudCombinePixelShader)
+	{
+		static DWORD s_dwCreateFailLogTick = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwCreateFailLogTick || (dwNow - s_dwCreateFailLogTick) >= 2000u)
+		{
+			s_dwCreateFailLogTick = dwNow;
+			TraceError("DX11_SKYENV_DRAW_FAIL stage=cloud reason=cloud_shader_create_failed hr=0x%08x",
+				static_cast<unsigned int>(hCreate));
+		}
+		return false;
+	}
+
+	return true;
+}
+
+struct SSkyDX11VSConstants
+{
+	D3DXMATRIX matWorldViewProj;
+};
+
+bool EnsureSkyDX11WorldVertexShader(ID3D11Device* pDevice)
+{
+	if (!pDevice)
+		return false;
+
+	if (gs_pSkyDX11WorldVertexShader && gs_pSkyDX11WorldVSConstantBuffer)
+		return true;
+
+	static const char* c_szSkyWorldVS =
+		"cbuffer SkyVSConstants : register(b0)"
+		"{"
+		"    row_major float4x4 uWorldViewProj;"
+		"};"
+		"struct VSIn { float3 pos : POSITION; float4 col : COLOR0; float2 uv : TEXCOORD0; };"
+		"struct VSOut { float4 pos : SV_POSITION; float4 col : COLOR0; float2 uv : TEXCOORD0; };"
+		"VSOut main(VSIn input)"
+		"{"
+		"    VSOut output;"
+		"    output.pos = mul(float4(input.pos, 1.0f), uWorldViewProj);"
+		"    output.col = input.col;"
+		"    output.uv = input.uv;"
+		"    return output;"
+		"}";
+
+	ID3DBlob* pVSBlob = NULL;
+	ID3DBlob* pErrorBlob = NULL;
+	const HRESULT hCompile = D3DCompile(
+		c_szSkyWorldVS, strlen(c_szSkyWorldVS),
+		NULL, NULL, NULL,
+		"main", "vs_4_0",
+		0, 0, &pVSBlob, &pErrorBlob);
+	if (FAILED(hCompile) || !pVSBlob)
+	{
+		static DWORD s_dwVSCompileFailLogTick = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwVSCompileFailLogTick || (dwNow - s_dwVSCompileFailLogTick) >= 2000u)
+		{
+			s_dwVSCompileFailLogTick = dwNow;
+			if (pErrorBlob && pErrorBlob->GetBufferPointer())
+			{
+				TraceError("DX11_SKYENV_DRAW_FAIL stage=sky reason=world_vs_compile_failed msg=%s",
+					reinterpret_cast<const char*>(pErrorBlob->GetBufferPointer()));
+			}
+			else
+			{
+				TraceError("DX11_SKYENV_DRAW_FAIL stage=sky reason=world_vs_compile_failed hr=0x%08x",
+					static_cast<unsigned int>(hCompile));
+			}
+		}
+		SAFE_RELEASE(pErrorBlob);
+		SAFE_RELEASE(pVSBlob);
+		return false;
+	}
+	SAFE_RELEASE(pErrorBlob);
+
+	const HRESULT hCreateVS = pDevice->CreateVertexShader(
+		pVSBlob->GetBufferPointer(),
+		pVSBlob->GetBufferSize(),
+		NULL,
+		&gs_pSkyDX11WorldVertexShader);
+	if (FAILED(hCreateVS) || !gs_pSkyDX11WorldVertexShader)
+	{
+		static DWORD s_dwVSCreateFailLogTick = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwVSCreateFailLogTick || (dwNow - s_dwVSCreateFailLogTick) >= 2000u)
+		{
+			s_dwVSCreateFailLogTick = dwNow;
+			TraceError("DX11_SKYENV_DRAW_FAIL stage=sky reason=world_vs_create_failed hr=0x%08x",
+				static_cast<unsigned int>(hCreateVS));
+		}
+		SAFE_RELEASE(pVSBlob);
+		return false;
+	}
+
+	D3D11_BUFFER_DESC kConstantBufferDesc = {};
+	kConstantBufferDesc.ByteWidth = sizeof(SSkyDX11VSConstants);
+	kConstantBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+	kConstantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	kConstantBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	const HRESULT hCreateCB = pDevice->CreateBuffer(&kConstantBufferDesc, NULL, &gs_pSkyDX11WorldVSConstantBuffer);
+	SAFE_RELEASE(pVSBlob);
+	if (FAILED(hCreateCB) || !gs_pSkyDX11WorldVSConstantBuffer)
+	{
+		static DWORD s_dwCBCreateFailLogTick = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwCBCreateFailLogTick || (dwNow - s_dwCBCreateFailLogTick) >= 2000u)
+		{
+			s_dwCBCreateFailLogTick = dwNow;
+			TraceError("DX11_SKYENV_DRAW_FAIL stage=sky reason=world_vs_cbuffer_create_failed hr=0x%08x",
+				static_cast<unsigned int>(hCreateCB));
+		}
+		return false;
+	}
+
+	return true;
+}
+
+inline void ConvertDiffuseToFloat4(const DWORD dwDiffuse, float& r, float& g, float& b, float& a)
+{
+	a = static_cast<float>((dwDiffuse >> 24) & 0xFF) / 255.0f;
+	r = static_cast<float>((dwDiffuse >> 16) & 0xFF) / 255.0f;
+	g = static_cast<float>((dwDiffuse >> 8) & 0xFF) / 255.0f;
+	b = static_cast<float>(dwDiffuse & 0xFF) / 255.0f;
+}
+
+bool DrawSkyPrimitiveDX11(const TPDTVertex* pVertices,
+						  const UINT uVertexCount,
+						  const D3D11_PRIMITIVE_TOPOLOGY eTopology,
+						  ID3D11ShaderResourceView* pTextureSRV,
+						  const char* c_szFailKey)
+{
+	(void)c_szFailKey;
+
+	if (!pVertices || 0 == uVertexCount)
+		return false;
+
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return false;
+
+	ID3D11Device* pDevice = pDX11Device->GetDevice();
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	if (!pDevice || !pContext)
+		return false;
+
+	if (!pDX11Device->EnsureBootstrapPipelineReady() || !pDX11Device->EnsureBootstrapUISamplerReady())
+		return false;
+	if (!EnsureSkyDX11WorldVertexShader(pDevice))
+		return false;
+
+	ID3D11InputLayout* pInputLayout = pDX11Device->GetBootstrapUIInputLayout();
+	ID3D11VertexShader* pVertexShader = gs_pSkyDX11WorldVertexShader;
+	ID3D11Buffer* pVertexBuffer = pDX11Device->GetBootstrapUIVertexBuffer();
+	ID3D11DepthStencilState* pDepthReadState = pDX11Device->GetBootstrapUIDepthReadState();
+	ID3D11RasterizerState* pRasterizerState = pDX11Device->GetBootstrapRasterizerState();
+	ID3D11SamplerState* pSamplerState = pDX11Device->GetBootstrapUISamplerState();
+	ID3D11ShaderResourceView* pWhiteSRV = CGraphicTextureDX11::GetWhiteFallbackTexture(pDevice);
+	ID3D11PixelShader* pPixelShader = NULL;
+	switch (gs_eSkyDX11ShadingMode)
+	{
+	case SKY_DX11_SHADING_DIFFUSE:
+		// Diffuse sky is vertex-color only; using textured UI PS here can output black when t0 is unbound.
+		pPixelShader = pDX11Device->GetBootstrapColorPixelShader();
+		break;
+	case SKY_DX11_SHADING_CLOUD_COMBINE:
+		if (!EnsureSkyDX11CloudCombineShader(pDevice))
+			return false;
+		pPixelShader = gs_pSkyDX11CloudCombinePixelShader;
+		break;
+	case SKY_DX11_SHADING_TEXTURE:
+	default:
+		pPixelShader = pDX11Device->GetBootstrapUITexturePixelShader();
+		break;
+	}
+
+	if (gs_bSkyDX11ClampSampler)
+	{
+		if (!EnsureSkyDX11ClampSampler(pDevice))
+			return false;
+		pSamplerState = gs_pSkyDX11ClampSamplerState;
+	}
+
+	if (!pInputLayout || !pVertexShader || !pPixelShader || !pVertexBuffer || !pDepthReadState || !pRasterizerState || !pSamplerState || !pWhiteSRV)
+		return false;
+
+	CCamera* pCurrentCamera = CCameraManager::Instance().GetCurrentCamera();
+	const D3DXMATRIX& matView = pCurrentCamera ? pCurrentCamera->GetViewMatrix() : CGraphicBase::GetViewMatrix();
+	const D3DXMATRIX& matProj = CGraphicBase::GetProjMatrix();
+	const D3DXMATRIX& matWorld = gs_matSkyDX11World;
+	D3DXMATRIX matWorldView;
+	D3DXMATRIX matWorldViewProj;
+	D3DXMatrixMultiply(&matWorldView, &matWorld, &matView);
+	D3DXMatrixMultiply(&matWorldViewProj, &matWorldView, &matProj);
+
+	std::vector<SBootstrapUIVertex> akVertices;
+	akVertices.resize(uVertexCount);
+
+	for (UINT i = 0; i < uVertexCount; ++i)
+	{
+		float r = 1.0f;
+		float g = 1.0f;
+		float b = 1.0f;
+		float a = 1.0f;
+		if (SKY_DX11_SHADING_TEXTURE != gs_eSkyDX11ShadingMode)
+		{
+			ConvertDiffuseToFloat4(pVertices[i].diffuse, r, g, b, a);
+			gs_bSkyDX11DiffuseSampled = true;
+			float fMinRGB = r;
+			float fMaxRGB = r;
+			if (g < fMinRGB) fMinRGB = g;
+			if (b < fMinRGB) fMinRGB = b;
+			if (g > fMaxRGB) fMaxRGB = g;
+			if (b > fMaxRGB) fMaxRGB = b;
+			if (fMinRGB < gs_fSkyDX11DiffuseMin) gs_fSkyDX11DiffuseMin = fMinRGB;
+			if (fMaxRGB > gs_fSkyDX11DiffuseMax) gs_fSkyDX11DiffuseMax = fMaxRGB;
+		}
+
+		akVertices[i].x = pVertices[i].position.x;
+		akVertices[i].y = pVertices[i].position.y;
+		akVertices[i].z = pVertices[i].position.z;
+		akVertices[i].r = r;
+		akVertices[i].g = g;
+		akVertices[i].b = b;
+		akVertices[i].a = a;
+		akVertices[i].u = pVertices[i].texCoord.x + gs_fSkyDX11UOffset;
+		akVertices[i].v = pVertices[i].texCoord.y + gs_fSkyDX11VOffset;
+	}
+
+	D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
+	const HRESULT hMapResult = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+	if (FAILED(hMapResult) || !kMappedResource.pData)
+		return false;
+	memcpy(kMappedResource.pData, &akVertices[0], sizeof(SBootstrapUIVertex) * akVertices.size());
+	pContext->Unmap(pVertexBuffer, 0);
+
+	D3D11_MAPPED_SUBRESOURCE kMappedCB = {};
+	const HRESULT hMapCB = pContext->Map(gs_pSkyDX11WorldVSConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedCB);
+	if (FAILED(hMapCB) || !kMappedCB.pData)
+		return false;
+	SSkyDX11VSConstants kVSConstants = {};
+	kVSConstants.matWorldViewProj = matWorldViewProj;
+	memcpy(kMappedCB.pData, &kVSConstants, sizeof(kVSConstants));
+	pContext->Unmap(gs_pSkyDX11WorldVSConstantBuffer, 0);
+
+	ID3D11InputLayout* pPrevInputLayout = NULL;
+	ID3D11Buffer* pPrevVertexBuffer = NULL;
+	UINT uPrevStride = 0u;
+	UINT uPrevOffset = 0u;
+	D3D11_PRIMITIVE_TOPOLOGY ePrevTopology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	ID3D11VertexShader* pPrevVS = NULL;
+	ID3D11Buffer* pPrevVSConstantBuffer0 = NULL;
+	ID3D11PixelShader* pPrevPS = NULL;
+	ID3D11SamplerState* pPrevPSSampler0 = NULL;
+	ID3D11ShaderResourceView* pPrevPSSRV0 = NULL;
+	ID3D11BlendState* pPrevBlendState = NULL;
+	FLOAT afPrevBlendFactor[4] = { 0, 0, 0, 0 };
+	UINT uPrevSampleMask = 0xFFFFFFFFu;
+	ID3D11DepthStencilState* pPrevDepthState = NULL;
+	UINT uPrevStencilRef = 0u;
+	ID3D11RasterizerState* pPrevRasterizerState = NULL;
+	ID3D11RenderTargetView* pPrevRTV = NULL;
+	ID3D11DepthStencilView* pPrevDSV = NULL;
+
+	pContext->IAGetInputLayout(&pPrevInputLayout);
+	pContext->IAGetVertexBuffers(0, 1, &pPrevVertexBuffer, &uPrevStride, &uPrevOffset);
+	pContext->IAGetPrimitiveTopology(&ePrevTopology);
+	pContext->VSGetShader(&pPrevVS, NULL, NULL);
+	pContext->VSGetConstantBuffers(0, 1, &pPrevVSConstantBuffer0);
+	pContext->PSGetShader(&pPrevPS, NULL, NULL);
+	pContext->PSGetSamplers(0, 1, &pPrevPSSampler0);
+	pContext->PSGetShaderResources(0, 1, &pPrevPSSRV0);
+	pContext->OMGetBlendState(&pPrevBlendState, afPrevBlendFactor, &uPrevSampleMask);
+	pContext->OMGetDepthStencilState(&pPrevDepthState, &uPrevStencilRef);
+	pContext->RSGetState(&pPrevRasterizerState);
+	pContext->OMGetRenderTargets(1, &pPrevRTV, &pPrevDSV);
+
+	pDX11Device->BindMainRenderTargets();
+
+	const FLOAT afBlendFactor[4] = { 0, 0, 0, 0 };
+	UINT uStride = sizeof(SBootstrapUIVertex);
+	UINT uOffset = 0;
+	// M3-SKY-BLEND-FIX-74: Safety check for blend state (fallback to alpha blend if NULL)
+    ID3D11BlendState* pBlendState = gs_pSkyDX11BlendState;
+	pContext->OMSetBlendState(pBlendState, afBlendFactor, 0xFFFFFFFFu);
+	pContext->RSSetState(pRasterizerState);
+	pContext->OMSetDepthStencilState(pDepthReadState, 0);
+	pContext->IASetInputLayout(pInputLayout);
+	pContext->IASetVertexBuffers(0, 1, &pVertexBuffer, &uStride, &uOffset);
+	pContext->IASetPrimitiveTopology(eTopology);
+	pContext->VSSetShader(pVertexShader, NULL, 0);
+	pContext->VSSetConstantBuffers(0, 1, &gs_pSkyDX11WorldVSConstantBuffer);
+	pContext->PSSetShader(pPixelShader, NULL, 0);
+	pContext->PSSetSamplers(0, 1, &pSamplerState);
+
+	ID3D11ShaderResourceView* pBoundSRV = pTextureSRV ? pTextureSRV : pWhiteSRV;
+	ID3D11ShaderResourceView* pNullSRV = NULL;
+	if (SKY_DX11_SHADING_DIFFUSE == gs_eSkyDX11ShadingMode)
+		pContext->PSSetShaderResources(0, 1, &pNullSRV);
+	else
+		pContext->PSSetShaderResources(0, 1, &pBoundSRV);
+	pContext->Draw(uVertexCount, 0);
+	pDX11Device->IncrementFrameDrawCalls(1u, (uVertexCount >= 2u) ? (uVertexCount - 2u) : 0u);
+
+	pContext->PSSetShaderResources(0, 1, &pPrevPSSRV0);
+	pContext->PSSetSamplers(0, 1, &pPrevPSSampler0);
+	pContext->PSSetShader(pPrevPS, NULL, 0);
+	pContext->VSSetConstantBuffers(0, 1, &pPrevVSConstantBuffer0);
+	pContext->VSSetShader(pPrevVS, NULL, 0);
+	pContext->IASetPrimitiveTopology(ePrevTopology);
+	pContext->IASetVertexBuffers(0, 1, &pPrevVertexBuffer, &uPrevStride, &uPrevOffset);
+	pContext->IASetInputLayout(pPrevInputLayout);
+	pContext->OMSetRenderTargets(1, &pPrevRTV, pPrevDSV);
+	pContext->OMSetDepthStencilState(pPrevDepthState, uPrevStencilRef);
+	pContext->OMSetBlendState(pPrevBlendState, afPrevBlendFactor, uPrevSampleMask);
+	pContext->RSSetState(pPrevRasterizerState);
+
+	SAFE_RELEASE(pPrevInputLayout);
+	SAFE_RELEASE(pPrevVertexBuffer);
+	SAFE_RELEASE(pPrevVS);
+	SAFE_RELEASE(pPrevVSConstantBuffer0);
+	SAFE_RELEASE(pPrevPS);
+	SAFE_RELEASE(pPrevPSSampler0);
+	SAFE_RELEASE(pPrevPSSRV0);
+	SAFE_RELEASE(pPrevBlendState);
+	SAFE_RELEASE(pPrevDepthState);
+	SAFE_RELEASE(pPrevRasterizerState);
+	SAFE_RELEASE(pPrevRTV);
+	SAFE_RELEASE(pPrevDSV);
+	return true;
+}
+
+// DX11_MODERNIZE_NOTES:
+// 1) Replace fixed-function sky/cloud pass with dedicated DX11 PSO-like state blocks.
+// 2) Render sky with immutable VB/IB + shader-based gradients (remove FVF/TextureStageState).
+// 3) Move cloud UV animation to shader constants and batch as one indexed draw.
+// 4) Integrate temporal blending and exposure-safe sky luminance path.
+}
 
 //////////////////////////////////////////////////////////////////////////
 // CSkyObjectQuad
@@ -90,9 +637,14 @@ bool CSkyObjectQuad::Update()
 
 void CSkyObjectQuad::Render()
 {
-	if (CGraphicBase::SetPDTStream(m_Vertex, 4))
-		STATEMANAGER.DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
-	//STATEMANAGER.DrawIndexedPrimitiveUP(D3DPT_TRIANGLESTRIP, 0, 4, 2, m_Indices, D3DFMT_INDEX16, &m_Vertex, sizeof(TPDTVertex));
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return;
+
+	++gs_uSkyDX11ExpectedQuads;
+	ID3D11ShaderResourceView* pTextureSRV = pDX11Device->GetBootstrapTextureStageSRV(0);
+	if (DrawSkyPrimitiveDX11(m_Vertex, 4, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, pTextureSRV, "DX11_SKYENV_DRAW_FAIL"))
+		++gs_uSkyDX11SubmittedQuads;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -154,21 +706,72 @@ void CSkyObject::Render()
 
 CGraphicImageInstance * CSkyObject::GenerateTexture(const char * szfilename)
 {
+	// M2-SKY-ENV-FIX-40: Add sky texture load diagnostics
+	static DWORD s_dwSkyTextureLoadLogTick = 0u;
+	const DWORD dwNow = ELTimer_GetMSec();
+
 	assert(szfilename != NULL);
 
 	if (strlen(szfilename) <= 0)
+	{
+		// M2-SKY-ENV-FIX-40: Log empty filename error
+		if (0u == s_dwSkyTextureLoadLogTick || (dwNow - s_dwSkyTextureLoadLogTick) >= 2000u)
+		{
+			s_dwSkyTextureLoadLogTick = dwNow;
+			TraceError("DX11_SKYENV_TEXTURE_LOAD_FAIL stage=generate_texture reason=empty_filename filename=(null)");
+		}
 		assert(false);
+		return NULL;
+	}
 
 	CResource * pResource = CResourceManager::Instance().GetResourcePointer(szfilename);
 
+	if (!pResource)
+	{
+		// M2-SKY-ENV-FIX-40: Log resource load failure
+		if (0u == s_dwSkyTextureLoadLogTick || (dwNow - s_dwSkyTextureLoadLogTick) >= 2000u)
+		{
+			s_dwSkyTextureLoadLogTick = dwNow;
+			TraceError("DX11_SKYENV_TEXTURE_LOAD_FAIL stage=generate_texture reason=resource_null filename=%s", szfilename);
+		}
+		return NULL;
+	}
+
 	if (!pResource->IsType(CGraphicImage::Type()))
 	{
+		// M2-SKY-ENV-FIX-40: Log type mismatch
+		if (0u == s_dwSkyTextureLoadLogTick || (dwNow - s_dwSkyTextureLoadLogTick) >= 2000u)
+		{
+			s_dwSkyTextureLoadLogTick = dwNow;
+			TraceError("DX11_SKYENV_TEXTURE_LOAD_FAIL stage=generate_texture reason=type_mismatch filename=%s expected_type=CGraphicImage",
+				szfilename);
+		}
 		assert(false);
 		return NULL;
 	}
 
 	CGraphicImageInstance * pImageInstance = CGraphicImageInstance::New();
+	if (!pImageInstance)
+	{
+		// M2-SKY-ENV-FIX-40: Log image instance creation failure
+		if (0u == s_dwSkyTextureLoadLogTick || (dwNow - s_dwSkyTextureLoadLogTick) >= 2000u)
+		{
+			s_dwSkyTextureLoadLogTick = dwNow;
+			TraceError("DX11_SKYENV_TEXTURE_LOAD_FAIL stage=generate_texture reason=image_instance_null filename=%s", szfilename);
+		}
+		return NULL;
+	}
+
 	pImageInstance->SetImagePointer(static_cast<CGraphicImage *>(pResource));
+
+	// M2-SKY-ENV-FIX-40: Log successful texture load (throttled)
+	static bool s_bLoggedTextureLoad = false;
+	if (!s_bLoggedTextureLoad)
+	{
+		s_bLoggedTextureLoad = true;
+		TraceError("DX11_SKYENV_TEXTURE_LOAD_SUCCESS filename=%s", szfilename);
+	}
+
 	return (pImageInstance);
 }
 
@@ -218,6 +821,7 @@ CSkyBox::CSkyBox()
 {
 	m_ucVirticalGradientLevelUpper = 0;
 	m_ucVirticalGradientLevelLower = 0;
+	m_bSkyTexturesExpected = false;  // M3-SKYBOX-ASSET-BIND-73: Initialize flag
 }
 
 CSkyBox::~CSkyBox()
@@ -242,14 +846,19 @@ void CSkyBox::SetSkyBoxScale(const D3DXVECTOR3 & c_rv3Scale)
 
 void CSkyBox::SetGradientLevel(BYTE byUpper, BYTE byLower)
 {
-	m_ucVirticalGradientLevelUpper = byUpper;
-	m_ucVirticalGradientLevelLower = byLower;
+	// Validate gradient levels to ensure smooth sky rendering
+	// Minimum values: 2 upper strips (prevent blocky sky), 4 lower strips (smooth terrain transition)
+	m_ucVirticalGradientLevelUpper = std::max<BYTE>(byUpper, 2);
+	m_ucVirticalGradientLevelLower = std::max<BYTE>(byLower, 4);
 }
 
 void CSkyBox::SetFaceTexture( const char* c_szFileName, int iFaceIndex )
 {
-	if( iFaceIndex < 0 || iFaceIndex > 5 ) 
+	if( iFaceIndex < 0 || iFaceIndex > 5 )
 		return;
+
+	// M3-SKYBOX-ASSET-BIND-73: Sky textures were configured (not just default diffuse mode)
+	m_bSkyTexturesExpected = true;
 
 	TGraphicImageInstanceMap::iterator itor = m_GraphicImageInstanceMap.find(c_szFileName);
 	if (m_GraphicImageInstanceMap.end() != itor)
@@ -274,7 +883,7 @@ void CSkyBox::SetCloudTexture(const char * c_szFileName)
 		TraceError("CSkyBox::SetCloudTexture - Failed to load cloud texture: %s", c_szFileName);
 	m_GraphicImageInstanceMap.insert(TGraphicImageInstanceMap::value_type(m_FaceCloud.m_strfacename, pGraphicImageInstance));
 
-	// 이거 안쓰는거 같은데요? [cronan]
+	// ì´ê±° ì•ˆì“°ëŠ”ê±° ê°™ì€ë°ìš”? [cronan]
 //	CGraphicImage * pImage = (CGraphicImage *) CResourceManager::Instance().GetResourcePointer("D:\\Ymir Work\\special/cloudalpha.tga");
 //	m_CloudAlphaImageInstance.SetImagePointer(pImage);
 }
@@ -365,27 +974,27 @@ void CSkyBox::SetSkyObjectQuadVertical(TSkyObjectQuadVector * pSkyObjectQuadVect
 
 		aPDTVertex.position.x = c_pv2QuadPoints[0].x;
 		aPDTVertex.position.y = c_pv2QuadPoints[0].y;
-		aPDTVertex.position.z = -(float)(ucY + 1)/ (float)(m_ucVirticalGradientLevelLower); 
+		aPDTVertex.position.z = -(float)(ucY + 1)/ (float)(m_ucVirticalGradientLevelLower);
 		aPDTVertex.texCoord.x = 0.0f;
-		aPDTVertex.texCoord.y = 0.5f + (float)(ucY + 1)/ (float)(m_ucVirticalGradientLevelUpper) * 0.5f;
+		aPDTVertex.texCoord.y = 0.5f + (float)(ucY + 1)/ (float)(m_ucVirticalGradientLevelLower) * 0.5f;
 		rSkyObjectQuad.SetVertex(0, aPDTVertex);
 		aPDTVertex.position.x = c_pv2QuadPoints[0].x;
 		aPDTVertex.position.y = c_pv2QuadPoints[0].y;
 		aPDTVertex.position.z = -(float)(ucY) / (float)(m_ucVirticalGradientLevelLower);
 		aPDTVertex.texCoord.x = 0.0f;
-		aPDTVertex.texCoord.y = 0.5f + (float)(ucY)/ (float)(m_ucVirticalGradientLevelUpper) * 0.5f;
+		aPDTVertex.texCoord.y = 0.5f + (float)(ucY)/ (float)(m_ucVirticalGradientLevelLower) * 0.5f;
 		rSkyObjectQuad.SetVertex(1, aPDTVertex);
 		aPDTVertex.position.x = c_pv2QuadPoints[1].x;
 		aPDTVertex.position.y = c_pv2QuadPoints[1].y;
-		aPDTVertex.position.z = -(float)(ucY + 1) / (float)(m_ucVirticalGradientLevelLower); 
+		aPDTVertex.position.z = -(float)(ucY + 1) / (float)(m_ucVirticalGradientLevelLower);
 		aPDTVertex.texCoord.x = 1.0f;
-		aPDTVertex.texCoord.y = 0.5f + (float)(ucY + 1)/ (float)(m_ucVirticalGradientLevelUpper) * 0.5f;
+		aPDTVertex.texCoord.y = 0.5f + (float)(ucY + 1)/ (float)(m_ucVirticalGradientLevelLower) * 0.5f;
 		rSkyObjectQuad.SetVertex(2, aPDTVertex);
 		aPDTVertex.position.x = c_pv2QuadPoints[1].x;
 		aPDTVertex.position.y = c_pv2QuadPoints[1].y;
-		aPDTVertex.position.z = -(float)(ucY) / (float)(m_ucVirticalGradientLevelLower); 
+		aPDTVertex.position.z = -(float)(ucY) / (float)(m_ucVirticalGradientLevelLower);
 		aPDTVertex.texCoord.x = 1.0f;
-		aPDTVertex.texCoord.y = 0.5f + (float)(ucY)/ (float)(m_ucVirticalGradientLevelUpper) * 0.5f;
+		aPDTVertex.texCoord.y = 0.5f + (float)(ucY)/ (float)(m_ucVirticalGradientLevelLower) * 0.5f;
 		rSkyObjectQuad.SetVertex(3, aPDTVertex);
 	}
 }
@@ -436,9 +1045,6 @@ void CSkyBox::Refresh()
 
 	if( m_ucRenderMode == CSkyObject::SKY_RENDER_MODE_DEFAULT ||  m_ucRenderMode == CSkyObject::SKY_RENDER_MODE_DIFFUSE )
 	{
-		if (m_ucVirticalGradientLevelUpper + m_ucVirticalGradientLevelLower <= 0)
-			return;
-
 		D3DXVECTOR2 v2QuadPoints[2];
 
 		//// Face 0: FRONT
@@ -615,171 +1221,78 @@ void CSkyBox::SetCloudColor(const TGradientColor & c_rColor, const TGradientColo
 
 void CSkyBox::SetSkyColor(const TVectorGradientColor & c_rColorVector, const TVectorGradientColor & c_rNextColorVector, long lTransitionTime)
 {
-	unsigned long ulVectorGradientColornum = 0;
-	unsigned long uck;
+	const size_t uRequiredSideSamples = std::max<size_t>(1u, m_Faces[0].m_SkyObjectQuadVector.size());
+	const TVectorGradientColor kColorVector = BuildSkyGradientLUT(c_rColorVector, uRequiredSideSamples);
+	const TVectorGradientColor kNextColorVector = BuildSkyGradientLUT(c_rNextColorVector, uRequiredSideSamples);
+
+	const DWORD dwNow = ELTimer_GetMSec();
+	static DWORD s_dwGradientValidationLogTick = 0u;
+	if (0u == s_dwGradientValidationLogTick || (dwNow - s_dwGradientValidationLogTick) >= 2000u)
+	{
+		s_dwGradientValidationLogTick = dwNow;
+		TraceError("DX11_SKY_GRADIENT_VALIDATION input=%u next_input=%u required=%u normalized=%u",
+			static_cast<unsigned int>(c_rColorVector.size()),
+			static_cast<unsigned int>(c_rNextColorVector.size()),
+			static_cast<unsigned int>(uRequiredSideSamples),
+			static_cast<unsigned int>(kColorVector.size()));
+	}
+
+	auto ApplySideGradient = [&](CSkyObjectQuad& rQuad, size_t uIndex)
+	{
+		const TGradientColor& rkCur = kColorVector[uIndex];
+		const TGradientColor& rkNext = kNextColorVector[uIndex];
+
+		rQuad.SetSrcColor(0, rkCur.m_SecondColor.r, rkCur.m_SecondColor.g, rkCur.m_SecondColor.b, rkCur.m_SecondColor.a);
+		rQuad.SetTransition(0, rkNext.m_SecondColor.r, rkNext.m_SecondColor.g, rkNext.m_SecondColor.b, rkNext.m_SecondColor.a, lTransitionTime);
+		rQuad.SetSrcColor(1, rkCur.m_FirstColor.r, rkCur.m_FirstColor.g, rkCur.m_FirstColor.b, rkCur.m_FirstColor.a);
+		rQuad.SetTransition(1, rkNext.m_FirstColor.r, rkNext.m_FirstColor.g, rkNext.m_FirstColor.b, rkNext.m_FirstColor.a, lTransitionTime);
+		rQuad.SetSrcColor(2, rkCur.m_SecondColor.r, rkCur.m_SecondColor.g, rkCur.m_SecondColor.b, rkCur.m_SecondColor.a);
+		rQuad.SetTransition(2, rkNext.m_SecondColor.r, rkNext.m_SecondColor.g, rkNext.m_SecondColor.b, rkNext.m_SecondColor.a, lTransitionTime);
+		rQuad.SetSrcColor(3, rkCur.m_FirstColor.r, rkCur.m_FirstColor.g, rkCur.m_FirstColor.b, rkCur.m_FirstColor.a);
+		rQuad.SetTransition(3, rkNext.m_FirstColor.r, rkNext.m_FirstColor.g, rkNext.m_FirstColor.b, rkNext.m_FirstColor.a, lTransitionTime);
+	};
+
+	auto ApplyFlatGradient = [&](CSkyObjectQuad& rQuad, const TColor& rkCur, const TColor& rkNext)
+	{
+		rQuad.SetSrcColor(0, rkCur.r, rkCur.g, rkCur.b, rkCur.a);
+		rQuad.SetTransition(0, rkNext.r, rkNext.g, rkNext.b, rkNext.a, lTransitionTime);
+		rQuad.SetSrcColor(1, rkCur.r, rkCur.g, rkCur.b, rkCur.a);
+		rQuad.SetTransition(1, rkNext.r, rkNext.g, rkNext.b, rkNext.a, lTransitionTime);
+		rQuad.SetSrcColor(2, rkCur.r, rkCur.g, rkCur.b, rkCur.a);
+		rQuad.SetTransition(2, rkNext.r, rkNext.g, rkNext.b, rkNext.a, lTransitionTime);
+		rQuad.SetSrcColor(3, rkCur.r, rkCur.g, rkCur.b, rkCur.a);
+		rQuad.SetTransition(3, rkNext.r, rkNext.g, rkNext.b, rkNext.a, lTransitionTime);
+	};
+
 	for (unsigned char ucj = 0; ucj < 4; ++ucj)
 	{
-		TSkyObjectFace & aFace = m_Faces[ucj];
-		ulVectorGradientColornum = 0;
-		for (uck = 0; uck < aFace.m_SkyObjectQuadVector.size(); ++uck)
+		TSkyObjectFace& rFace = m_Faces[ucj];
+		for (size_t uQuad = 0; uQuad < rFace.m_SkyObjectQuadVector.size(); ++uQuad)
 		{
-			CSkyObjectQuad & aSkyObjectQuad = aFace.m_SkyObjectQuadVector[uck];
-
-			aSkyObjectQuad.SetSrcColor(0,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.r,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.g,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.b,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.a);
-			aSkyObjectQuad.SetTransition(0, 
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.r,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.g,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.b,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.a,
-				lTransitionTime);
-			aSkyObjectQuad.SetSrcColor(1,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.r,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.g,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.b,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.a);
-			aSkyObjectQuad.SetTransition(1,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.r,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.g,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.b,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.a,
-				lTransitionTime);
-			aSkyObjectQuad.SetSrcColor(2,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.r,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.g,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.b,
-				c_rColorVector[ulVectorGradientColornum].m_SecondColor.a);
-			aSkyObjectQuad.SetTransition(2,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.r,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.g,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.b,
-				c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.a,
-				lTransitionTime);
-			aSkyObjectQuad.SetSrcColor(3,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.r,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.g,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.b,
-				c_rColorVector[ulVectorGradientColornum].m_FirstColor.a);
-			aSkyObjectQuad.SetTransition(3,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.r,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.g,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.b,
-				c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.a,
-				lTransitionTime);
-
-			ulVectorGradientColornum++;
+			const size_t uGradientIndex = std::min<size_t>(uQuad, kColorVector.size() - 1u);
+			ApplySideGradient(rFace.m_SkyObjectQuadVector[uQuad], uGradientIndex);
 		}
 	}
 
-	/////
-
-	TSkyObjectFace & aFaceTop = m_Faces[4];
-	ulVectorGradientColornum = 0;
-	for (uck = 0; uck < aFaceTop.m_SkyObjectQuadVector.size(); ++uck)
+	TSkyObjectFace& rTopFace = m_Faces[4];
+	for (size_t uQuad = 0; uQuad < rTopFace.m_SkyObjectQuadVector.size(); ++uQuad)
 	{
-		CSkyObjectQuad & aSkyObjectQuad = aFaceTop.m_SkyObjectQuadVector[uck];
-
-		aSkyObjectQuad.SetSrcColor(0,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.a);
-		aSkyObjectQuad.SetTransition(0, 
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.a,
-			lTransitionTime);
-		aSkyObjectQuad.SetSrcColor(1,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.a);
-		aSkyObjectQuad.SetTransition(1,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.a,
-			lTransitionTime);
-		aSkyObjectQuad.SetSrcColor(2,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.a);
-		aSkyObjectQuad.SetTransition(2,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.a,
-			lTransitionTime);
-		aSkyObjectQuad.SetSrcColor(3,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_FirstColor.a);
-		aSkyObjectQuad.SetTransition(3,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_FirstColor.a,
-			lTransitionTime);
+		ApplyFlatGradient(
+			rTopFace.m_SkyObjectQuadVector[uQuad],
+			kColorVector.front().m_FirstColor,
+			kNextColorVector.front().m_FirstColor);
 	}
-	TSkyObjectFace & aFaceBottom = m_Faces[5];
-	ulVectorGradientColornum = c_rColorVector.size() - 1;
-	for (uck = 0; uck < aFaceBottom.m_SkyObjectQuadVector.size(); ++uck)
+
+	TSkyObjectFace& rBottomFace = m_Faces[5];
+	const size_t uBottomIndex = kColorVector.size() - 1u;
+	for (size_t uQuad = 0; uQuad < rBottomFace.m_SkyObjectQuadVector.size(); ++uQuad)
 	{
-		CSkyObjectQuad & aSkyObjectQuad = aFaceBottom.m_SkyObjectQuadVector[uck];
-		
-		aSkyObjectQuad.SetSrcColor(0,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.a);
-		aSkyObjectQuad.SetTransition(0, 
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.a,
-			lTransitionTime);
-		aSkyObjectQuad.SetSrcColor(1,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.a);
-		aSkyObjectQuad.SetTransition(1,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.a,
-			lTransitionTime);
-		aSkyObjectQuad.SetSrcColor(2,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.a);
-		aSkyObjectQuad.SetTransition(2,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.a,
-			lTransitionTime);
-		aSkyObjectQuad.SetSrcColor(3,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rColorVector[ulVectorGradientColornum].m_SecondColor.a);
-		aSkyObjectQuad.SetTransition(3,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.r,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.g,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.b,
-			c_rNextColorVector[ulVectorGradientColornum].m_SecondColor.a,
-			lTransitionTime);
+		ApplyFlatGradient(
+			rBottomFace.m_SkyObjectQuadVector[uQuad],
+			kColorVector[uBottomIndex].m_SecondColor,
+			kNextColorVector[uBottomIndex].m_SecondColor);
 	}
 }
-
 void CSkyBox::StartTransition()
 {
 	m_bTransitionStarted = true;
@@ -805,67 +1318,222 @@ void CSkyBox::Update()
 
 void CSkyBox::Render()
 {
-	// 2004.01.25 myevan 처리를 렌더링 후반으로 옮기고, DepthTest 처리
-	STATEMANAGER.SaveRenderState(D3DRS_ZENABLE,	TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_ZWRITEENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_LIGHTING, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_FOGENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return;
 
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG2);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-	STATEMANAGER.SetTexture(1, NULL);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
- 	STATEMANAGER.SetFVF(D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1);
-
-	STATEMANAGER.SetTransform(D3DTS_WORLD, &m_matWorld);
-
-	//Render Face
-	if( m_ucRenderMode == CSkyObject::SKY_RENDER_MODE_TEXTURE )
+	gs_matSkyDX11World = m_matWorld;
+	gs_fSkyDX11UOffset = 0.0f;
+	gs_fSkyDX11VOffset = 0.0f;
+    // DX11 native sky pass: opaque/no-blend for faces; clouds use dedicated cloud blend in RenderCloud().
+    gs_pSkyDX11BlendState = NULL;
+	gs_uSkyDX11ExpectedQuads = 0u;
+	gs_uSkyDX11SubmittedQuads = 0u;
+	gs_bSkyDX11TextureBound = false;
+	gs_uSkyDX11SampledAlphaHint = 0u;
+	gs_bSkyDX11ClampSampler = false;
+	gs_bSkyDX11DiffuseSampled = false;
+	gs_fSkyDX11DiffuseMin = 1.0f;
+	gs_fSkyDX11DiffuseMax = 0.0f;
+	static bool s_abSkyFaceMissingLogged[6] = { false, false, false, false, false, false };
+	auto LogSkyFaceMissing = [&](unsigned int iFace, const char* c_szReason)
 	{
-		STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-		STATEMANAGER.SaveSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-		STATEMANAGER.SaveSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+		if (iFace >= 6 || s_abSkyFaceMissingLogged[iFace])
+			return;
+		s_abSkyFaceMissingLogged[iFace] = true;
+		TraceError("DX11_SKY_FACE_MISSING face=%u file=%s reason=%s",
+			iFace,
+			m_Faces[iFace].m_strFaceTextureFileName.c_str(),
+			c_szReason ? c_szReason : "unknown");
+	};
+
+	if (m_ucRenderMode == CSkyObject::SKY_RENDER_MODE_TEXTURE)
+	{
+		gs_eSkyDX11ShadingMode = SKY_DX11_SHADING_TEXTURE;
+		gs_szSkyDX11Mode = "texture";
+		gs_bSkyDX11ClampSampler = true;
+
+		// M2-SKY-ENV-FIX-40: Track face texture binding status
+		UINT uFaceTexturesBound = 0u;
+		UINT uFaceTexturesMissing = 0u;
 
 		for (unsigned int i = 0; i < 6; ++i)
 		{
-			CGraphicImageInstance * pFaceImageInstance = m_GraphicImageInstanceMap[m_Faces[i].m_strFaceTextureFileName];
-			if (!pFaceImageInstance)
-				break;
+			CGraphicImageInstance* pFaceImageInstance = m_GraphicImageInstanceMap[m_Faces[i].m_strFaceTextureFileName];
+			CGraphicTexture* pFaceTexture = pFaceImageInstance ? pFaceImageInstance->GetTexturePointer() : NULL;
 
-			STATEMANAGER.SetTexture( 0, pFaceImageInstance->GetTextureReference().GetD3DTexture() );
+			// M3-SKY-RESOURCE-DX11-72: Check if texture exists and is loaded
+			if (pFaceTexture && !pFaceTexture->IsEmpty())
+			{
+				pFaceTexture->SetTextureStage(0);
+				gs_bSkyDX11TextureBound = true;
+				++uFaceTexturesBound;
+			}
+			else
+			{
+				// M2-SKY-ENV-FIX-40: Log missing face texture
+				++uFaceTexturesMissing;
+
+				// M3-SKY-RESOURCE-DX11-72: Provide specific reason for texture failure
+				if (!pFaceImageInstance)
+				{
+					LogSkyFaceMissing(i, "texture_mode_instance_not_created");
+				}
+				else if (!pFaceTexture)
+				{
+					LogSkyFaceMissing(i, "texture_mode_pointer_null");
+				}
+				else if (pFaceTexture->IsEmpty())
+				{
+					// Texture object exists but failed to load (check file existence)
+					const std::string& fileName = m_Faces[i].m_strFaceTextureFileName;
+					const bool fileExists = CGraphicTextureDX11::DoesTextureFileExist(fileName.c_str());
+					if (fileExists)
+					{
+						LogSkyFaceMissing(i, "texture_mode_file_exists_but_decode_failed");
+					}
+					else
+					{
+						LogSkyFaceMissing(i, "texture_mode_file_not_found");
+					}
+				}
+
+				pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
+			}
 
 			m_Faces[i].Render();
 		}
 
-		//STATEMANAGER.SetTexture( 0, NULL );
-
-		STATEMANAGER.RestoreSamplerState(0, D3DSAMP_ADDRESSU);
-		STATEMANAGER.RestoreSamplerState(0, D3DSAMP_ADDRESSV);
+		// M2-SKY-ENV-FIX-40: Detect and log if no face textures were bound (potential black sky)
+		if (uFaceTexturesBound == 0 && uFaceTexturesMissing > 0)
+		{
+			static DWORD s_dwMissingFaceLogTick = 0u;
+			const DWORD dwNow = ELTimer_GetMSec();
+			if (0u == s_dwMissingFaceLogTick || (dwNow - s_dwMissingFaceLogTick) >= 2000u)
+			{
+				s_dwMissingFaceLogTick = dwNow;
+				TraceError("DX11_SKYENV_DRAW_FAIL stage=sky reason=no_face_textures_bound mode=texture texture_bound=0 missing_count=%u/6",
+					uFaceTexturesMissing);
+			}
+		}
 	}
 	else
 	{
+		// M3-SKY-BLEND-FIX-74: Respect render mode set by MapOutdoor policy system
+		// Previously this code forced texture mode when textures existed, overriding user's choice
+		// Now we respect the mode set by SetRenderMode() via policy system
+		gs_eSkyDX11ShadingMode = SKY_DX11_SHADING_DIFFUSE;
+		gs_szSkyDX11Mode = "diffuse";
+
+		// M3-SKY-RESOURCE-DX11-72: One-shot log for diffuse mode (truly missing assets)
+		static bool s_bDiffuseModeLogged = false;
+		if (!s_bDiffuseModeLogged)
+		{
+			s_bDiffuseModeLogged = true;
+			// M3-SKYBOX-ASSET-BIND-73: Distinguish expected fallback from actual error
+			if (m_bSkyTexturesExpected)
+			{
+				// ERROR: Sky textures were configured but failed to load
+				TraceError("DX11_SKY_ERROR face=all reason=expected_textures_failed_to_load texture_bound=0 count=0/6");
+			}
+			else
+			{
+				// EXPECTED: Map has no sky textures configured (using diffuse gradient)
+				Tracef("DX11_SKY_INFO mode=diffuse reason=no_textures_configured_for_map");
+			}
+		}
+
+		pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
 		for (unsigned int i = 0; i < 6; ++i)
 		{
+			if (false) // M3-SKY-BLEND-FIX-74: Removed texture_forced_from_diffuse override
+			{
+				CGraphicImageInstance* pFaceImageInstance = m_GraphicImageInstanceMap[m_Faces[i].m_strFaceTextureFileName];
+				CGraphicTexture* pFaceTexture = pFaceImageInstance ? pFaceImageInstance->GetTexturePointer() : NULL;
+				if (pFaceTexture)
+				{
+					pFaceTexture->SetTextureStage(0);
+					gs_bSkyDX11TextureBound = true;
+				}
+				else
+				{
+					LogSkyFaceMissing(i, "forced_texture_face_not_loaded");
+					pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
+				}
+			}
 			m_Faces[i].Render();
+		}
+
+		// M3-SKY-BLEND-FIX-74: Runtime safety fallback - only when assets actually failed
+		// Previously triggered on any dark gradient (e.g., legitimate night scenes)
+		// Now only triggers when textures were EXPECTED but failed to load
+		if (gs_bSkyDX11DiffuseSampled && gs_fSkyDX11DiffuseMax <= 0.01f && m_bSkyTexturesExpected)
+		{
+			bool bHasAnyFaceTexture = false;
+			for (unsigned int i = 0; i < 6; ++i)
+			{
+				CGraphicImageInstance* pFaceImageInstance = m_GraphicImageInstanceMap[m_Faces[i].m_strFaceTextureFileName];
+				CGraphicTexture* pFaceTexture = pFaceImageInstance ? pFaceImageInstance->GetTexturePointer() : NULL;
+				if (pFaceTexture)
+				{
+					bHasAnyFaceTexture = true;
+					break;
+				}
+			}
+
+			if (bHasAnyFaceTexture)
+			{
+				gs_eSkyDX11ShadingMode = SKY_DX11_SHADING_TEXTURE;
+				gs_szSkyDX11Mode = "texture_fallback";
+				gs_bSkyDX11ClampSampler = true;
+				gs_uSkyDX11ExpectedQuads = 0u;
+				gs_uSkyDX11SubmittedQuads = 0u;
+				gs_bSkyDX11TextureBound = false;
+				gs_uSkyDX11SampledAlphaHint = 0u;
+
+				for (unsigned int i = 0; i < 6; ++i)
+				{
+					CGraphicImageInstance* pFaceImageInstance = m_GraphicImageInstanceMap[m_Faces[i].m_strFaceTextureFileName];
+					CGraphicTexture* pFaceTexture = pFaceImageInstance ? pFaceImageInstance->GetTexturePointer() : NULL;
+					if (pFaceTexture)
+					{
+						pFaceTexture->SetTextureStage(0);
+						gs_bSkyDX11TextureBound = true;
+					}
+					else
+					{
+						LogSkyFaceMissing(i, "texture_fallback_face_not_loaded");
+						pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
+					}
+
+					m_Faces[i].Render();
+				}
+			}
 		}
 	}
 
-	STATEMANAGER.RestoreRenderState(D3DRS_LIGHTING);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZWRITEENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_FOGENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLOROP);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLORARG1);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLORARG2);
+	pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
+	gs_pSkyDX11BlendState = NULL;
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (0u == gs_dwSkyParityLogTick || (dwNow - gs_dwSkyParityLogTick) >= 2000u)
+	{
+		gs_dwSkyParityLogTick = dwNow;
+        TraceError("DX11_SKY_RENDER_STATE sky_blend=opaque cloud_blend=alpha");
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=skyenv path=dx11_native stage=sky mode=%s texture_bound=%u sampled_alpha_hint=%u diffuse_min=%.3f diffuse_max=%.3f",
+			gs_szSkyDX11Mode,
+			gs_bSkyDX11TextureBound ? 1u : 0u,
+			gs_uSkyDX11SampledAlphaHint,
+			gs_bSkyDX11DiffuseSampled ? gs_fSkyDX11DiffuseMin : -1.0f,
+			gs_bSkyDX11DiffuseSampled ? gs_fSkyDX11DiffuseMax : -1.0f);
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=skyenv expected=%u submitted=%u stage=sky mode=%s texture_bound=%u sampled_alpha_hint=%u diffuse_min=%.3f diffuse_max=%.3f",
+			gs_uSkyDX11ExpectedQuads,
+			gs_uSkyDX11SubmittedQuads,
+			gs_szSkyDX11Mode,
+			gs_bSkyDX11TextureBound ? 1u : 0u,
+			gs_uSkyDX11SampledAlphaHint,
+			gs_bSkyDX11DiffuseSampled ? gs_fSkyDX11DiffuseMin : -1.0f,
+			gs_bSkyDX11DiffuseSampled ? gs_fSkyDX11DiffuseMax : -1.0f);
+	}
 }
 
 void CSkyBox::RenderCloud()
@@ -873,60 +1541,60 @@ void CSkyBox::RenderCloud()
 	if (m_FaceCloud.m_strfacename.empty())
 		return;
 
-	CGraphicImageInstance * pCloudGraphicImageInstance = m_GraphicImageInstanceMap[m_FaceCloud.m_strfacename];
-	if (!pCloudGraphicImageInstance)
-		return;
+	CGraphicImageInstance* pCloudGraphicImageInstance = m_GraphicImageInstanceMap[m_FaceCloud.m_strfacename];
+	CGraphicTexture* pCloudTexture = pCloudGraphicImageInstance ? pCloudGraphicImageInstance->GetTexturePointer() : NULL;
 
-	// 2004.01.25 myevan 처리를 렌더링 후반으로 옮기고, DepthTest 처리
-	STATEMANAGER.SaveRenderState(D3DRS_ZENABLE,	TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_ZWRITEENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_LIGHTING, FALSE);	
-	STATEMANAGER.SaveRenderState(D3DRS_FOGENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCCOLOR);
-
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
-
-	m_matTextureCloud._31 = m_fCloudPositionU;
-	m_matTextureCloud._32 = m_fCloudPositionV;
-	
 	DWORD dwCurTime = CTimer::Instance().GetCurrentMillisecond();
-	
 	m_fCloudPositionU += m_fCloudScrollSpeedU * (float)( dwCurTime - m_dwlastTime ) * 0.001f;
 	if (m_fCloudPositionU >= 1.0f)
 		m_fCloudPositionU = 0.0f;
-	
 	m_fCloudPositionV += m_fCloudScrollSpeedV * (float)( dwCurTime - m_dwlastTime ) * 0.001f;
 	if (m_fCloudPositionV >= 1.0f)
 		m_fCloudPositionV = 0.0f;
-	
 	m_dwlastTime = dwCurTime;
-	
-	STATEMANAGER.SaveTransform(D3DTS_TEXTURE0, &m_matTextureCloud);
 
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATEINVALPHA_ADDCOLOR);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
- 	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-	
-	D3DXMATRIX matProjCloud;
-	D3DXMatrixPerspectiveFovRH(&matProjCloud, D3DX_PI * 0.25f, 1.33333f, 50.0f, 999999.0f);
-	STATEMANAGER.SetTransform(D3DTS_WORLD, &m_matWorldCloud);
-	STATEMANAGER.SaveTransform(D3DTS_PROJECTION, &matProjCloud);
-	STATEMANAGER.SetTexture(0, pCloudGraphicImageInstance->GetTexturePointer()->GetD3DTexture());
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return;
+
+	gs_matSkyDX11World = m_matWorldCloud;
+	gs_fSkyDX11UOffset = m_fCloudPositionU;
+	gs_fSkyDX11VOffset = m_fCloudPositionV;
+	gs_eSkyDX11ShadingMode = SKY_DX11_SHADING_CLOUD_COMBINE;
+	gs_szSkyDX11Mode = "cloud_combine";
+	gs_pSkyDX11BlendState = pDX11Device->GetBootstrapUICloudBlendState();
+	gs_uSkyDX11ExpectedQuads = 0u;
+	gs_uSkyDX11SubmittedQuads = 0u;
+	gs_bSkyDX11TextureBound = (pCloudTexture != NULL);
+	gs_uSkyDX11SampledAlphaHint = gs_bSkyDX11TextureBound ? 1u : 0u;
+	gs_bSkyDX11ClampSampler = false;
+
+	if (pCloudTexture)
+		pCloudTexture->SetTextureStage(0);
+	else
+		pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
+
 	m_FaceCloud.Render();
-	STATEMANAGER.RestoreTransform(D3DTS_PROJECTION);
-	
-	STATEMANAGER.RestoreTransform(D3DTS_TEXTURE0);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS);
+	pDX11Device->SetBootstrapTextureStageSRV(0, NULL);
+	gs_pSkyDX11BlendState = NULL;
 
-	STATEMANAGER.RestoreRenderState(D3DRS_LIGHTING);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZWRITEENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_FOGENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
+	if (0u == gs_dwCloudParityLogTick || (dwCurTime - gs_dwCloudParityLogTick) >= 2000u)
+	{
+		gs_dwCloudParityLogTick = dwCurTime;
+		TraceError("DX11_CLOUD_BLEND_MODE mode=combine texture_weight=%.3f min_contrib=%.3f alpha_min=%.3f vertex_alpha_floor=%.3f",
+			DX11RuntimeConfig::kSkyCloudTextureBlendWeight,
+			DX11RuntimeConfig::kSkyCloudTextureMinContribution,
+			DX11RuntimeConfig::kSkyCloudAlphaMin,
+			DX11RuntimeConfig::kSkyCloudVertexAlphaFloor);
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=skyenv path=dx11_native stage=cloud mode=%s texture_bound=%u sampled_alpha_hint=%u",
+			gs_szSkyDX11Mode,
+			gs_bSkyDX11TextureBound ? 1u : 0u,
+			gs_uSkyDX11SampledAlphaHint);
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=skyenv expected=%u submitted=%u stage=cloud mode=%s texture_bound=%u sampled_alpha_hint=%u",
+			gs_uSkyDX11ExpectedQuads,
+			gs_uSkyDX11SubmittedQuads,
+			gs_szSkyDX11Mode,
+			gs_bSkyDX11TextureBound ? 1u : 0u,
+			gs_uSkyDX11SampledAlphaHint);
+	}
 }

@@ -1,4 +1,8 @@
-#pragma once
+﻿#pragma once
+
+#include <map> // B4.4: For DDS texture cache
+#include <string>
+#include <cstdint>
 
 #include "EterLib/SkyBox.h"
 #include "EterLib/LensFlare.h"
@@ -27,7 +31,7 @@
 
 typedef struct SOutdoorMapCoordinate
 {
-	short m_sTerrainCoordX;		// Terrain 좌표
+	short m_sTerrainCoordX;		// Terrain ì¢Œí‘œ
 	short m_sTerrainCoordY;
 } TOutdoorMapCoordinate;
 
@@ -35,6 +39,30 @@ typedef std::map<const std::string, TOutdoorMapCoordinate> TOutdoorMapCoordinate
 
 class CTerrainPatchProxy;
 class CTerrainQuadtreeNode;
+
+// DX11 forward declarations
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+struct ID3D11Buffer;
+struct ID3D11VertexShader;
+struct ID3D11PixelShader;
+struct ID3D11InputLayout;
+struct ID3D11SamplerState;
+struct ID3D11BlendState;
+struct ID3D11DepthStencilView;
+struct ID3D11RasterizerState;
+struct ID3D11DepthStencilState;
+
+// DirectXTK forward declarations (Phase 2)
+namespace DirectX
+{
+	inline namespace DX11
+	{
+		class CommonStates;
+	}
+}
+struct ID3D11Texture2D;
+struct ID3D11ShaderResourceView;
 
 class CMapOutdoor : public CMapBase
 {
@@ -55,12 +83,6 @@ class CMapOutdoor : public CMapBase
 			PART_TREE,
 			PART_SKY,
 			PART_NUM,
-		};
-
-		enum ETerrainRenderSort
-		{
-			DISTANCE_SORT,
-			TEXTURE_SORT,
 		};
 
 	public:
@@ -99,10 +121,38 @@ class CMapOutdoor : public CMapBase
 
 		bool			LoadSetting(const char * c_szFileName);
 
-		void			ApplyLight(DWORD dwVersion, const D3DLIGHT9& c_rkLight);
+		void			ApplyLight(DWORD dwVersion, const SLightDesc& c_rkLight);
 		void			SetEnvironmentScreenFilter();
+		void			ApplyEnvironmentDistanceOnly();
 		void			SetEnvironmentSkyBox();
 		void			SetEnvironmentLensFlare();
+
+		// M3-SKY-BLEND-FIX-74: Apply fog parameters to GPU render state pipeline
+		void			__ApplyFogToGPU();
+
+		// M3-SKY-BLEND-FIX-74: Skybox render policy controls
+		void			SetSkyRenderPolicyOverride(ESkyRenderPolicy ePolicy);
+		ESkyRenderPolicy GetSkyRenderPolicyOverride() const;
+
+		// DX11 weather/environment bridge state used by native world passes.
+		struct SDX11EnvironmentBridgeState
+		{
+			bool bValid;
+			bool bSnowEnabled;
+			int iDayMode;
+			int iWeatherMonth;
+			float fRainIntensity;
+			float fWindStrength;
+			DWORD dwFogColor;
+			float fFogNear;
+			float fFogFar;
+			D3DXVECTOR3 v3BackgroundLightDirection;
+			D3DXCOLOR kBackgroundLightAmbient;
+			D3DXCOLOR kBackgroundLightDiffuse;
+			DWORD dwLastUpdateMS;
+		};
+		void			UpdateDX11EnvironmentBridgeState(bool bSnowEnabled, int iDayMode, int iWeatherMonth, float fRainIntensity);
+		const SDX11EnvironmentBridgeState& GetDX11EnvironmentBridgeState() const { return m_kDX11EnvironmentBridgeState; }
 
 		void			CreateCharacterShadowTexture();
 		void			ReleaseCharacterShadowTexture();
@@ -160,12 +210,12 @@ class CMapOutdoor : public CMapBase
 		bool			isTerrainLoaded(WORD wX, WORD wY);
 		bool			isAreaLoaded(WORD wX, WORD wY);
 
-		void			AssignTerrainPtr();				// 현재 좌표에서 주위(ex. 3x3)에 있는 것들의 포인터를 연결한다. (업데이트 시 불려짐)
+		void			AssignTerrainPtr();				// í˜„ìž¬ ì¢Œí‘œì—ì„œ ì£¼ìœ„(ex. 3x3)ì— ìžˆëŠ” ê²ƒë“¤ì˜ í¬ì¸í„°ë¥¼ ì—°ê²°í•œë‹¤. (ì—…ë°ì´íŠ¸ ì‹œ ë¶ˆë ¤ì§)
 
 		//////////////////////////////////////////////////////////////////////////
 		// New
 		//////////////////////////////////////////////////////////////////////////
-		// 여러가지 맵들을 얻는다.
+		// ì—¬ëŸ¬ê°€ì§€ ë§µë“¤ì„ ì–»ëŠ”ë‹¤.
 		void			GetHeightMap(const BYTE & c_rucTerrainNum, WORD ** pwHeightMap);
 		void			GetNormalMap(const BYTE & c_rucTerrainNum, char ** pucNormalMap);
 
@@ -178,19 +228,19 @@ class CMapOutdoor : public CMapBase
 	// Terrain
 	//////////////////////////////////////////////////////////////////////////
 	protected:
-		// 데이터
+		// ë°ì´í„°
 		CTerrain *					m_pTerrain[AROUND_AREA_NUM];	// Terrain
-		CTerrainPatchProxy *		m_pTerrainPatchProxyList;			// CTerrain을 랜더링 할때 실제로 랜더링하는 폴리곤 패치들... Seamless Map 을 위해 CTerrain으로부터 독립...
+		CTerrainPatchProxy *		m_pTerrainPatchProxyList;			// CTerrainì„ ëžœë”ë§ í• ë•Œ ì‹¤ì œë¡œ ëžœë”ë§í•˜ëŠ” í´ë¦¬ê³¤ íŒ¨ì¹˜ë“¤... Seamless Map ì„ ìœ„í•´ CTerrainìœ¼ë¡œë¶€í„° ë…ë¦½...
 
-		long						m_lViewRadius;				// 시야 거리.. 셀단위임..
-		float						m_fHeightScale;				// 높이 스케일... 1.0일때 0~655.35미터까지 표현 가능.
+		long						m_lViewRadius;				// ì‹œì•¼ ê±°ë¦¬.. ì…€ë‹¨ìœ„ìž„..
+		float						m_fHeightScale;				// ë†’ì´ ìŠ¤ì¼€ì¼... 1.0ì¼ë•Œ 0~655.35ë¯¸í„°ê¹Œì§€ í‘œí˜„ ê°€ëŠ¥.
 
-		short						m_sTerrainCountX, m_sTerrainCountY;		// seamless map 안에 들어가는 Terrain개수
+		short						m_sTerrainCountX, m_sTerrainCountY;		// seamless map ì•ˆì— ë“¤ì–´ê°€ëŠ” Terrainê°œìˆ˜
 
-		TOutdoorMapCoordinate		m_CurCoordinate;		// 현재의 좌표
+		TOutdoorMapCoordinate		m_CurCoordinate;		// í˜„ìž¬ì˜ ì¢Œí‘œ
 
 		long						m_lCurCoordStartX, m_lCurCoordStartY;
-		TOutdoorMapCoordinate		m_PrevCoordinate;		// 현재의 좌표
+		TOutdoorMapCoordinate		m_PrevCoordinate;		// í˜„ìž¬ì˜ ì¢Œí‘œ
 		TOutdoorMapCoordinateMap	m_EntryPointMap;
 
 		WORD						m_wPatchCount;
@@ -303,7 +353,7 @@ class CMapOutdoor : public CMapBase
 		//////////////////////////////////////////////////////////////////////////
 		// New
 		//////////////////////////////////////////////////////////////////////////
-		long					m_lCenterX, m_lCenterY;		// Terrain 좌표 내의 셀 좌표...
+		long					m_lCenterX, m_lCenterY;		// Terrain ì¢Œí‘œ ë‚´ì˜ ì…€ ì¢Œí‘œ...
 		long					m_lOldReadX, m_lOldReadY;	/* Last center */
 
 		//////////////////////////////////////////////////////////////////////////
@@ -332,69 +382,20 @@ class CMapOutdoor : public CMapBase
 			}
 		};
 
-	public:
-		typedef std::vector<BYTE> TTerrainNumVector; 
-		struct FSortPatchDrawStructWithTerrainNum
-		{
-			static TTerrainNumVector m_TerrainNumVector;
-			FSortPatchDrawStructWithTerrainNum()
-			{
-				m_TerrainNumVector.clear();
-			}
-
-			bool operator () (const TPatchDrawStruct & lhs, const TPatchDrawStruct & rhs)
-			{
-				DWORD lhsTerrainNumOrder = 0, rhsTerrainNumOrder = 0;
-				bool blhsOrderFound = false;
-				bool brhsOrderFound = false;
-
-				TTerrainNumVector::iterator lhsIterator = std::find(m_TerrainNumVector.begin(), m_TerrainNumVector.end(), lhs.byTerrainNum);
-				TTerrainNumVector::iterator rhsIterator = std::find(m_TerrainNumVector.begin(), m_TerrainNumVector.end(), rhs.byTerrainNum);
-
-				if (lhsIterator != m_TerrainNumVector.end())
-				{
-					blhsOrderFound = true;
-					lhsTerrainNumOrder = lhsIterator - m_TerrainNumVector.begin();
-				}
-				if (rhsIterator != m_TerrainNumVector.end())
-				{
-					brhsOrderFound = true;
-					rhsTerrainNumOrder = rhsIterator - m_TerrainNumVector.begin();
-				}
-				if (!brhsOrderFound)
-				{
-					m_TerrainNumVector.push_back(rhs.byTerrainNum);
-					rhsTerrainNumOrder = m_TerrainNumVector.size() -1;
-				}
-				if (!blhsOrderFound)
-				{
-					lhsIterator = std::find(m_TerrainNumVector.begin(), m_TerrainNumVector.end(), lhs.byTerrainNum);
-					if (lhsIterator != m_TerrainNumVector.end())
-					{
-						blhsOrderFound = true;
-						lhsTerrainNumOrder = lhsIterator - m_TerrainNumVector.begin();
-					}
-					if (!blhsOrderFound)
-					{
-						m_TerrainNumVector.push_back(lhs.byTerrainNum);
-						lhsTerrainNumOrder = m_TerrainNumVector.size() -1;
-					}
-				}
-
-				return lhsTerrainNumOrder < rhsTerrainNumOrder;
-			}
-		};
-
 	protected:
 
 		std::vector<std::pair<float, long> > m_PatchVector;
+		// DX11 terrain stabilization: short-lived fallback cache for transient empty-cull frames.
+		std::vector<std::pair<float, long> > m_DX11LastNonEmptyPatchVector;
+		DWORD m_dwDX11LastNonEmptyPatchVectorMS;
+		long m_lDX11LastNonEmptyPatchTotalCount;
 		std::vector<TPatchDrawStruct> m_PatchDrawStructVector;
 
 		void					SetPatchDrawVector();
 
-		void					NEW_DrawWireFrame(CTerrainPatchProxy * pTerrainPatchProxy, WORD wPrimitiveCount, D3DPRIMITIVETYPE ePrimitiveType);
+		void					NEW_DrawWireFrame(CTerrainPatchProxy * pTerrainPatchProxy, WORD wPrimitiveCount, GrpPrimitiveType ePrimitiveType);
 
-		void					DrawWireFrame(long patchnum, WORD wPrimitiveCount, D3DPRIMITIVETYPE ePrimitiveType);
+		void					DrawWireFrame(long patchnum, WORD wPrimitiveCount, GrpPrimitiveType ePrimitiveType);
 		void					DrawWater(long patchnum);
 
 		bool					m_bDrawWireFrame;
@@ -410,23 +411,13 @@ class CMapOutdoor : public CMapBase
 		//////////////////////////////////////////////////////////////////////////
 
 		//////////////////////////////////////////////////////////////////////////
-		// Character Shadow
-		LPDIRECT3DTEXTURE9		m_lpCharacterShadowMapTexture;
-		LPDIRECT3DSURFACE9		m_lpCharacterShadowMapRenderTargetSurface;
-		LPDIRECT3DSURFACE9		m_lpCharacterShadowMapDepthSurface;
-		D3DVIEWPORT9			m_ShadowMapViewport;
+		// Character Shadow (DX11-native)
 		WORD					m_wShadowMapSize;
-
-		// Backup Device Context
-		LPDIRECT3DSURFACE9		m_lpBackupRenderTargetSurface;
-		LPDIRECT3DSURFACE9		m_lpBackupDepthSurface;
-		D3DVIEWPORT9			m_BackupViewport;
-
-		// Character Shadow
 		//////////////////////////////////////////////////////////////////////////
 
 		// View Frustum Culling
 		D3DXPLANE					m_plane[6];
+		bool						m_bDX11TerrainUsePositiveYForFrustum;
 
 		void BuildViewFrustum(D3DXMATRIX & mat);
 
@@ -437,9 +428,12 @@ class CMapOutdoor : public CMapBase
 		CLensFlare					m_LensFlare;
 		CScreenFilter				m_ScreenFilter;
 
+		// M3-SKY-BLEND-FIX-74: Skybox render policy override
+		ESkyRenderPolicy			m_eSkyRenderPolicyOverride;
+
 	protected:
 		void SetIndexBuffer();
-		void SelectIndexBuffer(BYTE byLODLevel, WORD * pwPrimitiveCount, D3DPRIMITIVETYPE * pePrimitiveType);
+		void SelectIndexBuffer(BYTE byLODLevel, WORD * pwPrimitiveCount, GrpPrimitiveType * pePrimitiveType);
 
 		D3DXMATRIX m_matWorldForCommonUse;
 		D3DXMATRIX m_matViewInverse;
@@ -552,16 +546,16 @@ class CMapOutdoor : public CMapBase
 
 	protected:
 		void __RenderTerrain_RecurseRenderQuadTree(CTerrainQuadtreeNode *Node, bool bCullCheckNeed = true);
-		int	 __RenderTerrain_RecurseRenderQuadTree_CheckBoundingCircle(const D3DXVECTOR3 & c_v3Center, const float & c_fRadius);
+		int	 __RenderTerrain_RecurseRenderQuadTree_CheckBoundingCircle(const DirectX::SimpleMath::Vector3 & c_v3Center, const float & c_fRadius);
 
-		void __RenderTerrain_AppendPatch(const D3DXVECTOR3& c_rv3Center, float fDistance, long lPatchNum);
+		void __RenderTerrain_AppendPatch(const DirectX::SimpleMath::Vector3& c_rv3Center, float fDistance, long lPatchNum);
 
 		void __RenderTerrain_RenderSoftwareTransformPatch();
 		void __RenderTerrain_RenderHardwareTransformPatch();
 
 	protected:
-		void __HardwareTransformPatch_RenderPatchSplat(long patchnum, WORD wPrimitiveCount, D3DPRIMITIVETYPE ePrimitiveType);
-		void __HardwareTransformPatch_RenderPatchNone(long patchnum, WORD wPrimitiveCount, D3DPRIMITIVETYPE ePrimitiveType);
+		void __HardwareTransformPatch_RenderPatchSplat(long patchnum, WORD wPrimitiveCount, GrpPrimitiveType ePrimitiveType);
+		void __HardwareTransformPatch_RenderPatchNone(long patchnum, WORD wPrimitiveCount, GrpPrimitiveType ePrimitiveType);
 
 
 	protected:
@@ -573,8 +567,7 @@ class CMapOutdoor : public CMapBase
 				NONE_VB_NUM = 8,
 			};
 
-			IDirect3DVertexBuffer9* m_pkVBSplat[SPLAT_VB_NUM];
-			IDirect3DVertexBuffer9* m_pkVBNone[NONE_VB_NUM];
+			// M3-GAMELIB-TERRAIN-HEADER-68: m_pkVBSplat/m_pkVBNone removed (STP compatibility path removed)
 			DWORD m_dwSplatPos;
 			DWORD m_dwNonePos;
 			DWORD m_dwLightVersion;
@@ -584,8 +577,8 @@ class CMapOutdoor : public CMapBase
 			D3DXMATRIX m_m4Proj;
 			D3DXMATRIX m_m4Frustum;
 			D3DXMATRIX m_m4DynamicShadow;
-			D3DLIGHT9  m_kLight;
-			D3DMATERIAL9 m_kMtrl;
+		SLightDesc  m_kLight;
+			GrpMaterial m_kMtrl;
 			D3DXVECTOR3 m_v3Player;
 			DWORD m_dwFogColor;
 			float m_fScreenHalfWidth;
@@ -635,8 +628,8 @@ class CMapOutdoor : public CMapBase
 		void __SoftwareTransformPatch_RestoreFogShadowRenderState();
 		void __SoftwareTransformPatch_ApplyDynamicShadowRenderState();
 		void __SoftwareTransformPatch_RestoreDynamicShadowRenderState();
-		void __SoftwareTransformPatch_RenderPatchSplat(SoftwareTransformPatch_SRenderState& rkTPRS, long patchnum, WORD wPrimitiveCount, D3DPRIMITIVETYPE ePrimitiveType, bool isFogEnable);
-		void __SoftwareTransformPatch_RenderPatchNone(SoftwareTransformPatch_SRenderState& rkTPRS, long patchnum, WORD wPrimitiveCount, D3DPRIMITIVETYPE ePrimitiveType);
+		void __SoftwareTransformPatch_RenderPatchSplat(SoftwareTransformPatch_SRenderState& rkTPRS, long patchnum, WORD wPrimitiveCount, GrpPrimitiveType ePrimitiveType, bool isFogEnable);
+		void __SoftwareTransformPatch_RenderPatchNone(SoftwareTransformPatch_SRenderState& rkTPRS, long patchnum, WORD wPrimitiveCount, GrpPrimitiveType ePrimitiveType);
 
 
 	protected:
@@ -650,11 +643,6 @@ class CMapOutdoor : public CMapBase
 	public:
 		float	GetOpaqueWaterDepth() { return m_fOpaqueWaterDepth;	}
 		void	SetOpaqueWaterDepth(float fOpaqueWaterDepth) { m_fOpaqueWaterDepth = fOpaqueWaterDepth; }
-		void	SetTerrainRenderSort(ETerrainRenderSort eTerrainRenderSort) { m_eTerrainRenderSort = eTerrainRenderSort;}
-		ETerrainRenderSort	GetTerrainRenderSort() { return m_eTerrainRenderSort; }
-
-	protected:
-		ETerrainRenderSort m_eTerrainRenderSort;
 
 	protected:
 		CGraphicImageInstance	m_attrImageInstance;
@@ -750,6 +738,220 @@ class CMapOutdoor : public CMapBase
 		void SetEnvironmentDataName(const std::string& strEnvironmentDataName);
 		std::string& GetEnvironmentDataName();
 
+	// ========== DX11 Terrain Rendering API ==========
+	public:
+		// Initialize DX11 terrain resources (shaders, pipeline states)
+		bool InitializeDX11TerrainResources(ID3D11Device* pDevice);
+		void DestroyDX11TerrainResources();
+
+		// Build DX11 vertex buffers for all terrain patches
+		bool BuildDX11TerrainVertexBuffers(ID3D11Device* pDevice);
+
+		// Main DX11 terrain rendering function
+		void RenderTerrainDX11(
+			ID3D11Device* pDevice,
+			ID3D11DeviceContext* pContext,
+			uint32_t* pdwOutObservedMask = nullptr,
+			uint32_t* pdwOutSubmittedMask = nullptr,
+			uint32_t* pdwOutApplicableMask = nullptr);
+
+		// B9-B11 feature probes used by runtime world-port mask policy.
+		// These report whether object/effect/speedtree subsystems are populated and drawable for the current scene.
+		bool ProbeDX11ObjectsReady();
+		bool ProbeDX11EffectsReady();
+		bool ProbeDX11SpeedTreeReady();
+
+		// DX11 water rendering
+		bool InitializeDX11WaterResources(ID3D11Device* pDevice);
+		void DestroyDX11WaterResources();
+		void RenderWaterDX11(ID3D11Device* pDevice, ID3D11DeviceContext* pContext);
+
+		// DX11 dynamic shadows (CSM 3-cascade + PCF)
+		bool InitializeDX11ShadowResources(ID3D11Device* pDevice);
+		void DestroyDX11ShadowResources();
+		void RenderShadowCastersDX11(ID3D11DeviceContext* pContext);
+		void RenderShadowReceiversDX11(ID3D11DeviceContext* pContext);
+		bool IsDynamicShadowCaster(float fHeight) const;
+		bool IsDX11DynamicShadowsReady() const { return m_bDX11ShadowResourcesReady; }
+
+		// S1: Character shadow caster registration (called from PythonBackground)
+		void ClearCharacterShadowCasters();
+		void RegisterCharacterShadowCaster(class CGraphicThingInstance* pInstance);
+		void RegisterObjectShadowCaster(class CGraphicThingInstance* pInstance);
+
+		// Check if DX11 resources are ready
+		bool IsDX11TerrainReady() const { return m_bDX11TerrainResourcesReady; }
+		bool IsDX11WaterReady() const { return m_bDX11WaterResourcesReady; }
+		int GetDX11LastRenderedWaterPatchCount() const { return m_iDX11LastRenderedWaterPatchCount; }
+		int GetDX11LastObservedWaterPatchCount() const { return m_iDX11LastObservedWaterPatchCount; }
+		DWORD GetDX11LastSubmittedObjectCount() const { return m_dwDX11LastSubmittedObjectCount; }
+		DWORD GetDX11LastSubmittedEffectCount() const { return m_dwDX11LastSubmittedEffectCount; }
+		DWORD GetDX11LastSubmittedEffectParticleCount() const { return m_dwDX11LastSubmittedEffectParticleCount; }
+		DWORD GetDX11LastSubmittedEffectMeshCount() const { return m_dwDX11LastSubmittedEffectMeshCount; }
+		DWORD GetDX11LastSubmittedSpeedTreeCount() const { return m_dwDX11LastSubmittedSpeedTreeCount; }
+		DWORD GetDX11LastShadowSubmittedSpeedTreeCount() const { return m_dwDX11ShadowLastSubmittedSpeedTreeCount; }
+
+		// Get stored DX11 device (for terrain patches to use during load)
+		ID3D11Device* GetDX11Device() const { return m_pDX11Device; }
+
+		// W4.2: Get DX11 object shaders for character rendering (fix DEVICE_DRAW_VERTEX_SHADER_NOT_SET)
+		ID3D11VertexShader* GetDX11ObjectVS() const { return m_pDX11ObjectVS; }
+		ID3D11PixelShader* GetDX11ObjectPS() const { return m_pDX11ObjectPS; }
+		ID3D11InputLayout* GetDX11ObjectInputLayout() const { return m_pDX11ObjectInputLayout; }
+		ID3D11Buffer* GetDX11ObjectConstantBuffer() const { return m_pDX11ObjectConstantBuffer; }
+		ID3D11SamplerState* GetDX11ObjectSamplerState() const { return m_pDX11ObjectSamplerState; }
+
+	protected:
+		// DX11 terrain rendering internals
+		bool __CreateDX11TerrainShaders(ID3D11Device* pDevice);
+		void __DestroyDX11TerrainShaders();
+		bool __CreateDX11TerrainPipelineStates(ID3D11Device* pDevice);
+		void __DestroyDX11TerrainPipelineStates();
+		bool __RenderTerrain_DX11HardwareTransformPatch(
+			ID3D11Device* pDevice,
+			ID3D11DeviceContext* pContext,
+			const D3DXMATRIX& matTerrainViewProj);
+
+		// DX11 terrain splat rendering internals
+		bool __CreateDX11TerrainSplatShaders(ID3D11Device* pDevice);
+		void __DestroyDX11TerrainSplatShaders();
+		bool __CreateDX11TerrainSplatBlendState(ID3D11Device* pDevice);
+		void __DestroyDX11TerrainSplatBlendState();
+
+		// DX11 texture integration helpers (B4)
+		ID3D11ShaderResourceView* __GetOrCreateDX11TerrainTextureSRV(const char* szFilename);
+		ID3D11ShaderResourceView* __GetTerrainTextureSRV(bool* pbWasFallbackWhite = nullptr, const char* szFilename = nullptr);
+		ID3D11ShaderResourceView* __GetSplatTextureSRV(
+			bool* pbWasFallbackWhite = nullptr,
+			const char* szFilename = nullptr,
+			CTerrain* pTerrain = nullptr,
+			DWORD dwSplatIndex = 0);
+		ID3D11ShaderResourceView* __GetOrCreateDX11SplatAlphaSRV(CTerrain* pTerrain, DWORD dwSplatIndex);
+
+		// B4.4: Direct DDS loading (bypass DX9 DXT1 conversion)
+		ID3D11ShaderResourceView* __LoadTerrainTextureDDS(const char* szFilename, ID3D11Device* pDevice);
+		ID3D11ShaderResourceView* __LoadTerrainTextureWIC(const char* szFilename, ID3D11Device* pDevice);
+		void __ClearDX11TerrainTextureSRVCache();
+
+		// DX11 water rendering internals
+		bool __CreateDX11WaterShaders(ID3D11Device* pDevice);
+		void __DestroyDX11WaterShaders();
+		bool __CreateDX11WaterPipelineStates(ID3D11Device* pDevice);
+		void __DestroyDX11WaterPipelineStates();
+		void __RenderWater_DX11(ID3D11Device* pDevice, ID3D11DeviceContext* pContext);
+
+		// W4.1: DX11 object rendering (characters, buildings, NPCs)
+		bool __CreateDX11ObjectShaders(ID3D11Device* pDevice);
+		void __DestroyDX11ObjectShaders();
+		void __RenderObjectsDX11(ID3D11Device* pDevice, ID3D11DeviceContext* pContext);
+		void __RenderCharactersDX11(ID3D11DeviceContext* pContext);
+
+		// DX11 dynamic shadow internals
+		bool __CreateDX11ShadowShaders(ID3D11Device* pDevice);
+		void __DestroyDX11ShadowShaders();
+		bool __CreateDX11ShadowPipelineStates(ID3D11Device* pDevice);
+		void __DestroyDX11ShadowPipelineStates();
+		bool __CreateDX11ShadowMapResources(ID3D11Device* pDevice);
+		void __DestroyDX11ShadowMapResources();
+		void __UpdateDX11ShadowCascadeMatrices();
+		D3DXVECTOR3 __GetDX11ShadowLightDirection() const;
+		void __LogDX11ShadowFallback(const char* c_szReason);
+
+	private:
+		// DX11 terrain resources
+		bool m_bDX11TerrainResourcesReady;
+		ID3D11Device* m_pDX11Device; // Stored for terrain patches to use during load
+		ID3D11VertexShader* m_pDX11TerrainVertexShader;
+		ID3D11PixelShader* m_pDX11TerrainPixelShader;
+		ID3D11InputLayout* m_pDX11TerrainInputLayout;
+		ID3D11Buffer* m_pDX11TerrainConstantBuffer;
+		ID3D11Buffer* m_pDX11TerrainIndexBuffer;
+		UINT m_uDX11TerrainIndexCount;
+		ID3D11SamplerState* m_pDX11TerrainSamplerState;
+
+		// DX11 terrain textures
+		ID3D11Texture2D* m_pDX11TerrainDefaultTexture;
+		ID3D11ShaderResourceView* m_pDX11TerrainDefaultTextureSRV;
+		ID3D11Texture2D* m_pDX11TerrainMissingTexture;
+		ID3D11ShaderResourceView* m_pDX11TerrainMissingTextureSRV;
+
+		// B4.4: Direct DDS loading cache (bypass DX9 DXT1 conversion)
+		std::map<std::string, ID3D11ShaderResourceView*> m_mapDX11TerrainTextureSRVCache;
+		std::map<uint64_t, ID3D11ShaderResourceView*> m_mapDX11SplatAlphaSRVCache;
+
+		// Phase 2: DirectXTK CommonStates for standardized D3D11 states
+		DirectX::DX11::CommonStates* m_pDX11CommonStates;
+
+		// DX11 terrain splat resources
+		bool m_bDX11TerrainSplatResourcesReady;
+		ID3D11VertexShader* m_pDX11TerrainSplatVertexShader;
+		ID3D11PixelShader* m_pDX11TerrainSplatPixelShader;
+		ID3D11BlendState* m_pDX11TerrainSplatBlendState;
+		ID3D11SamplerState* m_pDX11TerrainSplatAlphaSamplerState;
+
+		// DX11 water resources
+		bool m_bDX11WaterResourcesReady;
+		ID3D11VertexShader* m_pDX11WaterVertexShader;
+		ID3D11PixelShader* m_pDX11WaterPixelShader;
+		ID3D11InputLayout* m_pDX11WaterInputLayout;
+		ID3D11Buffer* m_pDX11WaterConstantBuffer;
+		ID3D11BlendState* m_pDX11WaterBlendState;
+		ID3D11DepthStencilState* m_pDX11WaterDepthState;
+		ID3D11RasterizerState* m_pDX11WaterRasterState;
+		ID3D11SamplerState* m_pDX11WaterSamplerState;
+		ID3D11ShaderResourceView* m_apDX11WaterTextureSRV[30];
+		int m_iDX11LastRenderedWaterPatchCount;
+		int m_iDX11LastObservedWaterPatchCount;
+
+		// W4.1: DX11 object rendering resources (characters, buildings, NPCs)
+		ID3D11VertexShader* m_pDX11ObjectVS;
+		ID3D11PixelShader* m_pDX11ObjectPS;
+		ID3D11InputLayout* m_pDX11ObjectInputLayout;
+		ID3D11Buffer* m_pDX11ObjectConstantBuffer;
+		ID3D11SamplerState* m_pDX11ObjectSamplerState;
+
+		DWORD m_dwDX11LastSubmittedObjectCount;
+		DWORD m_dwDX11LastSubmittedEffectCount;
+		DWORD m_dwDX11LastSubmittedEffectParticleCount;
+		DWORD m_dwDX11LastSubmittedEffectMeshCount;
+		DWORD m_dwDX11LastSubmittedSpeedTreeCount;
+
+		// DX11 dynamic shadow resources (CSM)
+		bool m_bDX11ShadowResourcesReady;
+		bool m_bDX11ShadowReceiverActive;
+		bool m_bDX11ShadowFallbackActive;
+		DWORD m_dwDX11ShadowLastFallbackLogMS;
+		UINT m_uDX11ShadowMapSize;
+		ID3D11Texture2D* m_pDX11ShadowMapTextureArray;
+		ID3D11DepthStencilView* m_apDX11ShadowCascadeDSV[3];
+		ID3D11ShaderResourceView* m_pDX11ShadowMapArraySRV;
+		ID3D11Buffer* m_pDX11ShadowFrameConstantBuffer;
+		ID3D11Buffer* m_pDX11ShadowObjectConstantBuffer;
+		ID3D11SamplerState* m_pDX11ShadowComparisonSampler;
+		ID3D11RasterizerState* m_pDX11ShadowRasterizerState;
+		ID3D11DepthStencilState* m_pDX11ShadowDepthState;
+		ID3D11VertexShader* m_pDX11ShadowCasterVertexShader;
+		ID3D11PixelShader* m_pDX11ShadowCasterPixelShader;
+		ID3D11VertexShader* m_pDX11ShadowReceiverVertexShader;
+		ID3D11PixelShader* m_pDX11ShadowReceiverPixelShader;
+		D3DXMATRIX m_akDX11ShadowLightViewProj[3];
+		float m_afDX11ShadowCascadeSplits[4];
+		DWORD m_dwDX11ShadowLastCasterActors;
+		DWORD m_dwDX11ShadowLastCasterObjects;
+		DWORD m_dwDX11ShadowLastCasterSpeedTree;
+		DWORD m_dwDX11ShadowLastSubmittedSpeedTreeCount;
+		DWORD m_dwDX11ShadowLastFilteredFlat;
+		// Weather/day-night extensibility: this direction can be fed by sky/sun/moon/weather controllers.
+		D3DXVECTOR3 m_v3DX11ShadowLightDir;
+		SDX11EnvironmentBridgeState m_kDX11EnvironmentBridgeState;
+		DWORD m_dwDX11EnvironmentBridgeLastLogMS;
+		uint64_t m_uDX11SkyboxAppliedRevision;
+		DWORD m_dwDX11SkyboxLastRevisionLogMS;
+		bool m_bDX11LensFlareInitialized;
+		// S1: Registered shadow casters (populated per-frame by PythonBackground)
+		std::vector<class CGraphicThingInstance*> m_kVct_pkCharacterShadowCasters;
+		std::vector<class CGraphicThingInstance*> m_kVct_pkObjectShadowCasters;
+
 	protected:
 		std::string		m_settings_envDataName;
 		std::string		m_envDataName;
@@ -757,3 +959,4 @@ class CMapOutdoor : public CMapBase
 	private:
 		bool m_bSettingTerrainVisible;
 };
+
