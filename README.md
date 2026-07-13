@@ -1,5 +1,7 @@
 # M2Dev Client Source
 
+> Mapa architektury i przepływów cross-repo: [m2dev-docs](https://github.com/WojciechJa/m2dev-docs).
+
 [![build](https://github.com/d1str4ught/m2dev-client-src/actions/workflows/main.yml/badge.svg)](https://github.com/d1str4ught/m2dev-client-src/actions/workflows/main.yml)
 
 This repository contains the source code necessary to compile the game client executable.

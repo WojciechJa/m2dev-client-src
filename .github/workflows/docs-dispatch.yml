@@ -1,0 +1,16 @@
+name: notify-code-map
+on:
+  push:
+    branches: [dx11-world-render, main]
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.M2DEV_DOCS_DISPATCH_TOKEN }}
+          repository: WojciechJa/m2dev-docs
+          event-type: source-updated
+          client-payload: '{"repository":"classic-client-src","sha":"${{ github.sha }}"}'
