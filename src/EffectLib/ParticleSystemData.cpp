@@ -141,15 +141,15 @@ BOOL CParticleSystemData::OnLoadScript(CTextFileLoader & rTextFileLoader)
 
 	if (!rTextFileLoader.GetTokenByte("srcblendtype", &m_ParticleProperty.m_bySrcBlendType))
 	{
-		m_ParticleProperty.m_bySrcBlendType = D3DBLEND_SRCALPHA;
+		m_ParticleProperty.m_bySrcBlendType = GRP_BLEND_SRCALPHA;
 	}
 	if (!rTextFileLoader.GetTokenByte("destblendtype", &m_ParticleProperty.m_byDestBlendType))
 	{
-		m_ParticleProperty.m_byDestBlendType = D3DBLEND_ONE;
+		m_ParticleProperty.m_byDestBlendType = GRP_BLEND_ONE;
 	}
 	if (!rTextFileLoader.GetTokenByte("coloroperationtype", &m_ParticleProperty.m_byColorOperationType))
 	{
-		m_ParticleProperty.m_byColorOperationType = D3DTOP_MODULATE;
+		m_ParticleProperty.m_byColorOperationType = GRP_TOP_MODULATE;
 	}
 
 	if (!rTextFileLoader.GetTokenByte("billboardtype", &m_ParticleProperty.m_byBillboardType))
@@ -246,10 +246,10 @@ BOOL CParticleSystemData::OnLoadScript(CTextFileLoader & rTextFileLoader)
 			fA = GetTimeEventBlendValue(fTime, TimeEventA);
 			TTimeEventTypeColor t;
 			t.m_fTime = fTime;
-			t.m_Value.r = fR;
-			t.m_Value.g = fG;
-			t.m_Value.b = fB;
-			t.m_Value.a = fA;
+			t.m_Value.x = fR;
+			t.m_Value.y = fG;
+			t.m_Value.z = fB;
+			t.m_Value.w = fA;
 			m_ParticleProperty.m_TimeEventColor.push_back(t);
 		}
 	}

@@ -10,7 +10,7 @@ class CScreenFilter : public CScreen
 
 		void SetEnable(BOOL bFlag);
 		void SetBlendType(BYTE bySrcType, BYTE byDestType);
-		void SetColor(const D3DXCOLOR & c_rColor);
+		void SetColor(const DirectX::SimpleMath::Color& c_rColor);
 
 		void Render();
 
@@ -18,5 +18,5 @@ class CScreenFilter : public CScreen
 		BOOL m_bEnable;
 		BYTE m_bySrcType;
 		BYTE m_byDestType;
-		D3DXCOLOR m_Color;
+		DirectX::SimpleMath::Color m_Color;
 };

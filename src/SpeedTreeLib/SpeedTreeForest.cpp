@@ -11,6 +11,8 @@
 
 #include "SpeedTreeForest.h"
 #include "SpeedTreeConfig.h"
+#include "UserInterface/config.h"
+#include "EterLib/LightDesc.h"
 #include <cfloat>
 
 using namespace std;
@@ -61,7 +63,21 @@ void CSpeedTreeForest::Clear()
 		m_pMainTreeMap.clear();
 	}
 }
+DWORD CSpeedTreeForest::GetTotalInstanceCount() const
+{
+	DWORD dwTotalCount = 0;
+	for (TTreeMap::const_iterator it = m_pMainTreeMap.begin(); it != m_pMainTreeMap.end(); ++it)
+	{
+		const SpeedTreeWrapperPtr& pMainTree = it->second;
+		if (!pMainTree)
+			continue;
 
+		UINT uiCount = 0;
+		pMainTree->GetInstances(uiCount);
+		dwTotalCount += uiCount;
+	}
+	return dwTotalCount;
+}
 CSpeedTreeForest::SpeedTreeWrapperPtr CSpeedTreeForest::GetMainTree(DWORD dwCRC)
 {
 	TTreeMap::iterator itor = m_pMainTreeMap.find(dwCRC);
@@ -111,6 +127,19 @@ CSpeedTreeForest::SpeedTreeWrapperPtr CSpeedTreeForest::CreateInstance(float x, 
 	}
 
 	SpeedTreeWrapperPtr pTreeInst = pMainTree->MakeInstance();
+    if (!pTreeInst)
+    {
+        static bool s_bLoggedMakeInstanceFail = false;
+        if (!s_bLoggedMakeInstanceFail)
+        {
+            s_bLoggedMakeInstanceFail = true;
+            TraceError("DX11_SPEEDTREE_INSTANCE_FAIL reason=make_instance_returned_null crc=%u tree=%s",
+                dwTreeCRC,
+                c_szTreeName ? c_szTreeName : "(null)");
+        }
+
+        return nullptr;
+    }
 	pTreeInst->SetPosition(x, y, z);
 	pTreeInst->RegisterBoundingSphere();
 	return pTreeInst;
@@ -285,29 +314,29 @@ void CSpeedTreeForest::SetLodLimits(void)
 		CSpeedTreeWrapper * pMainTree = (itor++)->second;
 		CSpeedTreeWrapper ** ppInstances = pMainTree->GetInstances(uiCount);
 
-		pMainTree->GetSpeedTree()->SetLodLimits(fTallest * c_fNearLodFactor, fTallest * c_fFarLodFactor);
+		pMainTree->GetSpeedTree()->SetLodLimits(fTallest * DX11RuntimeConfig::kSpeedTreeNearLodFactor, fTallest * DX11RuntimeConfig::kSpeedTreeFarLodFactor);
 
 		for (UINT i = 0; i < uiCount; ++i)
-			ppInstances[i]->GetSpeedTree()->SetLodLimits(fTallest * c_fNearLodFactor, fTallest * c_fFarLodFactor);
+			ppInstances[i]->GetSpeedTree()->SetLodLimits(fTallest * DX11RuntimeConfig::kSpeedTreeNearLodFactor, fTallest * DX11RuntimeConfig::kSpeedTreeFarLodFactor);
 	}
 }
 */
-void CSpeedTreeForest::SetLight(const float * afDirection, const float * afAmbient, const float * afDiffuse)
+void CSpeedTreeForest::SetLight(const SLightDesc& rLight)
 {
-	m_afLighting[0] = afDirection[0];
-	m_afLighting[1] = afDirection[1];
-	m_afLighting[2] = afDirection[2];
+	m_afLighting[0] = rLight.Direction.x;
+	m_afLighting[1] = rLight.Direction.y;
+	m_afLighting[2] = rLight.Direction.z;
 	m_afLighting[3] = 1.0f;
 
-	m_afLighting[4] = afAmbient[0];
-	m_afLighting[5] = afAmbient[1];
-	m_afLighting[6] = afAmbient[2];
-	m_afLighting[7] = afAmbient[3];
+	m_afLighting[4] = rLight.Ambient.r;
+	m_afLighting[5] = rLight.Ambient.g;
+	m_afLighting[6] = rLight.Ambient.b;
+	m_afLighting[7] = rLight.Ambient.a;
 
-	m_afLighting[8] = afDiffuse[0];
-	m_afLighting[9] = afDiffuse[1];
-	m_afLighting[10] = afDiffuse[2];
-	m_afLighting[11] = afDiffuse[3];
+	m_afLighting[8] = rLight.Diffuse.r;
+	m_afLighting[9] = rLight.Diffuse.g;
+	m_afLighting[10] = rLight.Diffuse.b;
+	m_afLighting[11] = rLight.Diffuse.a;
 }
 
 void CSpeedTreeForest::SetFog(float fFogNear, float fFogFar)
@@ -319,3 +348,5 @@ void CSpeedTreeForest::SetFog(float fFogNear, float fFogFar)
 	m_afFog[2] = c_fFogLinearScale;
 	m_afFog[3] = 0.0f;
 }
+
+

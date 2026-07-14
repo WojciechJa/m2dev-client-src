@@ -15,7 +15,7 @@ bool CDynamicVertexBuffer::Create(int vtxCount, int fvf)
 	m_vtxCount = vtxCount;
 	m_fvf = fvf;
 
-	return CGraphicVertexBuffer::Create(m_vtxCount, m_fvf, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT);
+	return CGraphicVertexBuffer::Create(m_vtxCount, m_fvf, GRP_USAGE_DYNAMIC | GRP_USAGE_WRITEONLY, GRP_POOL_DEFAULT);
 }
 
 CDynamicVertexBuffer::CDynamicVertexBuffer()

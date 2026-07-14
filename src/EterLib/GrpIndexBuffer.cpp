@@ -1,133 +1,161 @@
 #include "StdAfx.h"
 #include "EterBase/Stl.h"
 #include "GrpIndexBuffer.h"
+#include "GrpDeviceDX11.h"
 #include "StateManager.h"
 
-LPDIRECT3DINDEXBUFFER9 CGraphicIndexBuffer::GetD3DIndexBuffer() const
+#include <algorithm>
+
+namespace
 {
-	assert(m_lpd3dIdxBuf != NULL);
-	return m_lpd3dIdxBuf;
+	ID3D11Device* GetDX11Device()
+	{
+		CGraphicDeviceDX11* pDevice = CGraphicDeviceDX11::GetActiveDevice();
+		if (!pDevice || !pDevice->IsValid())
+			return nullptr;
+		return pDevice->GetDevice();
+	}
+
+	ID3D11DeviceContext* GetDX11Context()
+	{
+		CGraphicDeviceDX11* pDevice = CGraphicDeviceDX11::GetActiveDevice();
+		if (!pDevice || !pDevice->IsValid())
+			return nullptr;
+		return pDevice->GetContext();
+	}
 }
 
 void CGraphicIndexBuffer::SetIndices(int startIndex) const
 {
-	assert(ms_lpd3dDevice != NULL);
-	STATEMANAGER.SetIndices(m_lpd3dIdxBuf, startIndex);
-}
+	if (!m_lpd3dIdxBuf)
+		return;
 
+	CStateManager* pStateManager = CStateManager::InstancePtr();
+	if (!pStateManager)
+		return;
+
+	const UINT bytesPerIndex = (m_formatType == GRP_FMT_INDEX32) ? 4u : 2u;
+	const UINT byteOffset = (startIndex > 0) ? static_cast<UINT>(startIndex) * bytesPerIndex : 0u;
+	pStateManager->SetIndices(m_lpd3dIdxBuf, static_cast<int>(m_formatType), byteOffset);
+}
 
 bool CGraphicIndexBuffer::Lock(void** pretIndices) const
 {
-	assert(m_lpd3dIdxBuf != NULL);
-
-	if (!m_lpd3dIdxBuf)
+	if (!pretIndices || m_cpuShadowIndices.empty())
 		return false;
 
-	if (FAILED(m_lpd3dIdxBuf->Lock(0, 0, pretIndices, 0)))
-		return false;
-
+	*pretIndices = const_cast<BYTE*>(m_cpuShadowIndices.data());
+	m_bCpuLockActive = true;
 	return true;
 }
 
 void CGraphicIndexBuffer::Unlock() const
 {
-	assert(m_lpd3dIdxBuf != NULL);
-
-	if (!m_lpd3dIdxBuf)
+	if (!m_bCpuLockActive)
 		return;
 
-	m_lpd3dIdxBuf->Unlock();
+	m_bCpuLockActive = false;
+
+	if (!m_lpd3dIdxBuf || m_cpuShadowIndices.empty())
+		return;
+
+	ID3D11DeviceContext* pContext = GetDX11Context();
+	if (!pContext)
+		return;
+
+	pContext->UpdateSubresource(m_lpd3dIdxBuf, 0, nullptr, m_cpuShadowIndices.data(), 0, 0);
 }
 
 bool CGraphicIndexBuffer::Lock(void** pretIndices)
 {
-	assert(m_lpd3dIdxBuf != NULL);
-
-	if (!m_lpd3dIdxBuf)
-		return false;
-
-	if (FAILED(m_lpd3dIdxBuf->Lock(0, 0, pretIndices, 0)))
-		return false;
-
-	return true;
+	return static_cast<const CGraphicIndexBuffer*>(this)->Lock(pretIndices);
 }
 
 void CGraphicIndexBuffer::Unlock()
 {
-	assert(m_lpd3dIdxBuf != NULL);
-
-	if (!m_lpd3dIdxBuf)
-		return;
-
-	m_lpd3dIdxBuf->Unlock();
+	static_cast<const CGraphicIndexBuffer*>(this)->Unlock();
 }
 
 bool CGraphicIndexBuffer::Copy(int bufSize, const void* srcIndices)
 {
-	assert(m_lpd3dIdxBuf != NULL);
-
-	BYTE* dstIndices;
-	if (FAILED(m_lpd3dIdxBuf->Lock(0, 0, (void**)&dstIndices, 0)))
+	if (!srcIndices || bufSize <= 0)
 		return false;
 
-	memcpy(dstIndices, srcIndices, bufSize);
+	void* pDstIndices = nullptr;
+	if (!Lock(&pDstIndices))
+		return false;
 
-	m_lpd3dIdxBuf->Unlock();
-
+	memcpy(pDstIndices, srcIndices, static_cast<size_t>(bufSize));
+	Unlock();
 	return true;
 }
 
 bool CGraphicIndexBuffer::Create(int faceCount, TFace* faces)
 {
-	int idxCount = faceCount * 3;
+	const int idxCount = faceCount * 3;
 	m_iidxCount = idxCount;
-	if (!Create(idxCount, D3DFMT_INDEX16))
+	if (!Create(idxCount, GRP_FMT_INDEX16))
 		return false;
 
-	WORD* dstIndices;
-	if (FAILED(m_lpd3dIdxBuf->Lock(0, 0, (void**)&dstIndices, 0)))
+	WORD* pDstIndices = nullptr;
+	if (!Lock(reinterpret_cast<void**>(&pDstIndices)))
 		return false;
 
-	for (int i = 0; i < faceCount; ++i, dstIndices += 3)
+	for (int i = 0; i < faceCount; ++i, pDstIndices += 3)
 	{
-		TFace* curFace = faces + i;
-		dstIndices[0] = curFace->indices[0];
-		dstIndices[1] = curFace->indices[1];
-		dstIndices[2] = curFace->indices[2];
+		const TFace* pFace = faces + i;
+		pDstIndices[0] = pFace->indices[0];
+		pDstIndices[1] = pFace->indices[1];
+		pDstIndices[2] = pFace->indices[2];
 	}
 
-	m_lpd3dIdxBuf->Unlock();
+	Unlock();
 	return true;
 }
 
 bool CGraphicIndexBuffer::CreateDeviceObjects()
 {
-	if (FAILED(ms_lpd3dDevice->CreateIndexBuffer(
-		m_dwBufferSize,
-		D3DUSAGE_WRITEONLY,
-		m_d3dFmt,
-		D3DPOOL_DEFAULT,
-		&m_lpd3dIdxBuf,
-		NULL)
-	))
+	if (m_dwBufferSize == 0)
 		return false;
 
-	return true;
+	m_cpuShadowIndices.resize(m_dwBufferSize);
+	m_bCpuLockActive = false;
+
+	ID3D11Device* pDevice = GetDX11Device();
+	if (!pDevice)
+		return true;
+
+	D3D11_BUFFER_DESC desc = {};
+	desc.ByteWidth = m_dwBufferSize;
+	desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	desc.CPUAccessFlags = 0u;
+
+	D3D11_SUBRESOURCE_DATA initData = {};
+	D3D11_SUBRESOURCE_DATA* pInitData = nullptr;
+	if (!m_cpuShadowIndices.empty())
+	{
+		initData.pSysMem = m_cpuShadowIndices.data();
+		pInitData = &initData;
+	}
+
+	return SUCCEEDED(pDevice->CreateBuffer(&desc, pInitData, &m_lpd3dIdxBuf));
 }
 
 void CGraphicIndexBuffer::DestroyDeviceObjects()
 {
 	safe_release(m_lpd3dIdxBuf);
+	m_bCpuLockActive = false;
 }
 
-bool CGraphicIndexBuffer::Create(int idxCount, D3DFORMAT d3dFmt)
+bool CGraphicIndexBuffer::Create(int idxCount, GrpFormatType formatType)
 {
 	Destroy();
 
 	m_iidxCount = idxCount;
-	UINT bytesPerIndex = (d3dFmt == D3DFMT_INDEX32) ? 4u : 2u;
-	m_dwBufferSize = bytesPerIndex * idxCount;
-	m_d3dFmt = d3dFmt;
+	const UINT bytesPerIndex = (formatType == GRP_FMT_INDEX32) ? 4u : 2u;
+	m_dwBufferSize = bytesPerIndex * static_cast<UINT>(idxCount);
+	m_formatType = formatType;
 
 	return CreateDeviceObjects();
 }
@@ -139,7 +167,12 @@ void CGraphicIndexBuffer::Destroy()
 
 void CGraphicIndexBuffer::Initialize()
 {
-	m_lpd3dIdxBuf = NULL;
+	m_lpd3dIdxBuf = nullptr;
+	m_dwBufferSize = 0u;
+	m_formatType = GRP_FMT_INDEX16;
+	m_iidxCount = 0;
+	m_bCpuLockActive = false;
+	m_cpuShadowIndices.clear();
 }
 
 CGraphicIndexBuffer::CGraphicIndexBuffer()

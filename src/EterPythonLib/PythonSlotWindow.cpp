@@ -388,7 +388,7 @@ BOOL CSlotWindow::HasSlot(DWORD dwIndex)
 	return TRUE;
 }
 
-void CSlotWindow::SetSlot(DWORD dwIndex, DWORD dwVirtualNumber, BYTE byWidth, BYTE byHeight, CGraphicImage * pImage, D3DXCOLOR& diffuseColor)
+void CSlotWindow::SetSlot(DWORD dwIndex, DWORD dwVirtualNumber, BYTE byWidth, BYTE byHeight, CGraphicImage * pImage, DirectX::SimpleMath::Color& diffuseColor)
 {
 	TSlot * pSlot;
 	if (!GetSlotPointer(dwIndex, &pSlot))
@@ -415,7 +415,7 @@ void CSlotWindow::SetSlot(DWORD dwIndex, DWORD dwVirtualNumber, BYTE byWidth, BY
 	{
 		assert(NULL == pSlot->pInstance);
 		pSlot->pInstance = CGraphicImageInstance::New();
-		pSlot->pInstance->SetDiffuseColor(diffuseColor.r, diffuseColor.g, diffuseColor.b, diffuseColor.a);
+		pSlot->pInstance->SetDiffuseColor(diffuseColor.x, diffuseColor.y, diffuseColor.z, diffuseColor.w);
 		pSlot->pInstance->SetImagePointer(pImage);
 	}
 
@@ -967,7 +967,7 @@ void CSlotWindow::OnMouseOverOut()
 
 void CSlotWindow::OnMouseOver()
 {
-	// FIXME : 윈도우를 드래깅 하는 도중에 SetTop이 되어버리면 Capture가 풀어져 버린다. 그것의 방지 코드.
+			// NOTE: guard against capture being released when SetTop occurs during dragging.
 	//         좀 더 근본적인 해결책을 찾아야 할 듯 - [levites]
 //	if (UI::CWindowManager::Instance().IsCapture())
 //	if (!UI::CWindowManager::Instance().IsAttaching())

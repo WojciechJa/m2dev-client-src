@@ -1,5 +1,6 @@
-﻿#pragma once
+#pragma once
 
+//DO NOT INCLUDE DX9 TYPES ANYWHERE!!! USE DX11 INSTEAD
 #include "Ray.h"
 #include <vector>
 #include <algorithm>
@@ -21,6 +22,34 @@ static constexpr float D3DX_PI = DirectX::XM_PI;
 static constexpr float D3DX_2PI = DirectX::XM_2PI;
 static constexpr float D3DX_PI_2 = DirectX::XM_PIDIV2;
 
+// DX11-native: neutral FVF-style layout flags used by legacy call sites.
+#ifndef DX11_FVF_LAYOUT_DEFINED
+#define DX11_FVF_LAYOUT_DEFINED 1
+static constexpr DWORD FVF_XYZ = 0x002;
+static constexpr DWORD FVF_NORMAL = 0x010;
+static constexpr DWORD FVF_DIFFUSE = 0x040;
+static constexpr DWORD FVF_TEX1 = 0x100;
+static constexpr DWORD FVF_TEX2 = 0x200;
+static constexpr DWORD FVF_TEXCOUNT_MASK = 0xF00;
+#endif
+
+// DX11: TSS_* constants for WorldEditor texture stage state compatibility
+// Keep this compatibility token local to GrpBase, independent from DX9 headers.
+#ifndef DX11_TSS_CONSTANTS_DEFINED
+#define DX11_TSS_CONSTANTS_DEFINED 1
+// M3-SKY-BLEND-FIX-74: Simple typedef for StateManager11 compatibility (removed enum values with forbidden patterns)
+using GrpTextureStageStateType = uint32_t;
+static constexpr GrpTextureStageStateType TSS_COLOROP = 1u;
+static constexpr GrpTextureStageStateType TSS_COLORARG1 = 2u;
+static constexpr GrpTextureStageStateType TSS_COLORARG2 = 3u;
+static constexpr GrpTextureStageStateType TSS_ALPHAOP = 4u;
+static constexpr GrpTextureStageStateType TSS_ALPHAARG1 = 5u;
+static constexpr GrpTextureStageStateType TSS_ALPHAARG2 = 6u;
+static constexpr GrpTextureStageStateType TSS_TEXCOORDINDEX = 11u;
+static constexpr GrpTextureStageStateType TSS_TEXTURETRANSFORMFLAGS = 24u;
+static constexpr DWORD TSS_TCI_CAMERASPACEPOSITION = 0x00010000u;
+#endif  // DX11_TSS_CONSTANTS_DEFINED
+
 struct D3DXCOLOR
 {
 	float r;
@@ -31,6 +60,7 @@ struct D3DXCOLOR
 	D3DXCOLOR() : r(0.0f), g(0.0f), b(0.0f), a(0.0f) {}
 	D3DXCOLOR(float fr, float fg, float fb, float fa) : r(fr), g(fg), b(fb), a(fa) {}
 	D3DXCOLOR(const DirectX::SimpleMath::Color& color) : r(color.x), g(color.y), b(color.z), a(color.w) {}
+	D3DXCOLOR(const DirectX::SimpleMath::Vector4& vec) : r(vec.x), g(vec.y), b(vec.z), a(vec.w) {}
 	D3DXCOLOR(DWORD dwColor)
 	{
 		a = float((dwColor >> 24) & 0xFF) / 255.0f;
@@ -77,6 +107,15 @@ struct D3DXCOLOR
 		return *this;
 	}
 
+	D3DXCOLOR& operator=(const DirectX::SimpleMath::Vector4& vec)
+	{
+		r = vec.x;
+		g = vec.y;
+		b = vec.z;
+		a = vec.w;
+		return *this;
+	}
+
 	operator DirectX::SimpleMath::Color() const
 	{
 		return DirectX::SimpleMath::Color(r, g, b, a);
@@ -98,10 +137,12 @@ inline float D3DXToDegree(float fRadian)
 	return DirectX::XMConvertToDegrees(fRadian);
 }
 
-#if !defined(_d3d9TYPES_H_)
-using D3DCOLOR = DWORD;
+// DX11-native compatibility data for legacy call sites, without re-declaring DX9 symbols.
+#ifndef GRPBASE_LEGACY_COMPAT_TYPES_DEFINED
+#define GRPBASE_LEGACY_COMPAT_TYPES_DEFINED 1
+using GrpColor = DWORD;
 
-struct D3DVIEWPORT9
+struct GrpViewport
 {
 	DWORD X = 0;
 	DWORD Y = 0;
@@ -111,32 +152,27 @@ struct D3DVIEWPORT9
 	float MaxZ = 1.0f;
 };
 
-struct D3DPRESENT_PARAMETERS
+struct GrpPresentParameters
 {
 	UINT BackBufferWidth = 0;
 	UINT BackBufferHeight = 0;
 	UINT PresentationInterval = 0;
 };
 
-enum D3DPRIMITIVETYPE : uint32_t
-{
-	D3DPT_POINTLIST = 1,
-	D3DPT_LINELIST = 2,
-	D3DPT_LINESTRIP = 3,
-	D3DPT_TRIANGLELIST = 4,
-	D3DPT_TRIANGLESTRIP = 5,
-	D3DPT_TRIANGLEFAN = 6,
-};
+using GrpPrimitiveType = uint32_t;
+static constexpr GrpPrimitiveType GRP_PT_POINTLIST = 1u;
+static constexpr GrpPrimitiveType GRP_PT_LINELIST = 2u;
+static constexpr GrpPrimitiveType GRP_PT_LINESTRIP = 3u;
+static constexpr GrpPrimitiveType GRP_PT_TRIANGLELIST = 4u;
+static constexpr GrpPrimitiveType GRP_PT_TRIANGLESTRIP = 5u;
+static constexpr GrpPrimitiveType GRP_PT_TRIANGLEFAN = 6u;
 
-#ifndef DX11_D3DFILLMODE_DEFINED
-using D3DFILLMODE = uint32_t;
-#define DX11_D3DFILLMODE_DEFINED 1
-#endif
-static constexpr D3DFILLMODE D3DFILL_POINT = 1u;
-static constexpr D3DFILLMODE D3DFILL_WIREFRAME = 2u;
-static constexpr D3DFILLMODE D3DFILL_SOLID = 3u;
+using GrpFillModeType = uint32_t;
+static constexpr GrpFillModeType GRP_FILL_POINT = 1u;
+static constexpr GrpFillModeType GRP_FILL_WIREFRAME = 2u;
+static constexpr GrpFillModeType GRP_FILL_SOLID = 3u;
 
-struct D3DMATERIAL9
+struct GrpMaterial
 {
 	D3DXCOLOR Diffuse;
 	D3DXCOLOR Ambient;
@@ -145,240 +181,198 @@ struct D3DMATERIAL9
 	float Power = 0.0f;
 };
 
-static constexpr DWORD D3DCREATE_HARDWARE_VERTEXPROCESSING = 0x00000040L;
-static constexpr DWORD D3DCREATE_MIXED_VERTEXPROCESSING = 0x00000080L;
-static constexpr DWORD D3DPMISCCAPS_CLIPTLVERTS = 0x00000040L;
-#ifndef D3DVS_VERSION
-#define D3DVS_VERSION(major, minor) (((major) << 8) | (minor))
+static constexpr DWORD GRP_CREATE_HARDWARE_VERTEXPROCESSING = 0x00000040L;
+static constexpr DWORD GRP_CREATE_MIXED_VERTEXPROCESSING = 0x00000080L;
+static constexpr DWORD GRP_PMISCCAPS_CLIPTLVERTS = 0x00000040L;
+#ifndef GRP_VS_VERSION
+#define GRP_VS_VERSION(major, minor) (((major) << 8) | (minor))
 #endif
 
-// DX11-native: neutral FVF-style layout flags used by legacy call sites.
-#ifndef DX11_FVF_LAYOUT_DEFINED
-#define DX11_FVF_LAYOUT_DEFINED 1
-inline constexpr DWORD FVF_XYZ = 0x002;
-inline constexpr DWORD FVF_NORMAL = 0x010;
-inline constexpr DWORD FVF_DIFFUSE = 0x040;
-inline constexpr DWORD FVF_TEX1 = 0x100;
-inline constexpr DWORD FVF_TEX2 = 0x200;
-inline constexpr DWORD FVF_TEXCOUNT_MASK = 0xF00;
-#endif
+using GrpBlendType = uint32_t;
+static constexpr GrpBlendType GRP_BLEND_ZERO = 1u;
+static constexpr GrpBlendType GRP_BLEND_ONE = 2u;
+static constexpr GrpBlendType GRP_BLEND_SRCCOLOR = 3u;
+static constexpr GrpBlendType GRP_BLEND_INVSRCCOLOR = 4u;
+static constexpr GrpBlendType GRP_BLEND_SRCALPHA = 5u;
+static constexpr GrpBlendType GRP_BLEND_INVSRCALPHA = 6u;
+static constexpr GrpBlendType GRP_BLEND_DESTALPHA = 7u;
+static constexpr GrpBlendType GRP_BLEND_INVDESTALPHA = 8u;
+static constexpr GrpBlendType GRP_BLEND_DESTCOLOR = 9u;
+static constexpr GrpBlendType GRP_BLEND_INVDESTCOLOR = 10u;
+static constexpr GrpBlendType GRP_BLEND_SRCALPHASAT = 11u;
+static constexpr GrpBlendType GRP_BLEND_BOTHSRCALPHA = 12u;
+static constexpr GrpBlendType GRP_BLEND_BOTHINVSRCALPHA = 13u;
+static constexpr GrpBlendType GRP_BLEND_BLENDFACTOR = 14u;
+static constexpr GrpBlendType GRP_BLEND_INVBLENDFACTOR = 15u;
 
-using D3DBLEND = uint32_t;
-#ifndef DX11_D3DBLEND_ZERO_DEFINED
-static constexpr D3DBLEND D3DBLEND_ZERO = 1u;
-#define DX11_D3DBLEND_ZERO_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_ONE_DEFINED
-static constexpr D3DBLEND D3DBLEND_ONE = 2u;
-#define DX11_D3DBLEND_ONE_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_SRCCOLOR_DEFINED
-static constexpr D3DBLEND D3DBLEND_SRCCOLOR = 3u;
-#define DX11_D3DBLEND_SRCCOLOR_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_INVSRCCOLOR_DEFINED
-static constexpr D3DBLEND D3DBLEND_INVSRCCOLOR = 4u;
-#define DX11_D3DBLEND_INVSRCCOLOR_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_SRCALPHA_DEFINED
-static constexpr D3DBLEND D3DBLEND_SRCALPHA = 5u;
-#define DX11_D3DBLEND_SRCALPHA_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_INVSRCALPHA_DEFINED
-static constexpr D3DBLEND D3DBLEND_INVSRCALPHA = 6u;
-#define DX11_D3DBLEND_INVSRCALPHA_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_DESTALPHA_DEFINED
-static constexpr D3DBLEND D3DBLEND_DESTALPHA = 7u;
-#define DX11_D3DBLEND_DESTALPHA_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_INVDESTALPHA_DEFINED
-static constexpr D3DBLEND D3DBLEND_INVDESTALPHA = 8u;
-#define DX11_D3DBLEND_INVDESTALPHA_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_DESTCOLOR_DEFINED
-static constexpr D3DBLEND D3DBLEND_DESTCOLOR = 9u;
-#define DX11_D3DBLEND_DESTCOLOR_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_INVDESTCOLOR_DEFINED
-static constexpr D3DBLEND D3DBLEND_INVDESTCOLOR = 10u;
-#define DX11_D3DBLEND_INVDESTCOLOR_DEFINED 1
-#endif
-#ifndef DX11_D3DBLEND_SRCALPHASAT_DEFINED
-static constexpr D3DBLEND D3DBLEND_SRCALPHASAT = 11u;
-#define DX11_D3DBLEND_SRCALPHASAT_DEFINED 1
-#endif
+using GrpBlendOpType = uint32_t;
+static constexpr GrpBlendOpType GRP_BLENDOP_ADD = 1u;
+static constexpr GrpBlendOpType GRP_BLENDOP_SUBTRACT = 2u;
+static constexpr GrpBlendOpType GRP_BLENDOP_REVSUBTRACT = 3u;
+static constexpr GrpBlendOpType GRP_BLENDOP_MIN = 4u;
+static constexpr GrpBlendOpType GRP_BLENDOP_MAX = 5u;
 
-using D3DBLENDOP = uint32_t;
-static constexpr D3DBLENDOP D3DBLENDOP_ADD = 1u;
-static constexpr D3DBLENDOP D3DBLENDOP_SUBTRACT = 2u;
-static constexpr D3DBLENDOP D3DBLENDOP_REVSUBTRACT = 3u;
-static constexpr D3DBLENDOP D3DBLENDOP_MIN = 4u;
-static constexpr D3DBLENDOP D3DBLENDOP_MAX = 5u;
+using GrpCmpFuncType = uint32_t;
+static constexpr GrpCmpFuncType GRP_CMP_NEVER = 1u;
+static constexpr GrpCmpFuncType GRP_CMP_LESS = 2u;
+static constexpr GrpCmpFuncType GRP_CMP_EQUAL = 3u;
+static constexpr GrpCmpFuncType GRP_CMP_LESSEQUAL = 4u;
+static constexpr GrpCmpFuncType GRP_CMP_GREATER = 5u;
+static constexpr GrpCmpFuncType GRP_CMP_NOTEQUAL = 6u;
+static constexpr GrpCmpFuncType GRP_CMP_GREATEREQUAL = 7u;
+static constexpr GrpCmpFuncType GRP_CMP_ALWAYS = 8u;
 
-using D3DCMPFUNC = uint32_t;
-static constexpr D3DCMPFUNC D3DCMP_NEVER = 1u;
-static constexpr D3DCMPFUNC D3DCMP_LESS = 2u;
-static constexpr D3DCMPFUNC D3DCMP_EQUAL = 3u;
-static constexpr D3DCMPFUNC D3DCMP_LESSEQUAL = 4u;
-static constexpr D3DCMPFUNC D3DCMP_GREATER = 5u;
-static constexpr D3DCMPFUNC D3DCMP_NOTEQUAL = 6u;
-static constexpr D3DCMPFUNC D3DCMP_GREATEREQUAL = 7u;
-static constexpr D3DCMPFUNC D3DCMP_ALWAYS = 8u;
+using GrpCullType = uint32_t;
+static constexpr GrpCullType GRP_CULL_NONE = 1u;
+static constexpr GrpCullType GRP_CULL_CW = 2u;
+static constexpr GrpCullType GRP_CULL_CCW = 3u;
 
-using D3DCULL = uint32_t;
-static constexpr D3DCULL D3DCULL_NONE = 1u;
-static constexpr D3DCULL D3DCULL_CW = 2u;
-static constexpr D3DCULL D3DCULL_CCW = 3u;
+using GrpStencilOpType = uint32_t;
+static constexpr GrpStencilOpType GRP_STENCILOP_KEEP = 1u;
+static constexpr GrpStencilOpType GRP_STENCILOP_ZERO = 2u;
+static constexpr GrpStencilOpType GRP_STENCILOP_REPLACE = 3u;
+static constexpr GrpStencilOpType GRP_STENCILOP_INCRSAT = 4u;
+static constexpr GrpStencilOpType GRP_STENCILOP_DECRSAT = 5u;
+static constexpr GrpStencilOpType GRP_STENCILOP_INVERT = 6u;
+static constexpr GrpStencilOpType GRP_STENCILOP_INCR = 7u;
+static constexpr GrpStencilOpType GRP_STENCILOP_DECR = 8u;
 
-using D3DSTENCILOP = uint32_t;
-static constexpr D3DSTENCILOP D3DSTENCILOP_KEEP = 1u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_ZERO = 2u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_REPLACE = 3u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_INCRSAT = 4u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_DECRSAT = 5u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_INVERT = 6u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_INCR = 7u;
-static constexpr D3DSTENCILOP D3DSTENCILOP_DECR = 8u;
+using GrpTextureFilterType = uint32_t;
+static constexpr GrpTextureFilterType GRP_TEXF_NONE = 0u;
+static constexpr GrpTextureFilterType GRP_TEXF_POINT = 1u;
+static constexpr GrpTextureFilterType GRP_TEXF_LINEAR = 2u;
+static constexpr GrpTextureFilterType GRP_TEXF_ANISOTROPIC = 3u;
 
-using D3DTEXTUREFILTERTYPE = uint32_t;
-static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_NONE = 0u;
-static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_POINT = 1u;
-static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_LINEAR = 2u;
-static constexpr D3DTEXTUREFILTERTYPE D3DTEXF_ANISOTROPIC = 3u;
+using GrpTextureAddressType = uint32_t;
+static constexpr GrpTextureAddressType GRP_TADDRESS_WRAP = 1u;
+static constexpr GrpTextureAddressType GRP_TADDRESS_MIRROR = 2u;
+static constexpr GrpTextureAddressType GRP_TADDRESS_CLAMP = 3u;
+static constexpr GrpTextureAddressType GRP_TADDRESS_BORDER = 4u;
+static constexpr GrpTextureAddressType GRP_TADDRESS_MIRRORONCE = 5u;
 
-using D3DTEXTUREADDRESS = uint32_t;
-static constexpr D3DTEXTUREADDRESS D3DTADDRESS_WRAP = 1u;
-static constexpr D3DTEXTUREADDRESS D3DTADDRESS_MIRROR = 2u;
-static constexpr D3DTEXTUREADDRESS D3DTADDRESS_CLAMP = 3u;
-static constexpr D3DTEXTUREADDRESS D3DTADDRESS_BORDER = 4u;
-static constexpr D3DTEXTUREADDRESS D3DTADDRESS_MIRRORONCE = 5u;
+using GrpFogModeType = uint32_t;
+static constexpr GrpFogModeType GRP_FOG_NONE = 0u;
+static constexpr GrpFogModeType GRP_FOG_EXP = 1u;
+static constexpr GrpFogModeType GRP_FOG_EXP2 = 2u;
+static constexpr GrpFogModeType GRP_FOG_LINEAR = 3u;
 
-using D3DFOGMODE = uint32_t;
-static constexpr D3DFOGMODE D3DFOG_NONE = 0u;
-static constexpr D3DFOGMODE D3DFOG_EXP = 1u;
-static constexpr D3DFOGMODE D3DFOG_EXP2 = 2u;
-static constexpr D3DFOGMODE D3DFOG_LINEAR = 3u;
+using GrpRenderStateType = uint32_t;
+static constexpr GrpRenderStateType GRP_RS_ZENABLE = 7u;
+static constexpr GrpRenderStateType GRP_RS_FILLMODE = 8u;
+static constexpr GrpRenderStateType GRP_RS_SHADEMODE = 9u;
+static constexpr GrpRenderStateType GRP_RS_ZWRITEENABLE = 14u;
+static constexpr GrpRenderStateType GRP_RS_ALPHAREF = 24u;
+static constexpr GrpRenderStateType GRP_RS_SRCBLEND = 19u;
+static constexpr GrpRenderStateType GRP_RS_DESTBLEND = 20u;
+static constexpr GrpRenderStateType GRP_RS_CULLMODE = 22u;
+static constexpr GrpRenderStateType GRP_RS_ZFUNC = 23u;
+static constexpr GrpRenderStateType GRP_RS_ALPHABLENDENABLE = 27u;
+static constexpr GrpRenderStateType GRP_RS_FOGENABLE = 28u;
+static constexpr GrpRenderStateType GRP_RS_SPECULARENABLE = 29u;
+static constexpr GrpRenderStateType GRP_RS_FOGCOLOR = 34u;
+static constexpr GrpRenderStateType GRP_RS_FOGSTART = 36u;
+static constexpr GrpRenderStateType GRP_RS_FOGEND = 37u;
+static constexpr GrpRenderStateType GRP_RS_FOGDENSITY = 38u;
+static constexpr GrpRenderStateType GRP_RS_RANGEFOGENABLE = 48u;
+static constexpr GrpRenderStateType GRP_RS_TEXTUREFACTOR = 60u;
+static constexpr GrpRenderStateType GRP_RS_LIGHTING = 137u;
+static constexpr GrpRenderStateType GRP_RS_AMBIENT = 139u;
+static constexpr GrpRenderStateType GRP_RS_FOGVERTEXMODE = 140u;
+static constexpr GrpRenderStateType GRP_RS_FOGTABLEMODE = 141u;
+static constexpr GrpRenderStateType GRP_RS_COLORWRITEENABLE = 168u;
+static constexpr GrpRenderStateType GRP_RS_BLENDOP = 171u;
+static constexpr GrpRenderStateType GRP_RS_SCISSORTESTENABLE = 174u;
 
-using D3DRENDERSTATETYPE = uint32_t;
-static constexpr D3DRENDERSTATETYPE D3DRS_ZENABLE = 7u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FILLMODE = 8u;
-static constexpr D3DRENDERSTATETYPE D3DRS_SHADEMODE = 9u;
-static constexpr D3DRENDERSTATETYPE D3DRS_ZWRITEENABLE = 14u;
-static constexpr D3DRENDERSTATETYPE D3DRS_SRCBLEND = 19u;
-static constexpr D3DRENDERSTATETYPE D3DRS_DESTBLEND = 20u;
-static constexpr D3DRENDERSTATETYPE D3DRS_CULLMODE = 22u;
-static constexpr D3DRENDERSTATETYPE D3DRS_ZFUNC = 23u;
-static constexpr D3DRENDERSTATETYPE D3DRS_ALPHABLENDENABLE = 27u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FOGENABLE = 28u;
-static constexpr D3DRENDERSTATETYPE D3DRS_SPECULARENABLE = 29u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FOGCOLOR = 34u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FOGSTART = 36u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FOGEND = 37u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FOGDENSITY = 38u;
-static constexpr D3DRENDERSTATETYPE D3DRS_RANGEFOGENABLE = 48u;
-static constexpr D3DRENDERSTATETYPE D3DRS_TEXTUREFACTOR = 60u;
-static constexpr D3DRENDERSTATETYPE D3DRS_LIGHTING = 137u;
-static constexpr D3DRENDERSTATETYPE D3DRS_AMBIENT = 139u;
-static constexpr D3DRENDERSTATETYPE D3DRS_FOGVERTEXMODE = 140u;
-static constexpr D3DRENDERSTATETYPE D3DRS_COLORWRITEENABLE = 168u;
-static constexpr D3DRENDERSTATETYPE D3DRS_BLENDOP = 171u;
-static constexpr D3DRENDERSTATETYPE D3DRS_SCISSORTESTENABLE = 174u;
+using GrpSamplerStateType = uint32_t;
+static constexpr GrpSamplerStateType GRP_SAMP_ADDRESSU = 1u;
+static constexpr GrpSamplerStateType GRP_SAMP_ADDRESSV = 2u;
+static constexpr GrpSamplerStateType GRP_SAMP_ADDRESSW = 3u;
+static constexpr GrpSamplerStateType GRP_SAMP_BORDERCOLOR = 4u;
+static constexpr GrpSamplerStateType GRP_SAMP_MAGFILTER = 5u;
+static constexpr GrpSamplerStateType GRP_SAMP_MINFILTER = 6u;
+static constexpr GrpSamplerStateType GRP_SAMP_MIPFILTER = 7u;
+static constexpr GrpSamplerStateType GRP_SAMP_MAXANISOTROPY = 10u;
 
-using D3DSAMPLERSTATETYPE = uint32_t;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_ADDRESSU = 1u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_ADDRESSV = 2u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_ADDRESSW = 3u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_BORDERCOLOR = 4u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MAGFILTER = 5u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MINFILTER = 6u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MIPFILTER = 7u;
-static constexpr D3DSAMPLERSTATETYPE D3DSAMP_MAXANISOTROPY = 10u;
+using GrpTransformStateType = uint32_t;
+static constexpr GrpTransformStateType GRP_TS_VIEW = 2u;
+static constexpr GrpTransformStateType GRP_TS_PROJECTION = 3u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE0 = 16u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE1 = 17u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE2 = 18u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE3 = 19u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE4 = 20u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE5 = 21u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE6 = 22u;
+static constexpr GrpTransformStateType GRP_TS_TEXTURE7 = 23u;
+static constexpr GrpTransformStateType GRP_TS_WORLD = 256u;
 
-using D3DTRANSFORMSTATETYPE = uint32_t;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_VIEW = 2u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_PROJECTION = 3u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE0 = 16u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE1 = 17u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE2 = 18u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE3 = 19u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE4 = 20u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE5 = 21u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE6 = 22u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_TEXTURE7 = 23u;
-static constexpr D3DTRANSFORMSTATETYPE D3DTS_WORLD = 256u;
+using GrpTextureArgType = uint32_t;
+static constexpr GrpTextureArgType GRP_TA_DIFFUSE = 0x00000000u;
+static constexpr GrpTextureArgType GRP_TA_CURRENT = 0x00000001u;
+static constexpr GrpTextureArgType GRP_TA_TEXTURE = 0x00000002u;
+static constexpr GrpTextureArgType GRP_TA_TFACTOR = 0x00000003u;
 
-using D3DTEXTURESTAGESTATETYPE = uint32_t;
+static constexpr DWORD GRP_TTFF_DISABLE = 0u;
+static constexpr DWORD GRP_TTFF_COUNT1 = 1u;
+static constexpr DWORD GRP_TTFF_COUNT2 = 2u;
+static constexpr DWORD GRP_TTFF_COUNT3 = 3u;
+static constexpr DWORD GRP_TTFF_COUNT4 = 4u;
 
-using D3DTEXTUREARG = uint32_t;
-static constexpr D3DTEXTUREARG D3DTA_DIFFUSE = 0x00000000u;
-static constexpr D3DTEXTUREARG D3DTA_CURRENT = 0x00000001u;
-static constexpr D3DTEXTUREARG D3DTA_TEXTURE = 0x00000002u;
-static constexpr D3DTEXTUREARG D3DTA_TFACTOR = 0x00000003u;
+using GrpTextureOpType = uint32_t;
+static constexpr GrpTextureOpType GRP_TOP_DISABLE = 1u;
+static constexpr GrpTextureOpType GRP_TOP_SELECTARG1 = 2u;
+static constexpr GrpTextureOpType GRP_TOP_SELECTARG2 = 3u;
+static constexpr GrpTextureOpType GRP_TOP_MODULATE = 4u;
 
-static constexpr DWORD D3DTTFF_DISABLE = 0u;
-static constexpr DWORD D3DTTFF_COUNT1 = 1u;
-static constexpr DWORD D3DTTFF_COUNT2 = 2u;
-static constexpr DWORD D3DTTFF_COUNT3 = 3u;
-static constexpr DWORD D3DTTFF_COUNT4 = 4u;
-using D3DTEXTUREOP = uint32_t;
-static constexpr D3DTEXTUREOP D3DTOP_DISABLE = 1u;
-static constexpr D3DTEXTUREOP D3DTOP_SELECTARG1 = 2u;
-static constexpr D3DTEXTUREOP D3DTOP_SELECTARG2 = 3u;
-static constexpr D3DTEXTUREOP D3DTOP_MODULATE = 4u;
+using GrpFormatType = uint32_t;
+static constexpr GrpFormatType GRP_FMT_UNKNOWN = 0u;
+static constexpr GrpFormatType GRP_FMT_A8R8G8B8 = 21u;
+static constexpr GrpFormatType GRP_FMT_X8R8G8B8 = 22u;
+static constexpr GrpFormatType GRP_FMT_INDEX16 = 101u;
+static constexpr GrpFormatType GRP_FMT_INDEX32 = 102u;
 
-using D3DFORMAT = uint32_t;
-static constexpr D3DFORMAT D3DFMT_UNKNOWN = 0;
-static constexpr D3DFORMAT D3DFMT_INDEX16 = 101;
-static constexpr D3DFORMAT D3DFMT_INDEX32 = 102;
-static constexpr D3DFORMAT D3DFMT_A8R8G8B8 = 21;
-static constexpr D3DFORMAT D3DFMT_X8R8G8B8 = 22;
+using GrpPoolType = uint32_t;
+static constexpr GrpPoolType GRP_POOL_DEFAULT = 0u;
+static constexpr GrpPoolType GRP_POOL_MANAGED = 1u;
+static constexpr GrpPoolType GRP_POOL_SYSTEMMEM = 2u;
 
-using D3DPOOL = uint32_t;
-static constexpr D3DPOOL D3DPOOL_DEFAULT = 0;
-static constexpr D3DPOOL D3DPOOL_MANAGED = 1;
-static constexpr D3DPOOL D3DPOOL_SYSTEMMEM = 2;
+using GrpVector = D3DXVECTOR3;
 
-using D3DVECTOR = D3DXVECTOR3;
+static constexpr DWORD GRP_USAGE_DYNAMIC = 0x200L;
+static constexpr DWORD GRP_USAGE_WRITEONLY = 0x8L;
+static constexpr DWORD GRP_LOCK_DISCARD = 0x2000L;
 
-static constexpr DWORD D3DUSAGE_DYNAMIC = 0x200L;
-static constexpr DWORD D3DUSAGE_WRITEONLY = 0x8L;
-static constexpr DWORD D3DLOCK_DISCARD = 0x2000L;
+static constexpr UINT GRP_PRESENT_INTERVAL_ONE = 1u;
+static constexpr UINT GRP_PRESENT_INTERVAL_IMMEDIATE = 0u;
 
-static constexpr UINT D3DPRESENT_INTERVAL_ONE = 1u;
-static constexpr UINT D3DPRESENT_INTERVAL_IMMEDIATE = 0u;
-#endif // !defined(_d3d9TYPES_H_)
-
-#if !defined(_D3D9CAPS_H_) && !defined(DX11_D3DCAPS9_DEFINED)
-struct D3DCAPS9
+struct GrpCaps
 {
 	DWORD PrimitiveMiscCaps = 0;
 	DWORD VertexShaderVersion = 0;
 };
-#define DX11_D3DCAPS9_DEFINED 1
-#endif // !defined(_D3D9CAPS_H_) && !defined(DX11_D3DCAPS9_DEFINED)
+#endif // GRPBASE_LEGACY_COMPAT_TYPES_DEFINED
 
-#ifndef D3DCOLOR_ARGB
-inline DWORD D3DCOLOR_ARGB(int a, int r, int g, int b)
+
+#ifndef GRP_COLOR_ARGB
+inline DWORD GrpColorARGB(int a, int r, int g, int b)
 {
 	return (DWORD((a & 0xFF) << 24) |
 		DWORD((r & 0xFF) << 16) |
 		DWORD((g & 0xFF) << 8) |
 		DWORD((b & 0xFF)));
 }
+#endif // GRP_COLOR_ARGB
 
-#endif // D3DCOLOR_ARGB
-
-#ifndef D3DCOLOR_COLORVALUE
-inline DWORD D3DCOLOR_COLORVALUE(float r, float g, float b, float a)
+#ifndef GRP_COLOR_COLORVALUE
+inline DWORD GrpColorValue(float r, float g, float b, float a)
 {
-	return D3DCOLOR_ARGB(
+	return GrpColorARGB(
 		int(std::clamp(a, 0.0f, 1.0f) * 255.0f),
 		int(std::clamp(r, 0.0f, 1.0f) * 255.0f),
 		int(std::clamp(g, 0.0f, 1.0f) * 255.0f),
 		int(std::clamp(b, 0.0f, 1.0f) * 255.0f));
 }
-#endif // D3DCOLOR_COLORVALUE
+#endif // GRP_COLOR_COLORVALUE
 
 
 #ifndef D3DXIFF_DDS
@@ -621,7 +615,7 @@ inline D3DXPLANE* D3DXPlaneNormalize(D3DXPLANE* pOut, const D3DXPLANE* pP)
 	return pOut;
 }
 
-inline D3DXVECTOR3* D3DXVec3Project(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, const D3DVIEWPORT9* pViewport, const D3DXMATRIX* pProjection, const D3DXMATRIX* pView, const D3DXMATRIX* pWorld)
+inline D3DXVECTOR3* D3DXVec3Project(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, const GrpViewport* pViewport, const D3DXMATRIX* pProjection, const D3DXMATRIX* pView, const D3DXMATRIX* pWorld)
 {
 	const DirectX::XMVECTOR v = DirectX::XMVector3Project(
 		DirectX::XMLoadFloat3(pV),
@@ -638,7 +632,7 @@ inline D3DXVECTOR3* D3DXVec3Project(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, co
 	return pOut;
 }
 
-inline D3DXVECTOR3* D3DXVec3Unproject(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, const D3DVIEWPORT9* pViewport, const D3DXMATRIX* pProjection, const D3DXMATRIX* pView, const D3DXMATRIX* pWorld)
+inline D3DXVECTOR3* D3DXVec3Unproject(D3DXVECTOR3* pOut, const D3DXVECTOR3* pV, const GrpViewport* pViewport, const D3DXMATRIX* pProjection, const D3DXMATRIX* pView, const D3DXMATRIX* pWorld)
 {
 	const DirectX::XMVECTOR v = DirectX::XMVector3Unproject(
 		DirectX::XMLoadFloat3(pV),
@@ -811,6 +805,7 @@ class CGraphicBase
 		static const D3DXMATRIX& GetViewMatrix();
 		static const D3DXMATRIX& GetProjMatrix();
 		static const D3DXMATRIX & GetIdentityMatrix();
+		static bool ProjectPositionDX11World(float x, float y, float z, float* pfX, float* pfY, float* pfZ);
 
 		enum
 		{			
@@ -905,13 +900,16 @@ class CGraphicBase
 
 		static D3DXMATRIX				ms_matWorld;
 		static D3DXMATRIX				ms_matWorldView;
+		static D3DXMATRIX				ms_matDX11WorldViewSnapshot;
+		static D3DXMATRIX				ms_matDX11WorldProjSnapshot;
+		static bool						ms_bDX11WorldProjectionSnapshotValid;
 
 	protected:
 		//void		UpdatePrePipeLineMatrix();
 		void		UpdatePipeLineMatrix();
 
 	protected:
-		// ÃªÂ°ÂÃ¬Â¢â€¦ D3DX Mesh Ã«â€œÂ¤ (Ã¬Â»Â¬Ã«Â£Â¨Ã¬Â Â¼ Ã«ÂÂ°Ã¬ÂÂ´Ã­â€žÂ° Ã«â€œÂ±Ã¬Ââ€ž Ã­â€˜Å“Ã¬â€¹Å“Ã­â„¢Å“ Ã«â€¢Å’ Ã¬â€œÂ´Ã«â€¹Â¤)
+		// ê°ì¢… D3DX Mesh ë“¤ (ì»¬ë£¨ì ¼ ë°ì´í„° ë“±ì„ í‘œì‹œí™œ ë•Œ ì“´ë‹¤)
 		static LPD3DXMESH				ms_lpSphereMesh;
 		static LPD3DXMESH				ms_lpCylinderMesh;
 
@@ -923,11 +921,11 @@ class CGraphicBase
 
 		static HWND						ms_hWnd;
 		static HDC						ms_hDC;
-		static D3DVIEWPORT9				ms_Viewport;
+		static GrpViewport				ms_Viewport;
 
 		static DWORD					ms_faceCount;
-		static D3DCAPS9					ms_d3dCaps;
-		static D3DPRESENT_PARAMETERS	ms_d3dPresentParameter;
+		static GrpCaps					ms_d3dCaps;
+		static GrpPresentParameters	ms_d3dPresentParameter;
 		
 		static DWORD					ms_dwD3DBehavior;
 
@@ -944,7 +942,7 @@ class CGraphicBase
 		static float					ms_fNearY;
 		static float					ms_fFarY;
 
-		// 2004.11.18.myevan.DynamicVertexBufferÃ«Â¡Å“ ÃªÂµÂÃ¬Â²Â´
+		// 2004.11.18.myevan.DynamicVertexBufferë¡œ êµì²´
 		/*
 		static std::vector<TIndex>		ms_lineIdxVector;
 		static std::vector<TIndex>		ms_lineTriIdxVector;
@@ -962,7 +960,7 @@ class CGraphicBase
 		static DWORD					ms_dwFlashingEndTime;
 		static D3DXCOLOR				ms_FlashingColor;
 
-		// Terrain pickingÃ¬Å¡Â© Ray... CCamera Ã¬ÂÂ´Ã¬Å¡Â©Ã­â€¢ËœÃ«Å â€ Ã«Â²â€žÃ¬Â â€ž.. ÃªÂ¸Â°Ã¬Â¡Â´Ã¬ÂËœ RayÃ¬â„¢â‚¬ Ã­â€ ÂµÃ­â€¢Â© Ã­â€¢â€žÃ¬Å¡â€...
+		// Terrain pickingìš© Ray... CCamera ì´ìš©í•˜ëŠ” ë²„ì „.. ê¸°ì¡´ì˜ Rayì™€ í†µí•© í•„ìš”...
  		static CRay						ms_Ray;
 
 		// 
@@ -978,16 +976,3 @@ class CGraphicBase
 		
 		
 };
-
-
-
-
-
-
-
-
-
-
-
-
-

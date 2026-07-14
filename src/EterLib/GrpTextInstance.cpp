@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "GrpTextInstance.h"
 #include "IME.h"
 #include "TextTag.h"
@@ -22,6 +22,16 @@ static int gs_mx = 0;
 static int gs_my = 0;
 
 static std::wstring gs_hyperlinkText;
+
+static void __EnhanceDX11TextColor(float& r, float& g, float& b)
+{
+	const float fLuma = (r * 0.2126f) + (g * 0.7152f) + (b * 0.0722f);
+	const float fSaturation = 1.25f;
+	const float fBrightness = 1.08f;
+	r = std::min(1.0f, std::max(0.0f, (fLuma + ((r - fLuma) * fSaturation)) * fBrightness));
+	g = std::min(1.0f, std::max(0.0f, (fLuma + ((g - fLuma) * fSaturation)) * fBrightness));
+	b = std::min(1.0f, std::max(0.0f, (fLuma + ((b - fLuma) * fSaturation)) * fBrightness));
+}
 
 // M2-UI-TEXTTAIL-PARITY-26: Startup guard state (file-scope to allow reset)
 static DWORD s_dwDX11TextStartupGuardBeginMS = timeGetTime(); // Initialize at first load
@@ -976,6 +986,7 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 		float charG = ((dwCharColor >> 8) & 0xFF) / 255.0f;
 		float charB = ((dwCharColor) & 0xFF) / 255.0f;
 		float charA = ((dwCharColor >> 24) & 0xFF) / 255.0f;
+		__EnhanceDX11TextColor(charR, charG, charB);
 
 		// Convert to NDC
 		float x0 = PixelToNDCX(fFontSx);
@@ -1020,18 +1031,30 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 	auto DrawBatchLCD = [&](const std::unordered_map<DWORD, std::vector<SBootstrapVertex>>& batches, bool skipPass2) -> int
 	{
 		int iTotalGlyphQuads = 0;
+		std::vector<SBootstrapVertex> coverageVertices;
+		std::vector<SBootstrapVertex> colorVertices;
+
+		auto UploadVertices = [&](const std::vector<SBootstrapVertex>& vertices) -> bool
+		{
+			D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
+			const HRESULT hr = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+			if (FAILED(hr) || !kMappedResource.pData)
+				return false;
+			memcpy(kMappedResource.pData, vertices.data(), vertices.size() * sizeof(SBootstrapVertex));
+			pContext->Unmap(pVertexBuffer, 0);
+			return true;
+		};
 
 		for (const auto& [dwTexturePage, vtxBatch] : batches)
 		{
 			if (vtxBatch.empty())
 				continue;
 
-			// Get texture SRV from font atlas using Model 1's API
 			ID3D11ShaderResourceView* pTextureSRV = pFontTexture->GetTexturePageSRV(dwTexturePage);
 			if (!pTextureSRV)
 			{
-				++s_iSRVFailures; // M3-TEXTTAIL22.A: Track SRV failures
-				++s_iPersistentSRVFailures; // M2-UI-TEXTTAIL-PARITY-26: Persistent tracking
+				++s_iSRVFailures;
+				++s_iPersistentSRVFailures;
 				static std::set<DWORD> s_loggedPages;
 				if (s_loggedPages.find(dwTexturePage) == s_loggedPages.end())
 				{
@@ -1041,10 +1064,20 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 				continue;
 			}
 
-			// Map vertex buffer
-			D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
-			HRESULT hr = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
-			if (FAILED(hr))
+			// Pass 1 must receive coverage only. Multiplying it by the text color
+			// leaves destination color in the glyph and makes its hue depend on the background.
+			coverageVertices = vtxBatch;
+			colorVertices = vtxBatch;
+			for (SBootstrapVertex& vertex : coverageVertices)
+				vertex.r = vertex.g = vertex.b = vertex.a;
+			for (SBootstrapVertex& vertex : colorVertices)
+			{
+				vertex.r *= vertex.a;
+				vertex.g *= vertex.a;
+				vertex.b *= vertex.a;
+			}
+
+			if (!UploadVertices(coverageVertices))
 			{
 				static bool s_bLoggedMapFail = false;
 				if (!s_bLoggedMapFail)
@@ -1055,13 +1088,9 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 				continue;
 			}
 
-			memcpy(kMappedResource.pData, vtxBatch.data(), vtxBatch.size() * sizeof(SBootstrapVertex));
-			pContext->Unmap(pVertexBuffer, 0);
-
-			// Bind texture
 			pContext->PSSetShaderResources(0, 1, &pTextureSRV);
 
-			// Pass 1: dest.rgb *= (1 - coverage.rgb) - ZERO, INVSRCCOLOR blend
+			// Pass 1: dest.rgb *= (1 - coverage.rgb).
 			ID3D11BlendState* pPass1BlendState = pDX11Device->GetBootstrapUILCDPass1BlendState();
 			if (pPass1BlendState)
 			{
@@ -1070,7 +1099,6 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 			}
 			else
 			{
-				// Fallback: use alpha blend (not ideal for LCD, but won't crash)
 				float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 				pContext->OMSetBlendState(pAlphaBlendState, blendFactor, 0xFFFFFFFF);
 			}
@@ -1079,7 +1107,10 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 
 			if (!skipPass2)
 			{
-				// Pass 2: dest.rgb += textColor.rgb * coverage.rgb - ONE, ONE blend
+				if (!UploadVertices(colorVertices))
+					continue;
+
+				// Pass 2: dest.rgb += textColor.rgb * coverage.rgb.
 				ID3D11BlendState* pPass2BlendState = pDX11Device->GetBootstrapUILCDPass2BlendState();
 				if (pPass2BlendState)
 				{
@@ -1088,7 +1119,6 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 				}
 				else
 				{
-					// Fallback: use alpha blend
 					float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 					pContext->OMSetBlendState(pAlphaBlendState, blendFactor, 0xFFFFFFFF);
 				}
@@ -1101,7 +1131,6 @@ bool CGraphicTextInstance::RenderDX11(RECT * pClipRect)
 
 		return iTotalGlyphQuads;
 	};
-
 	// Render outline batches first (skip Pass 2 if black outline)
 	bool outlineIsBlack = ((m_dwOutLineColor & 0x00FFFFFF) == 0);
 	int iOutlineQuads = DrawBatchLCD(outlineBatches, outlineIsBlack);

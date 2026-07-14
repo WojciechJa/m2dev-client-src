@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "TextFileLoader.h"
 #include "PackLib/PackManager.h"
+#include "GrpDeviceDX11.h"
 
 void PrintfTabs(FILE * File, int iTabCount, const char * c_szString, ...)
 {
@@ -107,29 +108,59 @@ bool LoadMultipleTextData(const char * c_szFileName, CTokenVectorMap & rstTokenV
 	return true;
 }
 
-D3DXVECTOR3 TokenToVector(CTokenVector & rVector)
+DirectX::SimpleMath::Vector3 TokenToVector(CTokenVector & rVector)
 {
 	if (3 != rVector.size())
 	{
 		assert(!"Size of token vector which will be converted to vector is not 3");
-		return D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+		return DirectX::SimpleMath::Vector3(0.0f, 0.0f, 0.0f);
 	}
 
-	return D3DXVECTOR3(atof(rVector[0].c_str()),
+	return DirectX::SimpleMath::Vector3(atof(rVector[0].c_str()),
 						atof(rVector[1].c_str()),
 						atof(rVector[2].c_str()));
 }
 
-D3DXCOLOR TokenToColor(CTokenVector & rVector)
+DirectX::SimpleMath::Vector4 TokenToColor(CTokenVector & rVector)
 {
 	if (4 != rVector.size())
 	{
 		assert(!"Size of token vector which will be converted to color is not 4");
-		return D3DXCOLOR(1.0f, 1.0f, 1.0f, 1.0f);
+		return DirectX::SimpleMath::Vector4(1.0f, 1.0f, 1.0f, 1.0f);
 	}
 
-	return D3DXCOLOR(atof(rVector[0].c_str()),
+	return DirectX::SimpleMath::Vector4(atof(rVector[0].c_str()),
 						atof(rVector[1].c_str()),
 						atof(rVector[2].c_str()),
 						atof(rVector[3].c_str()));
 }
+
+DWORD GetMaxTextureWidth()
+{
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid() || !pDX11Device->GetDevice())
+		return static_cast<DWORD>(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+
+	switch (pDX11Device->GetDevice()->GetFeatureLevel())
+	{
+	case D3D_FEATURE_LEVEL_11_1:
+	case D3D_FEATURE_LEVEL_11_0:
+		return 16384u;
+	case D3D_FEATURE_LEVEL_10_1:
+	case D3D_FEATURE_LEVEL_10_0:
+		return 8192u;
+	case D3D_FEATURE_LEVEL_9_3:
+		return 4096u;
+	case D3D_FEATURE_LEVEL_9_2:
+	case D3D_FEATURE_LEVEL_9_1:
+		return 2048u;
+	default:
+		return 4096u;
+	}
+}
+
+DWORD GetMaxTextureHeight()
+{
+	return GetMaxTextureWidth();
+}
+

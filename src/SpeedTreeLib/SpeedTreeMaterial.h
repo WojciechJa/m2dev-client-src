@@ -29,15 +29,19 @@
 
 #pragma once
 
+#include <cstring>  // for memcpy
 
-///////////////////////////////////////////////////////////////////////  
+///////////////////////////////////////////////////////////////////////
 //	Include Files
 
-#include <d3d9.h>
-#include <d3d9types.h>
-#include <d3dx9.h>
+// Custom material structure for DX11 compatibility
+struct SpeedTreeMaterialData
+{
+	struct ColorValue { float r, g, b, a; } Ambient, Diffuse, Specular, Emissive;
+	float Power;
+};
 
-///////////////////////////////////////////////////////////////////////  
+///////////////////////////////////////////////////////////////////////
 //	class CSpeedTreeMaterial declaration/definiton
 
 class CSpeedTreeMaterial
@@ -69,11 +73,11 @@ class CSpeedTreeMaterial
 			m_cMaterial.Power = pMaterialArray[12];
 		}
 		
-		D3DMATERIAL9 * Get()
+		SpeedTreeMaterialData * Get()
 		{
 			return &m_cMaterial;
 		}
-		
+
 	private:
-		D3DMATERIAL9 m_cMaterial;	// the material object
+		SpeedTreeMaterialData m_cMaterial;	// the material object
 };

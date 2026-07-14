@@ -3,7 +3,6 @@
 #include <granny.h>
 #include <windows.h>
 // DX11 runtime uses engine compatibility headers/types from EterLib.
-//#include <d3d9.h>
 
 #include "Eterlib/ReferenceObject.h"
 #include "Eterlib/Ref.h"
@@ -69,6 +68,7 @@ class CGrannyMaterial : public CReferenceObject
 		// MR-12: -- END OF -- Fix specular isolation issue
 
 		bool					IsTwoSided() const		{ return m_bTwoSideRender; }
+		void					SetTwoSided(bool bEnable)	{ m_bTwoSideRender = bEnable; }
 
 		
 	protected:

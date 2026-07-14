@@ -50,9 +50,7 @@ public:
 	bool TickNativeWorldRuntime(const char* c_szStage, int iTerrainTiles, int iActorCount, int iFXCount);
 	bool PresentNativeWorld(bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY);
 	bool PresentNativeWorldDryRun(bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY);
-	bool CaptureDX9FrameToVisibleBridge(void* pDX9Device);
 	bool PresentVisibleBridgeTexture(bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY);
-	bool PresentNativeVisibleBridge(void* pDX9Device, bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY);
 	void BindMainRenderTargets();
 	bool Present();
 	bool PresentTest();
@@ -128,7 +126,6 @@ public:
 private:
 	bool __ValidateNativeWorldRuntimePass();
 	bool __RunNativeWorldTerrainPrototype(int iTerrainTiles, int iActorCount, int iFXCount, bool bIncludeActorsAndFX);
-	bool __RunNativeWorldRuntimeStub(const char* c_szStage, int iTerrainTiles, int iActorCount, int iFXCount);
 	bool __CreateRenderTarget();
 	void __DestroyRenderTarget();
 	bool __CreateDepthStencil();

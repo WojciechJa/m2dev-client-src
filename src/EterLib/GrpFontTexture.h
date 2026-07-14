@@ -41,6 +41,8 @@ class CGraphicFontTexture : public CGraphicTexture
 
 		bool CheckTextureIndex(DWORD dwTexture);
 		void SelectTexture(DWORD dwTexture);
+		DWORD GetTexturePageCount() const;
+		ID3D11ShaderResourceView* GetTexturePageSRV(DWORD dwTexture) const;
 
 		bool UpdateTexture();
 

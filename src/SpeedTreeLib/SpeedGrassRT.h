@@ -91,7 +91,7 @@ public:
 
 		//////////////////////////////////////////////////////////////////////////
 		// Utility
-static	void				RotateAxisFromIdentity(D3DXMATRIX * pMat, const float & c_fAngle, const D3DXVECTOR3 & c_rv3Axis);
+static	void				RotateAxisFromIdentity(DirectX::SimpleMath::Matrix * pMat, const float & c_fAngle, const DirectX::SimpleMath::Vector3 & c_rv3Axis);
 
         ///////////////////////////////////////////////////////////////////////  
         //  Geometry

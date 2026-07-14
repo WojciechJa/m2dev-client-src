@@ -97,9 +97,9 @@ class CGraphicObjectInstance : public CGraphicCollisionObject
 		virtual void			OnRenderToShadowMap() = 0;
 		virtual void			OnRenderShadow() = 0;
 		virtual void			OnRenderPCBlocker() = 0;
-		virtual void			OnClear(){}
-		virtual void			OnUpdate(){}
-		virtual void			OnDeform(){}
+		virtual void			OnClear();
+		virtual void			OnUpdate();
+		virtual void			OnDeform();
 
 	protected:
 		D3DXVECTOR3				m_v3Position;

@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "EterLib/Camera.h"
 #include "EterLib/TextBar.h"
+#include "EterBase/Timer.h"
 
 #include <string>
 #include <utf8.h>
@@ -507,6 +508,24 @@ PyObject* grpRenderLine(PyObject* poSelf, PyObject* poArgs)
 	if (!PyTuple_GetInteger(poArgs, 3, &height))
 		return Py_BuildException();
 
+	// Zero-length line (point) is invalid; axis-aligned lines are legal.
+	const bool bDegenerate = (0 == width && 0 == height);
+
+	// M2-UI-CALLSITE-25: Call-site telemetry (throttled to 5s)
+	static DWORD s_dwLastLineLogTick = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+
+	if (bDegenerate || (dwNow - s_dwLastLineLogTick) >= 5000)
+	{
+		s_dwLastLineLogTick = dwNow;
+		TraceError("DX11_UI_CALLSITE_LINE widget=python_binding degenerate=%d x=%d y=%d width=%d height=%d",
+			bDegenerate ? 1 : 0, x, y, width, height);
+	}
+
+	// Keep a visible primitive for point-like accidental input.
+	if (0 == width && 0 == height)
+		width = 1;
+
 	CPythonGraphic::Instance().RenderLine2d((float) x, (float) y, (float) x+width, (float) y+height);
 	return Py_BuildNone();
 }
@@ -584,6 +603,27 @@ PyObject* grpRenderBar(PyObject* poSelf, PyObject* poArgs)
 	int height;
 	if (!PyTuple_GetInteger(poArgs, 3, &height))
 		return Py_BuildException();
+
+	// Zero-area rectangles are invalid; line-like bars (w=0 or h=0) are legal and expected.
+	const bool bDegenerate = (0 == width && 0 == height);
+
+	// M2-UI-CALLSITE-25: Call-site telemetry (throttled to 5s)
+	static DWORD s_dwLastBarLogTick = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+
+	if (bDegenerate || (dwNow - s_dwLastBarLogTick) >= 5000)
+	{
+		s_dwLastBarLogTick = dwNow;
+		TraceError("DX11_UI_CALLSITE_BAR widget=python_binding degenerate=%d x=%d y=%d width=%d height=%d",
+			bDegenerate ? 1 : 0, x, y, width, height);
+	}
+
+	// Keep line-like bars intact to preserve legacy visual parity.
+	if (0 == width && 0 == height)
+	{
+		width = 1;
+		height = 1;
+	}
 
 	CPythonGraphic::Instance().RenderBar2d((float) x, (float) y, (float) x+width, (float) y+height);
 	return Py_BuildNone();
@@ -674,6 +714,27 @@ PyObject * grpRenderGradationBar(PyObject* poSelf, PyObject* poArgs)
 	int iEndColor;
 	if (!PyTuple_GetInteger(poArgs, 5, &iEndColor))
 		return Py_BadArgument();
+
+	// Zero-area gradbar is invalid; axis-aligned line gradbars are used by legacy UI.
+	const bool bDegenerate = (0 == width && 0 == height);
+
+	// M2-UI-CALLSITE-25: Call-site telemetry (throttled to 5s)
+	static DWORD s_dwLastGradbarLogTick = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+
+	if (bDegenerate || (dwNow - s_dwLastGradbarLogTick) >= 5000)
+	{
+		s_dwLastGradbarLogTick = dwNow;
+		TraceError("DX11_UI_CALLSITE_GRADBAR widget=python_binding degenerate=%d x=%d y=%d width=%d height=%d",
+			bDegenerate ? 1 : 0, x, y, width, height);
+	}
+
+	// Preserve line-like gradbars (width=0 xor height=0).
+	if (0 == width && 0 == height)
+	{
+		width = 1;
+		height = 1;
+	}
 
 	CPythonGraphic::Instance().RenderGradationBar2d((float)x, (float)y, (float)x+width, (float)y+height, iStartColor, iEndColor);
 	return Py_BuildNone();
@@ -938,13 +999,13 @@ PyObject * grpSetOmniLight(PyObject * poSelf, PyObject * poArgs)
 
 PyObject * grpGetCameraPosition(PyObject * poSelf, PyObject * poArgs)
 {
-	D3DXVECTOR3 v3Eye = CCameraManager::Instance().GetCurrentCamera()->GetEye();
+	DirectX::SimpleMath::Vector3 v3Eye = CCameraManager::Instance().GetCurrentCamera()->GetEye();
 	return Py_BuildValue("fff", v3Eye.x, v3Eye.y, v3Eye.z);
 }
 
 PyObject * grpGetTargetPosition(PyObject * poSelf, PyObject * poArgs)
 {
-	D3DXVECTOR3 v3Target = CCameraManager::Instance().GetCurrentCamera()->GetTarget();
+	DirectX::SimpleMath::Vector3 v3Target = CCameraManager::Instance().GetCurrentCamera()->GetTarget();
 	return Py_BuildValue("fff", v3Target.x, v3Target.y, v3Target.z);
 }
 

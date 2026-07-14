@@ -58,11 +58,6 @@ void CGraphicDevice::__WarningMessage(HWND hWnd, UINT uiMsg)
 	MessageBoxA(hWnd, it->second.c_str(), "Graphic Device Warning", MB_ICONWARNING | MB_OK);
 }
 
-void CGraphicDevice::__UpdatePresentationInterval(D3DPRESENT_PARAMETERS& rkD3DPP)
-{
-	rkD3DPP.PresentationInterval = m_isVSyncEnabled ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-}
-
 void CGraphicDevice::MoveWebBrowserRect(const RECT&)
 {
 }
@@ -88,26 +83,6 @@ bool CGraphicDevice::ResizeBackBuffer(UINT uWidth, UINT uHeight)
 		ms_iHeight = static_cast<int>(uHeight);
 	}
 	return bOk;
-}
-
-LPDIRECT3DVERTEXDECLARATION9 CGraphicDevice::CreatePTStreamVertexShader()
-{
-	return nullptr;
-}
-
-LPDIRECT3DVERTEXDECLARATION9 CGraphicDevice::CreatePNTStreamVertexShader()
-{
-	return nullptr;
-}
-
-LPDIRECT3DVERTEXDECLARATION9 CGraphicDevice::CreatePNT2StreamVertexShader()
-{
-	return nullptr;
-}
-
-LPDIRECT3DVERTEXDECLARATION9 CGraphicDevice::CreateDoublePNTStreamVertexShader()
-{
-	return nullptr;
 }
 
 CGraphicDevice::EDeviceState CGraphicDevice::GetDeviceState()

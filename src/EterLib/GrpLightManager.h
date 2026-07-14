@@ -3,6 +3,7 @@
 #include "EterBase/Singleton.h"
 
 #include "GrpBase.h"
+#include "LightDesc.h"
 #include "Util.h"
 #include "Pool.h"
 
@@ -39,22 +40,25 @@ class CLight : public CGraphicBase, public CLightBase
 		
 		void		Update();
 
-		void		SetParameter(TLightID id, const D3DLIGHT9 & c_rLight);
+		void		SetParameter(TLightID id, ELightType eLightType, const SLightDesc& c_rLight);
 
 		void		SetDistance(float fDistance);
 		float		GetDistance() const { return m_fDistance;	}
 
 		TLightID	GetLightID()	{ return m_LightID;		}
+		ELightType	GetLightType() const { return m_eLightType; }
 
 		BOOL		isEdited()		{ return m_isEdited;	}
 		void		SetDeviceLight(BOOL bActive);
+		void		SetDeviceLightSlot(DWORD dwSlot, BOOL bActive);
 
 		void		SetDiffuseColor(float fr, float fg, float fb, float fa = 1.0f);
 		void		SetAmbientColor(float fr, float fg, float fb, float fa = 1.0f);
 		void		SetRange(float fRange);
 		void		SetPosition(float fx, float fy, float fz);
+		void		SetDirection(float fx, float fy, float fz);
 
-		const D3DVECTOR & GetPosition() const;
+		const GrpVector & GetPosition() const;
 
 		void		BlendDiffuseColor(const D3DXCOLOR & c_rColor, float fBlendTime, float fDelayTime = 0.0f);
 		void		BlendAmbientColor(const D3DXCOLOR & c_rColor, float fBlendTime, float fDelayTime = 0.0f);
@@ -63,9 +67,11 @@ class CLight : public CGraphicBase, public CLightBase
 	private:
 		TLightID		m_LightID;		// Light ID. equal to D3D light index
 
-		D3DLIGHT9		m_d3dLight;
+		ELightType		m_eLightType;
+		SLightDesc		m_kLightDesc;
 		BOOL			m_isEdited;
 		float			m_fDistance;
+		DWORD			m_dwActiveSlot;
 
 		TTransitorColor	m_DiffuseColorTransitor;
 		TTransitorColor	m_AmbientColorTransitor;
@@ -75,6 +81,32 @@ class CLight : public CGraphicBase, public CLightBase
 class CLightManager : public CGraphicBase, public CLightBase, public CSingleton<CLightManager>
 {
 	public:
+		struct SLightTelemetry
+		{
+			DWORD dwRegisteredStaticCount;
+			DWORD dwRegisteredDynamicCount;
+			DWORD dwActiveStaticCount;
+			DWORD dwActiveDynamicCount;
+			DWORD dwRequestedActiveCount;
+			DWORD dwBoundActiveCount;
+			DWORD dwClippedBySlotCount;
+			DWORD dwSlotCapacity;
+			DWORD dwSkipIndex;
+
+			SLightTelemetry()
+				: dwRegisteredStaticCount(0u)
+				, dwRegisteredDynamicCount(0u)
+				, dwActiveStaticCount(0u)
+				, dwActiveDynamicCount(0u)
+				, dwRequestedActiveCount(0u)
+				, dwBoundActiveCount(0u)
+				, dwClippedBySlotCount(0u)
+				, dwSlotCapacity(0u)
+				, dwSkipIndex(0u)
+			{
+			}
+		};
+
 		enum
 		{
 			LIGHT_LIMIT_DEFAULT = 3,
@@ -100,7 +132,7 @@ class CLightManager : public CGraphicBase, public CLightBase, public CSingleton<
 		void		RestoreLight();
 
 		/////
-		void		RegisterLight(ELightType LightType, TLightID * poutLightID, D3DLIGHT9 & LightData);
+		void		RegisterLight(ELightType LightType, TLightID * poutLightID, const SLightDesc& LightData);
 		CLight *	GetLight(TLightID LightID);
 		void		DeleteLight(TLightID LightID);
 		/////
@@ -108,6 +140,7 @@ class CLightManager : public CGraphicBase, public CLightBase, public CSingleton<
 		void		SetCenterPosition(const D3DXVECTOR3 & c_rv3Position);
 		void		SetLimitLightCount(DWORD dwLightCount);
 		void		SetSkipIndex(DWORD dwSkipIndex);
+		const SLightTelemetry& GetTelemetry() const { return m_kTelemetry; }
 
 	protected:
 		TLightIDDeque			m_NonUsingLightIDDeque;
@@ -118,6 +151,7 @@ class CLightManager : public CGraphicBase, public CLightBase, public CSingleton<
 		D3DXVECTOR3				m_v3CenterPosition;
 		DWORD					m_dwLimitLightCount;
 		DWORD					m_dwSkipIndex;
+		SLightTelemetry			m_kTelemetry;
 
 	protected:
 		TLightID				NewLightID();

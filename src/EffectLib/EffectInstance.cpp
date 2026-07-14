@@ -2,9 +2,10 @@
 #include "EffectInstance.h"
 #include "ParticleSystemInstance.h"
 #include "SimpleLightInstance.h"
+#include "EffectManager.h"
 
 #include "EterBase/Stl.h"
-#include "EterLib/StateManager.h"
+#include "EterLib/GrpDeviceDX11.h"
 #include "AudioLib/SoundEngine.h"
 
 CDynamicPool<CEffectInstance>	CEffectInstance::ms_kPool;
@@ -102,41 +103,101 @@ void CEffectInstance::OnUpdate()
 
 void CEffectInstance::OnRender()
 {
-	STATEMANAGER.SetFVF(D3DFVF_XYZ | D3DFVF_TEX1);
+	// Use DX11 effect path whenever DX11 runtime/resources are ready.
+	// Native-present state must not gate submit counters, otherwise world mask can stall.
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	CEffectManager& rkEffectManager = CEffectManager::Instance();
+	if (rkEffectManager.EnsureDX11EffectResourcesReady() &&
+		pDX11Device &&
+		pDX11Device->IsValid())
+	{
+		const uint32_t uSubmittedBefore = rkEffectManager.GetDX11SubmittedEffectCount();
+		std::for_each(m_ParticleInstanceVector.begin(), m_ParticleInstanceVector.end(), std::mem_fn(&CEffectElementBaseInstance::Render));
+		std::for_each(m_MeshInstanceVector.begin(), m_MeshInstanceVector.end(), std::mem_fn(&CEffectElementBaseInstance::Render));
+		const uint32_t uSubmittedAfter = rkEffectManager.GetDX11SubmittedEffectCount();
+		if (uSubmittedAfter > uSubmittedBefore)
+			++ms_iRenderingEffectCount;
+		return;
+	}
 
-	STATEMANAGER.SaveSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_NONE);
-	STATEMANAGER.SaveSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_NONE);
+	if (pDX11Device && pDX11Device->IsValid())
+	{
+		static DWORD s_dwLastStrictSkipLogMS = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwLastStrictSkipLogMS || (dwNow - s_dwLastStrictSkipLogMS) >= 2000u)
+		{
+			s_dwLastStrictSkipLogMS = dwNow;
+			TraceError("DX11_EFFECT_SKIP reason=dx11_resources_not_ready");
+		}
+		return;
+	}
 
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHATESTENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-	STATEMANAGER.SaveRenderState(D3DRS_ZWRITEENABLE, FALSE);
-	/////
+	// Full-DX11 migration policy: no DX9 fallback path in effect instance renderer.
+	static DWORD s_dwLastRuntimeInactiveLogMS = 0u;
+	const DWORD dwNowRuntime = ELTimer_GetMSec();
+	if (0u == s_dwLastRuntimeInactiveLogMS || (dwNowRuntime - s_dwLastRuntimeInactiveLogMS) >= 3000u)
+	{
+		s_dwLastRuntimeInactiveLogMS = dwNowRuntime;
+		TraceError("DX11_EFFECT_SKIP reason=dx11_runtime_inactive");
+	}
+	return;
+}
 
-    STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TFACTOR);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TFACTOR);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_MODULATE);
+void CEffectInstance::OnBlendRender()
+{
+	// Effect blend submission follows the same DX11 runtime path as regular effect rendering.
+	OnRender();
+}
 
-	std::for_each(m_ParticleInstanceVector.begin(),m_ParticleInstanceVector.end(),std::mem_fn(&CEffectElementBaseInstance::Render));
-	std::for_each(m_MeshInstanceVector.begin(),m_MeshInstanceVector.end(),std::mem_fn(&CEffectElementBaseInstance::Render));
+void CEffectInstance::OnRenderToShadowMap()
+{
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return;
 
-	/////
-	STATEMANAGER.RestoreSamplerState(0, D3DSAMP_MINFILTER);
-	STATEMANAGER.RestoreSamplerState(0, D3DSAMP_MAGFILTER);
+	CEffectManager& rkEffectManager = CEffectManager::Instance();
+	if (!rkEffectManager.EnsureDX11EffectResourcesReady())
+		return;
 
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHATESTENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZWRITEENABLE);
+	// Shadow/occluder-compatible subset: mesh effects only.
+	std::for_each(m_MeshInstanceVector.begin(), m_MeshInstanceVector.end(), std::mem_fn(&CEffectElementBaseInstance::Render));
+}
 
-	++ms_iRenderingEffectCount;
+void CEffectInstance::OnRenderShadow()
+{
+	OnRenderToShadowMap();
+}
+
+void CEffectInstance::OnRenderPCBlocker()
+{
+	// Keep PC blocker pass consistent with shadow subset for mesh-based effects.
+	OnRenderToShadowMap();
+}
+
+void CEffectInstance::OnUpdateCollisionData(const CStaticCollisionDataVector * pscdVector)
+{
+	if (!pscdVector)
+		return;
+
+	const D3DXMATRIX& c_rMatrix = GetTransform();
+	for (CStaticCollisionDataVector::const_iterator it = pscdVector->begin(); it != pscdVector->end(); ++it)
+		AddCollision(&(*it), &c_rMatrix);
+}
+
+void CEffectInstance::OnUpdateHeighInstance(CAttributeInstance * pAttributeInstance)
+{
+	if (!pAttributeInstance)
+		return;
+
+	SetHeightInstance(pAttributeInstance);
+}
+
+bool CEffectInstance::OnGetObjectHeight(float fX, float fY, float * pfHeight)
+{
+	if (!m_pHeightAttributeInstance || !pfHeight)
+		return false;
+
+	return m_pHeightAttributeInstance->GetHeight(fX, fY, pfHeight) != 0;
 }
 
 void CEffectInstance::SetGlobalMatrix(const D3DXMATRIX & c_rmatGlobal)
@@ -194,6 +255,8 @@ void CEffectInstance::__SetMeshData(CEffectMeshScript * pMesh)
 	CEffectMeshInstance * pMeshInstance = CEffectMeshInstance::New();
 	pMeshInstance->SetDataPointer(pMesh);
 	pMeshInstance->SetLocalMatrixPointer(&m_matGlobal);
+	pMeshInstance->SetDX11RenderClass(CEffectManager::Instance().GetEffectRenderClass(m_pkEftData));
+	pMeshInstance->SetOwnerEffectCRC(CEffectManager::Instance().GetEffectDataCRC(m_pkEftData));
 
 	m_MeshInstanceVector.push_back(pMeshInstance);
 }

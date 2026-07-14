@@ -1,8 +1,8 @@
 #pragma once
-#include <d3dx9math.h>
+#include "EterLib/DirectXMathHelpers.h"
 
 #define Clamp(x, min, max)  x = (x<min  ? min : x<max ? x : max);
-#define GRAVITY			D3DXVECTOR3(0.0f, 0.0f, -9.8f)
+#define GRAVITY			DirectX::SimpleMath::Vector3(0.0f, 0.0f, -9.8f)
 
 #define	MAX_FRAME		20
 #define MAX_TEXTURE		20
@@ -12,9 +12,7 @@ typedef	struct	_FVF_POINT
 	float	x, y, z;
 } FVF_POINT;
 
-#ifndef D3DFVF_POINT
-#define	D3DFVF_POINT (D3DFVF_XYZ)
-#endif
+constexpr DWORD kEffectVertexLayoutPoint = 0x01u;
 
 
 typedef	struct	_FVF_PT
@@ -23,9 +21,7 @@ typedef	struct	_FVF_PT
 	float	tu, tv;
 } FVF_PT;
 
-#ifndef D3DFVF_PT
-#define	D3DFVF_PT (D3DFVF_XYZ|D3DFVF_TEX1)
-#endif
+constexpr DWORD kEffectVertexLayoutPointTex = 0x02u;
 
 typedef	struct	_FVF_PDT
 {
@@ -34,9 +30,7 @@ typedef	struct	_FVF_PDT
 	float	tu, tv;
 } FVF_PDT;
 
-#ifndef D3DFVF_PDT
-#define	D3DFVF_PDT (D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1)
-#endif
+constexpr DWORD kEffectVertexLayoutPointDiffuseTex = 0x03u;
 
 inline FVF_PDT _FVF_PDT(float x, float y, float z, DWORD dif, float u, float v)
 {
@@ -116,11 +110,11 @@ bool operator<(const float& lhs, const CTimeEvent<T>& rhs)
 	return lhs < rhs.m_fTime;
 }
 
-typedef struct SEffectPosition : public CTimeEvent<D3DXVECTOR3>
+typedef struct SEffectPosition : public CTimeEvent<DirectX::SimpleMath::Vector3>
 {
 	// For Bezier Curve
 	int m_iMovingType;
-	D3DXVECTOR3 m_vecControlPoint;
+	DirectX::SimpleMath::Vector3 m_vecControlPoint;
 } TEffectPosition;
 
 typedef CTimeEvent<char>						TTimeEventTypeCharacter;
@@ -128,9 +122,9 @@ typedef CTimeEvent<short>						TTimeEventTypeShort;
 typedef CTimeEvent<float>						TTimeEventTypeFloat;
 typedef CTimeEvent<WORD>						TTimeEventTypeWord;
 typedef CTimeEvent<DWORD>						TTimeEventTypeDoubleWord;
-typedef CTimeEvent<D3DXCOLOR>					TTimeEventTypeColor;
-typedef CTimeEvent<D3DXVECTOR2>					TTimeEventTypeVector2;
-typedef CTimeEvent<D3DXVECTOR3>					TTimeEventTypeVector3;
+typedef CTimeEvent<DirectX::SimpleMath::Color>					TTimeEventTypeColor;
+typedef CTimeEvent<DirectX::SimpleMath::Vector2>					TTimeEventTypeVector2;
+typedef CTimeEvent<DirectX::SimpleMath::Vector3>					TTimeEventTypeVector3;
 
 typedef std::vector<float>						TTimeEventTable;
 typedef std::vector<TEffectPosition>			TTimeEventTablePosition;
@@ -155,7 +149,7 @@ T BlendSingleValue(float time,
 	return static_cast<T>(low.m_Value + perc * valueDiff);
 }
 
-inline D3DXVECTOR3 BlendSingleValue(float time, const TEffectPosition& low, const TEffectPosition& high)
+inline DirectX::SimpleMath::Vector3 BlendSingleValue(float time, const TEffectPosition& low, const TEffectPosition& high)
 {
 	const float timeDiff = high.m_fTime - low.m_fTime;
 	const float perc = (time - low.m_fTime) / timeDiff;
@@ -173,7 +167,7 @@ inline D3DXVECTOR3 BlendSingleValue(float time, const TEffectPosition& low, cons
 	}
 
 	// Unknown moving type - impossible(?)
-	return D3DXVECTOR3();
+	return DirectX::SimpleMath::Vector3();
 }
 
 template <typename T>
@@ -227,3 +221,4 @@ void InsertItemTimeEvent(std::vector<CTimeEvent<T> >* pTable, float fTime, T fVa
 
 	pTable->insert(itor, TimeEvent);
 }
+

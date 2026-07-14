@@ -30,9 +30,9 @@ void CParticleProperty::Clear()
 	m_bAttachFlag = FALSE;
 	m_bStretchFlag = FALSE;
 
-	m_bySrcBlendType = D3DBLEND_SRCALPHA;
-	m_byDestBlendType = D3DBLEND_ONE;
-	m_byColorOperationType = D3DTOP_MODULATE; 
+	m_bySrcBlendType = GRP_BLEND_SRCALPHA;
+	m_byDestBlendType = GRP_BLEND_ONE;
+	m_byColorOperationType = GRP_TOP_MODULATE;
 
 	m_byBillboardType = BILLBOARD_TYPE_NONE;
 

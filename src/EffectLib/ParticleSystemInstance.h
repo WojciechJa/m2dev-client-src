@@ -4,7 +4,6 @@
 #include "ParticleProperty.h"
 
 #include "Eterlib/GrpScreen.h"
-#include "Eterlib/StateManager.h"
 #include "EterLib/GrpImageInstance.h"
 #include "EmitterProperty.h"
 
@@ -20,25 +19,6 @@ class CParticleSystemInstance : public CEffectElementBaseInstance
 
 		static CDynamicPool<CParticleSystemInstance>	ms_kPool;
 		static float								ms_fGlobalEmissionScale;
-
-	public:
-		template <typename T>
-		inline void ForEachParticleRendering(T & FunObj)
-		{
-			DWORD dwFrameIndex;
-			for(dwFrameIndex=0; dwFrameIndex<m_kVct_pkImgInst.size(); dwFrameIndex++)
-			{
-				STATEMANAGER.SetTexture(0, m_kVct_pkImgInst[dwFrameIndex]->GetTextureReference().GetD3DTexture());
-				TParticleInstanceList::iterator itor = m_ParticleInstanceListVector[dwFrameIndex].begin();
-				for (; itor != m_ParticleInstanceListVector[dwFrameIndex].end(); ++itor)
-				{
-					if (!InFrustum(*itor))
-						continue;
-
-					FunObj(*itor);
-				}
-			}
-		}
 
 		CParticleSystemInstance();
 		virtual ~CParticleSystemInstance();

@@ -2,35 +2,6 @@
 #include "Model.h"
 #include "Mesh.h"
 
-// M3-EGRN-27: Throttled telemetry for legacy buffer accessor skips in DX11 strict mode
-namespace {
-	inline void LogLegacyBufferAccessorSkip(const char* c_szBufferType)
-	{
-		static DWORD s_dwLastHeartbeatTick = 0;
-		static int s_iVBSkipsSinceHeartbeat = 0;
-		static int s_iIBSkipsSinceHeartbeat = 0;
-
-		if (0 == strcmp(c_szBufferType, "VB"))
-			++s_iVBSkipsSinceHeartbeat;
-		else if (0 == strcmp(c_szBufferType, "IB"))
-			++s_iIBSkipsSinceHeartbeat;
-
-		// Throttled heartbeat telemetry (30s cadence)
-		const DWORD dwNow = GetTickCount();
-		if (0 == s_dwLastHeartbeatTick || dwNow - s_dwLastHeartbeatTick >= 30000u)
-		{
-			s_dwLastHeartbeatTick = dwNow;
-			if (s_iVBSkipsSinceHeartbeat > 0 || s_iIBSkipsSinceHeartbeat > 0)
-			{
-				TraceError("DX11_EGRN_LEGACY_BUFFER_SKIP_HEARTBEAT vb_skips=%d ib_skips=%d interval_ms=30000",
-					s_iVBSkipsSinceHeartbeat, s_iIBSkipsSinceHeartbeat);
-				s_iVBSkipsSinceHeartbeat = 0;
-				s_iIBSkipsSinceHeartbeat = 0;
-			}
-		}
-	}
-}
-
 // DX11 Migration: Vertex layout metadata helper functions
 SVertexLayoutMetadata SVertexLayoutMetadata::CreateFromFVF(DWORD dwFvF)
 {
@@ -126,44 +97,21 @@ granny_model* CGrannyModel::GetGrannyModelPointer()
 	return m_pgrnModel;
 }
 
-ID3D11Buffer* CGrannyModel::GetD3DIndexBuffer() const
+ID3D11Buffer* CGrannyModel::GetIndexBuffer() const
 {
-#if defined(DX11_STRICT_ONLY)
-	static bool s_bLoggedGetIndexBufferSkip = false;
-	if (!s_bLoggedGetIndexBufferSkip)
-	{
-		s_bLoggedGetIndexBufferSkip = true;
-		TraceError("DX11_EGRN_LEGACY_IB_SKIP function=GetD3DIndexBuffer reason=strict_mode_no_dx9_pointer");
-	}
-	LogLegacyBufferAccessorSkip("IB");
-	return nullptr;
-#else
-	return m_idxBuf.GetD3DIndexBuffer();
-#endif
+	return m_idxBuf.GetIndexBuffer();
 }
 
-ID3D11Buffer* CGrannyModel::GetPNTD3DVertexBuffer() const
+ID3D11Buffer* CGrannyModel::GetRigidVertexBuffer() const
 {
-#if defined(DX11_STRICT_ONLY)
-	static bool s_bLoggedGetVertexBufferSkip = false;
-	if (!s_bLoggedGetVertexBufferSkip)
-	{
-		s_bLoggedGetVertexBufferSkip = true;
-		TraceError("DX11_EGRN_LEGACY_VB_SKIP function=GetPNTD3DVertexBuffer reason=strict_mode_no_dx9_pointer");
-	}
-	LogLegacyBufferAccessorSkip("VB");
-	return nullptr;
-#else
-	return m_pntVtxBuf.GetD3DVertexBuffer();
-	#endif
+	return m_pntVtxBuf.GetVertexBuffer();
 }
 
-#if defined(DX11_STRICT_ONLY)
-// DX11 Model Sync M3-EGRN18.A: Lock CPU shadow buffers in strict mode
+// DX11 Model Sync M3-EGRN18.A: Lock CPU shadow buffers in strict mode.
 bool CGrannyModel::LockVertices(void** indicies, void** vertices) const
 {
-	// CGraphicIndexBuffer::Lock() and CGraphicVertexBuffer::Lock() automatically
-	// use CPU shadow buffers when ms_lpd3dDevice is NULL (strict mode).
+	// CGraphicIndexBuffer::Lock() and CGraphicVertexBuffer::Lock() operate on
+	// CPU shadow buffers in strict DX11 mode.
 	// Important: some Granny models are fully deformable (no rigid VB), so lock only required sources.
 	if (indicies)
 		*indicies = nullptr;
@@ -191,49 +139,13 @@ bool CGrannyModel::LockVertices(void** indicies, void** vertices) const
 
 void CGrannyModel::UnlockVertices() const
 {
-	// CGraphicIndexBuffer::Unlock() and CGraphicVertexBuffer::Unlock() automatically
-	// use CPU shadow buffers when ms_lpd3dDevice is NULL (strict mode)
+	// CGraphicIndexBuffer::Unlock() and CGraphicVertexBuffer::Unlock() sync
+	// CPU shadow buffers in strict DX11 mode.
 	if (m_idxCount > 0)
 		m_idxBuf.Unlock();
 	if (m_rigidVtxCount > 0)
 		m_pntVtxBuf.Unlock();
 }
-#else
-// DX9 fallback (hybrid mode only)
-bool CGrannyModel::LockVertices(void** indicies, void** vertices) const
-{
-	if (indicies)
-		*indicies = nullptr;
-	if (vertices)
-		*vertices = nullptr;
-
-	const bool bNeedIndices = (m_idxCount > 0) && (nullptr != indicies);
-	const bool bNeedRigidVertices = (m_rigidVtxCount > 0) && (nullptr != vertices);
-
-	if (!bNeedIndices && !bNeedRigidVertices)
-		return true;
-
-	if (bNeedIndices && !m_idxBuf.Lock(indicies))
-		return false;
-
-	if (bNeedRigidVertices && !m_pntVtxBuf.Lock(vertices))
-	{
-		if (bNeedIndices)
-			m_idxBuf.Unlock();
-		return false;
-	}
-
-	return true;
-}
-
-void CGrannyModel::UnlockVertices() const
-{
-	if (m_idxCount > 0)
-		m_idxBuf.Unlock();
-	if (m_rigidVtxCount > 0)
-		m_pntVtxBuf.Unlock();
-}
-#endif
 
 bool CGrannyModel::LoadPNTVertices()
 {
@@ -242,11 +154,10 @@ bool CGrannyModel::LoadPNTVertices()
 
 	assert(m_meshs != NULL);
 
-#if defined(DX11_STRICT_ONLY)
 	// DX11 Model Sync M3-EGRN18.A: Populate CPU shadow buffer in strict mode
-	// CGraphicVertexBuffer::CreateWithStride() allocates CPU shadow when ms_lpd3dDevice is NULL.
+	// CGraphicVertexBuffer::CreateWithStride() allocates CPU shadow in strict DX11 mode.
 	// Without Create(), Lock() returns false and DX11 upload path sees source=none.
-	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
+	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, GRP_USAGE_WRITEONLY, GRP_POOL_DEFAULT))
 		return false;
 
 	void* vertices;
@@ -261,24 +172,6 @@ bool CGrannyModel::LoadPNTVertices()
 
 	m_pntVtxBuf.Unlock();
 	return true;
-#else
-	// DX9 fallback (hybrid mode only)
-	if (!m_pntVtxBuf.Create(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
-		return false;
-
-	void* vertices;
-	if (!m_pntVtxBuf.Lock(&vertices))
-		return false;
-
-	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
-	{
-		CGrannyMesh& rMesh = m_meshs[m];
-		rMesh.LoadPNTVertices(vertices);
-	}
-
-	m_pntVtxBuf.Unlock();
-	return true;
-#endif
 }
 
 bool CGrannyModel::LoadIndices()
@@ -287,11 +180,10 @@ bool CGrannyModel::LoadIndices()
 	if (m_idxCount <= 0)
 		return true;
 
-#if defined(DX11_STRICT_ONLY)
 	// DX11 Model Sync M3-EGRN18.A: Populate CPU shadow buffer in strict mode
-	// CGraphicIndexBuffer::Create() allocates CPU shadow when ms_lpd3dDevice is NULL.
+	// CGraphicIndexBuffer::Create() allocates CPU shadow in strict DX11 mode.
 	// Without Create(), Lock() returns false and DX11 upload path sees source=none.
-	if (!m_idxBuf.Create(m_idxCount, D3DFMT_INDEX16))
+	if (!m_idxBuf.Create(m_idxCount, GRP_FMT_INDEX16))
 		return false;
 
 	void * indices;
@@ -307,25 +199,6 @@ bool CGrannyModel::LoadIndices()
 
 	m_idxBuf.Unlock();
 	return true;
-#else
-	// DX9 fallback (hybrid mode only)
-	if (!m_idxBuf.Create(m_idxCount, D3DFMT_INDEX16))
-		return false;
-
-	void * indices;
-
-	if (!m_idxBuf.Lock((void**)&indices))
-		return false;
-
-	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
-	{
-		CGrannyMesh& rMesh = m_meshs[m];
-		rMesh.LoadIndices(indices);
-	}
-
-	m_idxBuf.Unlock();
-	return true;
-#endif
 }
 
 bool CGrannyModel::LoadMeshs()
@@ -546,11 +419,10 @@ bool CGrannyModel::__LoadVertices()
 
 	assert(m_meshs != NULL);
 
-#if defined(DX11_STRICT_ONLY)
 	// DX11 Model Sync M3-EGRN18.A: Populate CPU shadow buffer in strict mode
-	// CGraphicVertexBuffer::CreateWithStride() allocates CPU shadow when ms_lpd3dDevice is NULL.
+	// CGraphicVertexBuffer::CreateWithStride() allocates CPU shadow in strict DX11 mode.
 	// Without Create(), Lock() returns false and DX11 upload path sees source=none.
-	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
+	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, GRP_USAGE_WRITEONLY, GRP_POOL_DEFAULT))
 		return false;
 
 	void* vertices;
@@ -565,27 +437,6 @@ bool CGrannyModel::__LoadVertices()
 
 	m_pntVtxBuf.Unlock();
 	return true;
-#else
-	// DX9 fallback (hybrid mode only)
-//	assert((m_kVertexLayout.dwVertexStride == 32) || (m_kVertexLayout.dwVertexStride == 40));
-
-//	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, 32, D3DUSAGE_WRITEONLY, D3DPOOL_MANAGED))
-	if (!m_pntVtxBuf.CreateWithStride(m_rigidVtxCount, m_kVertexLayout.dwVertexStride, D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT))
-		return false;
-
-	void* vertices;
-	if (!m_pntVtxBuf.Lock(&vertices))
-		return false;
-
-	for (int m = 0; m < m_pgrnModel->MeshBindingCount; ++m)
-	{
-		CGrannyMesh& rMesh = m_meshs[m];
-		rMesh.NEW_LoadVertices(vertices);
-	}
-
-	m_pntVtxBuf.Unlock();
-	return true;
-#endif
 }
 
 void CGrannyModel::Initialize()

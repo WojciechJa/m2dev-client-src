@@ -1,5 +1,8 @@
 #pragma once
 
+
+#include "DIKCompat.h"
+
 #ifndef SAFE_RELEASE
 #define SAFE_RELEASE(p)		{ if (p) { (p)->Release(); (p)=NULL; } }
 #endif
@@ -13,7 +16,8 @@ class CInputDevice
 		HRESULT CreateDevice(HWND hWnd);
 
 	protected:
-		static LPDIRECTINPUT8 ms_lpDI;
+		static void* ms_lpDI;
+		static HWND ms_hWnd;
 };
 
 class CInputKeyboard : public CInputDevice
@@ -35,7 +39,7 @@ class CInputKeyboard : public CInputDevice
 		virtual void	OnKeyUp(int iIndex) = 0;
 
 	protected:
-		static LPDIRECTINPUTDEVICE8	ms_lpKeyboard;
+		static void* ms_lpKeyboard;
 		static bool					ms_bPressedKey[256];
 		static char					ms_diks[256];
 };

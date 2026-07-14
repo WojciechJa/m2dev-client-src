@@ -68,6 +68,21 @@ class CDynamicPool
 			}
 			m_Free = m_Data;
 		}
+
+		bool Contains(const T* p)
+		{
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
+			return m_Data.end() != std::find(m_Data.begin(), m_Data.end(), const_cast<T*>(p));
+		}
+
+		bool IsAllocated(const T* p)
+		{
+			std::lock_guard<std::recursive_mutex> lock(m_mutex);
+			T* const ptr = const_cast<T*>(p);
+			if (m_Data.end() == std::find(m_Data.begin(), m_Data.end(), ptr))
+				return false;
+			return m_Free.end() == std::find(m_Free.begin(), m_Free.end(), ptr);
+		}
 		
 		size_t GetCapacity()
 		{

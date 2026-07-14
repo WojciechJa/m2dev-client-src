@@ -427,7 +427,7 @@ void CGraphicImageTexture::Initialize()
 
 	m_stFileName = "";
 
-	m_d3dFmt=D3DFMT_UNKNOWN;
+	m_formatType=GRP_FMT_UNKNOWN;
 	m_dwFilter=0;
 	m_pDX11Texture = nullptr;
 	m_pDX11TextureSRV = nullptr;
@@ -467,7 +467,15 @@ bool CGraphicImageTexture::CreateDeviceObjects()
 		}
 		else
 		{
-			ID3D11ShaderResourceView* pSRV = CGraphicTextureDX11::LoadTexture(pDX11Device->GetDevice(), m_stFileName.c_str(), true);
+			// M3-TEXTURE-ASYNC-10: Load via DX11 async helper with PRIORITY_CRITICAL for UI
+			// UI textures use highest priority to minimize fallback texture display time
+			// Returns cached texture if available, or white fallback while loading asynchronously
+			ID3D11ShaderResourceView* pSRV = CGraphicTextureDX11::LoadTextureAsync(
+				pDX11Device->GetDevice(),
+				m_stFileName.c_str(),
+				CGraphicTextureDX11::PRIORITY_CRITICAL,
+				nullptr,  // No callback needed - UI will update when texture is cached
+				true);    // Enable cache
 			bDX11CreateSuccess = (pSRV && BindDX11LoadedTexture(pSRV));
 		}
 
@@ -492,13 +500,13 @@ bool CGraphicImageTexture::CreateDeviceObjects()
 	return false;
 }
 
-bool CGraphicImageTexture::Create(UINT width, UINT height, D3DFORMAT d3dFmt, DWORD dwFilter)
+bool CGraphicImageTexture::Create(UINT width, UINT height, GrpFormatType formatType, DWORD dwFilter)
 {
 	Destroy();
 
 	m_width = width;
 	m_height = height;
-	m_d3dFmt = d3dFmt;
+	m_formatType = formatType;
 	m_dwFilter = dwFilter;
 
 	return CreateDeviceObjects();
@@ -664,7 +672,7 @@ bool CGraphicImageTexture::CreateFromSTB(UINT bufSize, const void* c_pvBuf)
 	decodedImage.pixels.assign(data, data + static_cast<size_t>(width) * static_cast<size_t>(height) * 4u);
 	stbi_image_free(data);
 
-	return CreateFromDecodedData(decodedImage, m_d3dFmt, m_dwFilter);
+	return CreateFromDecodedData(decodedImage, m_formatType, m_dwFilter);
 }
 
 bool CGraphicImageTexture::CreateFromTGA(UINT bufSize, const void* c_pvBuf)
@@ -694,7 +702,7 @@ bool CGraphicImageTexture::CreateFromTGA(UINT bufSize, const void* c_pvBuf)
 	decodedImage.mipLevels = 1;
 	decodedImage.pixels.swap(decodedTGA.pixels);
 
-	const bool ok = CreateFromDecodedData(decodedImage, m_d3dFmt, m_dwFilter);
+	const bool ok = CreateFromDecodedData(decodedImage, m_formatType, m_dwFilter);
 	if (ok)
 	{
 		if (ShouldLogTGAForFile(m_stFileName) && ConsumeOneShotKey(s_tgaOkFiles, ToLowerASCII(m_stFileName)))
@@ -754,7 +762,7 @@ bool CGraphicImageTexture::CreateFromSOIL2(UINT bufSize, const void* c_pvBuf)
 	memcpy(decodedImage.pixels.data(), pPixels, decodedImage.pixels.size());
 	soil.freeImageData(pPixels);
 
-	const bool ok = CreateFromDecodedData(decodedImage, m_d3dFmt, m_dwFilter);
+	const bool ok = CreateFromDecodedData(decodedImage, m_formatType, m_dwFilter);
 	if (ok)
 	{
 		if (ConsumeOneShotKey(s_soilOkFiles, ToLowerASCII(m_stFileName)))
@@ -766,9 +774,9 @@ bool CGraphicImageTexture::CreateFromSOIL2(UINT bufSize, const void* c_pvBuf)
 	return ok;
 }
 
-bool CGraphicImageTexture::CreateFromMemoryFile(UINT bufSize, const void * c_pvBuf, D3DFORMAT d3dFmt, DWORD dwFilter)
+bool CGraphicImageTexture::CreateFromMemoryFile(UINT bufSize, const void * c_pvBuf, GrpFormatType formatType, DWORD dwFilter)
 {
-	(void)d3dFmt;
+	(void)formatType;
 	(void)dwFilter;
 
 	if (!c_pvBuf || !bufSize)
@@ -817,18 +825,18 @@ void CGraphicImageTexture::SetFileName(const char * c_szFileName)
 	m_stFileName=c_szFileName;
 }
 
-bool CGraphicImageTexture::CreateFromDiskFile(const char * c_szFileName, D3DFORMAT d3dFmt, DWORD dwFilter)
+bool CGraphicImageTexture::CreateFromDiskFile(const char * c_szFileName, GrpFormatType formatType, DWORD dwFilter)
 {
 	Destroy();
 
 	SetFileName(c_szFileName);
 
-	m_d3dFmt = d3dFmt;
+	m_formatType = formatType;
 	m_dwFilter = dwFilter;
 	return CreateDeviceObjects();
 }
 
-bool CGraphicImageTexture::CreateFromDecodedData(const TDecodedImageData& decodedImage, D3DFORMAT d3dFmt, DWORD dwFilter)
+bool CGraphicImageTexture::CreateFromDecodedData(const TDecodedImageData& decodedImage, GrpFormatType formatType, DWORD dwFilter)
 {
 	if (ShouldUseDX11TexturePath())
 	{
@@ -843,7 +851,7 @@ bool CGraphicImageTexture::CreateFromDecodedData(const TDecodedImageData& decode
 			return false;
 
 		if (decodedImage.isDDS)
-			return CreateFromMemoryFile(decodedImage.pixels.size(), decodedImage.pixels.data(), d3dFmt, dwFilter);
+			return CreateFromMemoryFile(decodedImage.pixels.size(), decodedImage.pixels.data(), formatType, dwFilter);
 
 		if (decodedImage.format != TDecodedImageData::FORMAT_RGBA8)
 		{

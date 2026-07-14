@@ -1,10 +1,11 @@
 #include "StdAfx.h"
 #include "Input.h"
 
-LPDIRECTINPUT8			CInputDevice::ms_lpDI = NULL;
-LPDIRECTINPUTDEVICE8	CInputKeyboard::ms_lpKeyboard = NULL;
-bool					CInputKeyboard::ms_bPressedKey[256];
-char					CInputKeyboard::ms_diks[256];
+void* CInputDevice::ms_lpDI = NULL;
+HWND CInputDevice::ms_hWnd = NULL;
+void* CInputKeyboard::ms_lpKeyboard = NULL;
+bool CInputKeyboard::ms_bPressedKey[256];
+char CInputKeyboard::ms_diks[256];
 
 CInputDevice::CInputDevice()
 {
@@ -12,27 +13,14 @@ CInputDevice::CInputDevice()
 
 CInputDevice::~CInputDevice()
 {
-	SAFE_RELEASE(ms_lpDI);
 }
 
-HRESULT CInputDevice::CreateDevice(HWND /*hWnd*/)
+HRESULT CInputDevice::CreateDevice(HWND hWnd)
 {
-	if (ms_lpDI)
-	{
-		ms_lpDI->AddRef();
-		return S_OK;
-	}
-
-	HRESULT hr;
-	
-	// Create a DInput object
-	if (FAILED(hr = DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, 
-					IID_IDirectInput8, (VOID**) &ms_lpDI, NULL)))
-		return hr;
-
+	ms_hWnd = hWnd;
+	// DX11 native path: keyboard is polled via Win32 state.
 	return S_OK;
 }
-
 
 CInputKeyboard::CInputKeyboard()
 {
@@ -41,10 +29,6 @@ CInputKeyboard::CInputKeyboard()
 
 CInputKeyboard::~CInputKeyboard()
 {
-	if (ms_lpKeyboard)
-		ms_lpKeyboard->Unacquire();
-
-	SAFE_RELEASE(ms_lpKeyboard);
 }
 
 void CInputKeyboard::ResetKeyboard()
@@ -55,64 +39,52 @@ void CInputKeyboard::ResetKeyboard()
 
 bool CInputKeyboard::InitializeKeyboard(HWND hWnd)
 {
-	NANOBEGIN
-
-	if (ms_lpKeyboard)
-		return true;
-
 	if (FAILED(CreateDevice(hWnd)))
 		return false;
-	
-	HRESULT hr;
 
-	// Obtain an interface to the system keyboard device.
-	if (FAILED(hr = ms_lpDI->CreateDevice(GUID_SysKeyboard, &ms_lpKeyboard, NULL)))
-		return false;
-
-	if (FAILED(hr = ms_lpKeyboard->SetDataFormat(&c_dfDIKeyboard)))
-		return false;
-
-// Alt + F4를 위해 비독점 모드로 - [levites]
-//	DWORD dwCoopFlags = DISCL_FOREGROUND | DISCL_EXCLUSIVE;
-//	DWORD dwCoopFlags = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
-	DWORD dwCoopFlags = DISCL_FOREGROUND | DISCL_NONEXCLUSIVE;
-
-	if (FAILED(hr = ms_lpKeyboard->SetCooperativeLevel(hWnd, dwCoopFlags)))
-		return false;
-
-	ms_lpKeyboard->Acquire();
-
-	NANOEND
+	ResetKeyboard();
 	return true;
 }
 
 void CInputKeyboard::UpdateKeyboard()
 {
-	if (!ms_lpKeyboard)
-		return;
+	// Ignore keyboard input when game window is not active.
+	HWND hForeground = GetForegroundWindow();
+	const bool bHasForeground =
+		(hForeground != NULL) &&
+		(hForeground == ms_hWnd || IsChild(ms_hWnd, hForeground));
 
-	HRESULT hr;
-	
-	hr = ms_lpKeyboard->GetDeviceState(sizeof(ms_diks), &ms_diks);
-
-	if (FAILED(hr))
+	if (!ms_hWnd || !bHasForeground || !IsWindowVisible(ms_hWnd))
 	{
-		hr = ms_lpKeyboard->Acquire();			
-		
-		// 현재 어플리케이션이 비활성화 되어 있어 입력을 받을 수 없다.
-		//if (hr == DIERR_OTHERAPPHASPRIO || hr == DIERR_NOTACQUIRED);
+		for (int i = 0; i < 256; ++i)
+		{
+			if (IsPressed(i))
+				KeyUp(i);
+		}
 		return;
 	}
 
 	for (int i = 0; i < 256; ++i)
 	{
-		if (ms_diks[i] & 0x80)
+		const UINT uVirtualKey = MapVirtualKeyExA(static_cast<UINT>(i), MAPVK_VSC_TO_VK_EX, GetKeyboardLayout(0));
+		if (0u == uVirtualKey)
+		{
+			if (IsPressed(i))
+				KeyUp(i);
+			continue;
+		}
+
+		const SHORT sState = GetAsyncKeyState(static_cast<int>(uVirtualKey));
+		const bool bDown = (sState & 0x8000) != 0;
+		if (bDown)
 		{
 			if (!IsPressed(i))
 				KeyDown(i);
 		}
 		else if (IsPressed(i))
+		{
 			KeyUp(i);
+		}
 	}
 }
 

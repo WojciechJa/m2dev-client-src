@@ -155,6 +155,11 @@ bool CDibBar::Create(DWORD dwWidth, DWORD dwHeight)
 	return true;
 }
 
+void CDibBar::OnCreate()
+{
+	return;
+}
+
 CDibBar::CDibBar() :
 	m_dwWidth(0),
 	m_dwHeight(0)

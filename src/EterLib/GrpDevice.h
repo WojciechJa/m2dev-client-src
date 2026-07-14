@@ -54,7 +54,6 @@ public:
 protected:
 	void __Initialize();
 	void __WarningMessage(HWND hWnd, UINT uiMsg);
-	void __UpdatePresentationInterval(D3DPRESENT_PARAMETERS& rkD3DPP);
 
 	void __InitializeDefaultIndexBufferList();
 	void __DestroyDefaultIndexBufferList();	
@@ -64,11 +63,6 @@ protected:
 	void __InitializePDTVertexBufferList();
 	void __DestroyPDTVertexBufferList();
 	bool __CreatePDTVertexBufferList();
-
-	LPDIRECT3DVERTEXDECLARATION9 CreatePTStreamVertexShader();
-	LPDIRECT3DVERTEXDECLARATION9 CreatePNTStreamVertexShader();
-	LPDIRECT3DVERTEXDECLARATION9 CreatePNT2StreamVertexShader();
-	LPDIRECT3DVERTEXDECLARATION9 CreateDoublePNTStreamVertexShader();
 
 protected:
 	DWORD						m_uBackBufferCount;

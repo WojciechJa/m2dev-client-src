@@ -42,9 +42,9 @@ void CGraphicShadowTexture::Set(int stage) const
     }
 }
 
-const D3DXMATRIX& CGraphicShadowTexture::GetLightVPMatrixReference() const
+const DirectX::SimpleMath::Matrix& CGraphicShadowTexture::GetLightVPMatrixReference() const
 {
-    return m_d3dLightVPMatrix;
+    return m_lightViewProjMatrix;
 }
 
 ID3D11ShaderResourceView* CGraphicShadowTexture::GetD3DTexture() const
@@ -55,7 +55,7 @@ ID3D11ShaderResourceView* CGraphicShadowTexture::GetD3DTexture() const
 void CGraphicShadowTexture::Begin()
 {
     // Keep matrix update for any caller still sampling this value.
-    D3DXMatrixMultiply(&m_d3dLightVPMatrix, &ms_matView, &ms_matProj);
+    m_lightViewProjMatrix = ms_matView * ms_matProj;
 
     if (!gs_bLoggedShadowTextureBeginSkip)
     {
@@ -79,8 +79,8 @@ void CGraphicShadowTexture::Initialize()
 {
     CGraphicTexture::Initialize();
 
-    D3DXMatrixIdentity(&m_d3dLightVPMatrix);
-    ZeroMemory(&m_d3dOldViewport, sizeof(m_d3dOldViewport));
+    m_lightViewProjMatrix = DirectX::SimpleMath::Matrix::Identity;
+    ZeroMemory(&m_oldViewport, sizeof(m_oldViewport));
 
     m_lpd3dShadowTexture = NULL;
 }

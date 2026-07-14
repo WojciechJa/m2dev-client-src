@@ -10,6 +10,7 @@ class CGrannyLODController : public CGraphicBase
 {
 	public:
 		static void SetMinLODMode(bool isEnable);		
+		static void SetGlobalLODDistanceFromFarClip(float fFarClip);
 
 	public:
 		struct FSetLocalTime
@@ -97,7 +98,38 @@ class CGrannyLODController : public CGraphicBase
 					pController->RenderShadow();
 			}
 		};
-		
+
+		// W4.1: DX11 world rendering functors
+		struct FRenderWithOneTextureDX11
+		{
+			ID3D11DeviceContext* pContext;
+			const D3DXMATRIX& matViewProj;
+
+			FRenderWithOneTextureDX11(ID3D11DeviceContext* pCtx, const D3DXMATRIX& mat)
+				: pContext(pCtx), matViewProj(mat) {}
+
+			void operator() (CGrannyLODController * pController)
+			{
+				if (pController->isModelInstance())
+					pController->RenderWithOneTextureDX11(pContext, matViewProj);
+			}
+		};
+
+		struct FRenderWithTwoTextureDX11
+		{
+			ID3D11DeviceContext* pContext;
+			const D3DXMATRIX& matViewProj;
+
+			FRenderWithTwoTextureDX11(ID3D11DeviceContext* pCtx, const D3DXMATRIX& mat)
+				: pContext(pCtx), matViewProj(mat) {}
+
+			void operator() (CGrannyLODController * pController)
+			{
+				if (pController->isModelInstance())
+					pController->RenderWithTwoTextureDX11(pContext, matViewProj);
+			}
+		};
+
 		struct FDeform
 		{
 			const D3DXMATRIX * mc_pWorldMatrix;
@@ -244,6 +276,10 @@ class CGrannyLODController : public CGraphicBase
 		void	BlendRenderWithOneTexture();
 		void	BlendRenderWithTwoTexture();
 
+		// W4.1: DX11 world rendering
+		void	RenderWithOneTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
+		void	RenderWithTwoTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
+
 		void	Update(float fElapsedTime, float fDistanceFromCenter, float fDistanceFromCamera);
 		void	UpdateLODLevel(float fDistanceFromCenter, float fDistanceFromCamera);
 		void	UpdateTime(float fElapsedTime);
@@ -255,6 +291,7 @@ class CGrannyLODController : public CGraphicBase
 		
 		void	RenderToShadowMap();
 		void	RenderShadow();
+		void	RenderToShadowMapDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& c_rmatLightViewProj);  // S1: DX11 shadow caster
 		void	ReloadTexture();
 
 		void	GetBoundBox(D3DXVECTOR3 * vtMin, D3DXVECTOR3 * vtMax);

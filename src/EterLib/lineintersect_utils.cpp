@@ -24,24 +24,24 @@
 
 #define MY_EPSILON 0.1f
 
-__forceinline void FindNearestPointOnLineSegment(const D3DXVECTOR3 & A1,
-												 const D3DXVECTOR3 & L,
-												 const D3DXVECTOR3 & B,
-												 D3DXVECTOR3 & Nearest,
+__forceinline void FindNearestPointOnLineSegment(const TPosition & A1,
+												 const TPosition & L,
+												 const TPosition & B,
+												 TPosition & Nearest,
 												 float &parameter)
 {
 	// Line/Segment is degenerate --- special case #1
-	float D = D3DXVec3LengthSq(&L);
+	float D = DXMath::Vec3LengthSq(&L);
 	if (D < MY_EPSILON*MY_EPSILON)
 	{
 		Nearest = A1;
 		return;
 	}
 	
-	D3DXVECTOR3 AB = B-A1;
+	TPosition AB = B-A1;
 	
 	// parameter is computed from Equation (20).
-	parameter = (D3DXVec3Dot(&AB,&L)) / D;
+	parameter = (DXMath::Vec3Dot(&AB,&L)) / D;
 	
 	//if (false == infinite_line) 
 	parameter = FMAX(0.0f, FMIN(1.0f, parameter));
@@ -85,15 +85,15 @@ __forceinline void FindNearestPointOnLineSegment(const D3DXVECTOR3 & A1,
 |             PointOnSegBz
 
 **************************************************************************/
-__forceinline void FindNearestPointOfParallelLineSegments(const D3DXVECTOR3 & A1,
-														  const D3DXVECTOR3 & A2,
-														  const D3DXVECTOR3 & La,
-														  const D3DXVECTOR3 & B1,
-														  const D3DXVECTOR3 & B2,
-														  const D3DXVECTOR3 & Lb,
+__forceinline void FindNearestPointOfParallelLineSegments(const TPosition & A1,
+														  const TPosition & A2,
+														  const TPosition & La,
+														  const TPosition & B1,
+														  const TPosition & B2,
+														  const TPosition & Lb,
 														  //bool infinite_lines, float epsilon_squared,
-														  D3DXVECTOR3 & OutA,
-														  D3DXVECTOR3 & OutB)
+														  TPosition & OutA,
+														  TPosition & OutB)
 {
 	float s[2], temp;
 	FindNearestPointOnLineSegment(A1, La, B1, OutA, s[0]);
@@ -106,7 +106,7 @@ __forceinline void FindNearestPointOfParallelLineSegments(const D3DXVECTOR3 & A1
 	else*/
 	{
 		//float tp[3];
-		D3DXVECTOR3 tp;
+		TPosition tp;
 		FindNearestPointOnLineSegment(A1, La, B2,
 			tp, s[1]);
 		if (s[0] < 0.f && s[1] < 0.f)
@@ -170,13 +170,13 @@ __forceinline void FindNearestPointOfParallelLineSegments(const D3DXVECTOR3 & A1
 |             PointOnSegBy,     to segment A. This corresponds to point D in the text.
 |             PointOnSegBz
 **************************************************************************/
-__forceinline void AdjustNearestPoints(const D3DXVECTOR3 & A1,
-									   const D3DXVECTOR3 & La,
-									   const D3DXVECTOR3 & B1,
-									   const D3DXVECTOR3 & Lb,
+__forceinline void AdjustNearestPoints(const TPosition & A1,
+									   const TPosition & La,
+									   const TPosition & B1,
+									   const TPosition & Lb,
 									   float s, float t,
-									   D3DXVECTOR3 & OutA,
-									   D3DXVECTOR3 & OutB)
+									   TPosition & OutA,
+									   TPosition & OutB)
 {
 	// handle the case where both parameter s and t are out of range
 	if (OUT_OF_RANGE(s) && OUT_OF_RANGE(t))
@@ -219,24 +219,24 @@ __forceinline void AdjustNearestPoints(const D3DXVECTOR3 & A1,
 	}
 }
 
-void IntersectLineSegments(const D3DXVECTOR3 & A1,
-                           const D3DXVECTOR3 & A2, 
-                           const D3DXVECTOR3 & B1,
-                           const D3DXVECTOR3 & B2,
+void IntersectLineSegments(const TPosition & A1,
+                           const TPosition & A2, 
+                           const TPosition & B1,
+                           const TPosition & B2,
                            //bool infinite_lines, /*float epsilon,*/ 
-						   D3DXVECTOR3 & OutA, 
-						   D3DXVECTOR3 & OutB)
+						   TPosition & OutA, 
+						   TPosition & OutB)
 {
 	float temp = 0.f;
 	const float epsilon = MY_EPSILON;
 	const float epsilon_squared = MY_EPSILON*MY_EPSILON;
 	
 	// Compute parameters from Equations (1) and (2) in the text
-	D3DXVECTOR3 La = A2-A1;
-	D3DXVECTOR3 Lb = B2-B1;
+	TPosition La = A2-A1;
+	TPosition Lb = B2-B1;
 	// From Equation (15)
-	float L11 =  D3DXVec3LengthSq(&La);
-	float L22 =  D3DXVec3LengthSq(&Lb);
+	float L11 =  DXMath::Vec3LengthSq(&La);
+	float L22 =  DXMath::Vec3LengthSq(&Lb);
 	
 	// Line/Segment A is degenerate ---- Special Case #1
 	if (L11 < epsilon_squared)
@@ -256,10 +256,10 @@ void IntersectLineSegments(const D3DXVECTOR3 & A1,
 	else
 	{
 		// Compute more parameters from Equation (3) in the text.
-		D3DXVECTOR3 AB = B1 - A1;
+		TPosition AB = B1 - A1;
 		
 		// and from Equation (15).
-		float L12 = -D3DXVec3Dot(&La, &Lb);
+		float L12 = -DXMath::Vec3Dot(&La, &Lb);
 		
 		float DetL = L11 * L22 - L12 * L12;
 		// Lines/Segments A and B are parallel ---- special case #2.
@@ -275,8 +275,8 @@ void IntersectLineSegments(const D3DXVECTOR3 & A1,
 		else
 		{
 			// from Equation (15)
-			float ra = D3DXVec3Dot(&La, &AB);//Lax * ABx + Lay * ABy + Laz * ABz;
-			float rb = D3DXVec3Dot(&Lb, &AB);//-Lbx * ABx - Lby * ABy - Lbz * ABz;
+			float ra = DXMath::Vec3Dot(&La, &AB);//Lax * ABx + Lay * ABy + Laz * ABz;
+			float rb = DXMath::Vec3Dot(&Lb, &AB);//-Lbx * ABx - Lby * ABy - Lbz * ABz;
 			
 			float t = (L11 * rb - ra * L12)/DetL; // Equation (12)
 			

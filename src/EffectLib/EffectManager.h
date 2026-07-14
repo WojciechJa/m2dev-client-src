@@ -2,6 +2,7 @@
 
 #include "StdAfx.h"
 #include "EffectInstance.h"
+#include "EffectRenderClass.h"
 #include <unordered_map>
 
 // Forward declarations for DX11 types
@@ -29,6 +30,30 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 			EFFECT_TYPE_SIMPLE_LIGHT		= 4,
 
 			EFFECT_TYPE_MAX_NUM				= 4,
+		};
+
+		struct SDX11TargetRingDiagnostics
+		{
+			uint32_t dwActiveInstanceCount;
+			uint32_t dwSubmittedCount;
+			uint32_t dwSkippedCount;
+			uint32_t dwLastEffectCRC;
+			uint32_t dwLastTimestampMS;
+			uint32_t dwLastBlendState;
+			uint32_t dwLastPipelineFlags;
+			char szLastReason[96];
+
+			SDX11TargetRingDiagnostics()
+				: dwActiveInstanceCount(0u)
+				, dwSubmittedCount(0u)
+				, dwSkippedCount(0u)
+				, dwLastEffectCRC(0u)
+				, dwLastTimestampMS(0u)
+				, dwLastBlendState(0u)
+				, dwLastPipelineFlags(0u)
+			{
+				szLastReason[0] = '\0';
+			}
 		};
 
 		typedef std::map<DWORD, CEffectData*> TEffectDataMap;
@@ -102,12 +127,15 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		bool IsDX11EffectResourcesReady() const { return m_bDX11EffectResourcesReady; }
 		ID3D11VertexShader* GetDX11EffectVertexShader() const { return m_pDX11EffectVertexShader; }
 		ID3D11PixelShader* GetDX11EffectPixelShader() const { return m_pDX11EffectPixelShader; }
+		ID3D11PixelShader* GetDX11EffectTargetRingPixelShader() const { return m_pDX11EffectTargetRingPixelShader; }
+		ID3D11PixelShader* GetDX11EffectShadowAlphaPixelShader() const { return m_pDX11EffectShadowAlphaPixelShader; }
 		ID3D11InputLayout* GetDX11EffectInputLayout() const { return m_pDX11EffectInputLayout; }
 		ID3D11Buffer* GetDX11EffectConstantBuffer() const { return m_pDX11EffectConstantBuffer; }
 		ID3D11SamplerState* GetDX11EffectSamplerState() const { return m_pDX11EffectSamplerState; }
 		ID3D11Buffer* GetDX11EffectDynamicVB() const { return m_pDX11EffectDynamicVB; }
 		ID3D11RasterizerState* GetDX11EffectNoCullRasterizerState() const { return m_pDX11EffectNoCullRasterizerState; }
 		ID3D11DepthStencilState* GetDX11EffectDepthReadOnlyState() const { return m_pDX11EffectDepthReadOnlyState; }
+		ID3D11DepthStencilState* GetDX11EffectDepthWriteState() const { return m_pDX11EffectDepthWriteState; }
 		bool EnsureDX11EffectDynamicVB(uint32_t uMinVertexCount);
 		uint32_t GetDX11EffectDynamicVBCapacity() const { return m_uDX11EffectDynamicVBCapacity; }
 		ID3D11ShaderResourceView* GetEffectTextureSRV(CGraphicImageInstance* pImageInstance);
@@ -117,6 +145,17 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		uint32_t GetDX11SubmittedEffectCount() const;
 		uint32_t GetDX11SubmittedParticleCount() const { return m_dwDX11SubmittedParticleCount; }
 		uint32_t GetDX11SubmittedMeshEffectCount() const { return m_dwDX11SubmittedMeshEffectCount; }
+		float GetDX11TargetRingAlphaClipThreshold() const { return m_fDX11TargetRingAlphaClipThreshold; }
+		void SetDX11TargetRingAlphaClipThreshold(float fThreshold);
+		EEffectRenderClass GetEffectRenderClass(const CEffectData* pEffectData) const;
+		EEffectRenderClass GetEffectRenderClassByCRC(DWORD dwEffectCRC) const;
+		DWORD GetEffectDataCRC(const CEffectData* pEffectData) const;
+		void AddDX11TargetRingSubmittedCount(uint32_t dwCount, DWORD dwEffectCRC = 0u);
+		void AddDX11TargetRingSkippedCount(uint32_t dwCount, const char* c_szReason, DWORD dwEffectCRC = 0u);
+		void SetDX11TargetRingBlendState(bool bBlendingEnable, BYTE bySrcBlend, BYTE byDestBlend);
+		void SetDX11TargetRingPipelineState(bool bDepthTestLessEqual, bool bDepthWriteEnable, bool bNoCull, bool bAlphaClip);
+		const SDX11TargetRingDiagnostics& GetDX11TargetRingDiagnostics() const { return m_kDX11TargetRingDiagnostics; }
+		uint32_t GetDX11TargetRingActiveInstanceCount() const;
 
 		// DX11 Blend State Accessors
 		ID3D11BlendState* GetDX11EffectBlendStateAdditive() const { return m_pDX11EffectBlendStateAdditive; }
@@ -129,6 +168,9 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		static std::string NormalizeEffectPath(const char* cszFile);
 		uint32_t LegacyBlendToDX11Blend(BYTE byBlendType) const;
 		void NormalizeLegacyBlendPair(BYTE& bySrcBlend, BYTE& byDestBlend) const;
+		EEffectRenderClass ClassifyEffectPath(const char* c_szFileName) const;
+		void UpdateDX11TargetRingActiveInstanceCount();
+		void ResetDX11TargetRingFrameCounters();
 		ID3D11BlendState* GetOrCreateDX11EffectBlendState(BYTE bySrcBlend, BYTE byDestBlend);
 		bool CreateDX11EffectDynamicVB(ID3D11Device* pDevice, uint32_t uVertexCapacity);
 		void DestroyDX11EffectBlendCache();
@@ -160,6 +202,8 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		// DX11 Effect Resources (Batch W2)
 		ID3D11VertexShader*				m_pDX11EffectVertexShader;
 		ID3D11PixelShader*				m_pDX11EffectPixelShader;
+		ID3D11PixelShader*				m_pDX11EffectTargetRingPixelShader;
+		ID3D11PixelShader*				m_pDX11EffectShadowAlphaPixelShader;
 		ID3D11InputLayout*				m_pDX11EffectInputLayout;
 		ID3D11Buffer*					m_pDX11EffectConstantBuffer;
 		ID3D11SamplerState*				m_pDX11EffectSamplerState;
@@ -168,11 +212,15 @@ class CEffectManager : public CScreen, public CSingleton<CEffectManager>
 		ID3D11BlendState*				m_pDX11EffectBlendStateScreen;
 		ID3D11RasterizerState*			m_pDX11EffectNoCullRasterizerState;
 		ID3D11DepthStencilState*		m_pDX11EffectDepthReadOnlyState;
+		ID3D11DepthStencilState*		m_pDX11EffectDepthWriteState;
 		std::unordered_map<uint32_t, ID3D11BlendState*> m_kDX11EffectBlendStateCache;
 		ID3D11ShaderResourceView*		m_pDX11EffectDefaultTextureSRV;
 		ID3D11Buffer*					m_pDX11EffectDynamicVB;
 		uint32_t						m_uDX11EffectDynamicVBCapacity;
 		bool							m_bDX11EffectResourcesReady;
+		float							m_fDX11TargetRingAlphaClipThreshold;
+		std::unordered_map<DWORD, EEffectRenderClass> m_kEffectRenderClassByCRC;
+		SDX11TargetRingDiagnostics		m_kDX11TargetRingDiagnostics;
 
 		// DX11 Telemetry (W4.2)
 		DWORD							m_dwDX11SubmittedEffectCount;

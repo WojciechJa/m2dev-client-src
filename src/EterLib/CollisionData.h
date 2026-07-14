@@ -1,6 +1,5 @@
 #pragma once
 
-#include <d3d11.h>
 #include "GrpBase.h"
 
 // Collision Detection
@@ -79,7 +78,7 @@ typedef std::vector<CStaticCollisionData> CStaticCollisionDataVector;
 class CBaseCollisionInstance
 {
 	public:
-		virtual void Render(D3D11_FILL_MODE fillMode = D3D11_FILL_SOLID) = 0;
+		virtual void Render(GrpFillModeType fillMode = GRP_FILL_SOLID) = 0;
 
 		bool MovementCollisionDynamicSphere(const CDynamicSphereInstance & s) const
 		{
@@ -114,7 +113,7 @@ class CSphereCollisionInstance : public CBaseCollisionInstance
 	public:
 		TSphereData & GetAttribute();
 		const TSphereData & GetAttribute() const;
-		virtual void Render(D3D11_FILL_MODE fillMode = D3D11_FILL_SOLID);
+		virtual void Render(GrpFillModeType fillMode = GRP_FILL_SOLID);
 
 	protected:
 		void OnDestroy();
@@ -133,7 +132,7 @@ class CPlaneCollisionInstance : public CBaseCollisionInstance
 	public:
 		TPlaneData & GetAttribute();
 		const TPlaneData & GetAttribute() const;
-		virtual void Render(D3D11_FILL_MODE fillMode = D3D11_FILL_SOLID);
+		virtual void Render(GrpFillModeType fillMode = GRP_FILL_SOLID);
 
 	protected:
 		void OnDestroy();
@@ -152,7 +151,7 @@ class CAABBCollisionInstance : public CBaseCollisionInstance
 	public:
 		TAABBData & GetAttribute();
 		const TAABBData & GetAttribute() const;
-		virtual void Render(D3D11_FILL_MODE fillMode = D3D11_FILL_SOLID);
+		virtual void Render(GrpFillModeType fillMode = GRP_FILL_SOLID);
 
 	protected:
 		void OnDestroy();
@@ -171,7 +170,7 @@ class COBBCollisionInstance : public CBaseCollisionInstance
 	public:
 		TOBBData & GetAttribute();
 		const TOBBData & GetAttribute() const;
-		virtual void Render(D3D11_FILL_MODE fillMode = D3D11_FILL_SOLID);
+		virtual void Render(GrpFillModeType fillMode = GRP_FILL_SOLID);
 
 	protected:
 		void OnDestroy();
@@ -190,7 +189,7 @@ class CCylinderCollisionInstance : public CBaseCollisionInstance
 	public:
 		TCylinderData & GetAttribute();
 		const TCylinderData & GetAttribute() const;
-		virtual void Render(D3D11_FILL_MODE fillMode = D3D11_FILL_SOLID);
+		virtual void Render(GrpFillModeType fillMode = GRP_FILL_SOLID);
 
 	protected:
 		void OnDestroy();

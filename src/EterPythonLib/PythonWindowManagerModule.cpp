@@ -1147,11 +1147,11 @@ PyObject * wndMgrSetSlot(PyObject * poSelf, PyObject * poArgs)
 	if (!PyTuple_GetUnsignedLongLong(poArgs, 5, &iImageHandle))
 		return Py_BuildException();
 
-	D3DXCOLOR diffuseColor;
+	DirectX::SimpleMath::Color diffuseColor;
 	PyObject* pTuple;
 	if (!PyTuple_GetObject(poArgs, 6, &pTuple))
 	{
-		diffuseColor = D3DXCOLOR(1.0, 1.0, 1.0, 1.0);
+		diffuseColor = DirectX::SimpleMath::Color(1.0, 1.0, 1.0, 1.0);
 		//return Py_BuildException();
 	}
 	else
@@ -1159,13 +1159,13 @@ PyObject * wndMgrSetSlot(PyObject * poSelf, PyObject * poArgs)
 	{
 		if (PyTuple_Size(pTuple) != 4)
 			return Py_BuildException();
-		if (!PyTuple_GetFloat(pTuple, 0, &diffuseColor.r))
+		if (!PyTuple_GetFloat(pTuple, 0, &diffuseColor.x))
 			return Py_BuildException();
-		if (!PyTuple_GetFloat(pTuple, 1, &diffuseColor.g))
+		if (!PyTuple_GetFloat(pTuple, 1, &diffuseColor.y))
 			return Py_BuildException();
-		if (!PyTuple_GetFloat(pTuple, 2, &diffuseColor.b))
+		if (!PyTuple_GetFloat(pTuple, 2, &diffuseColor.z))
 			return Py_BuildException();
-		if (!PyTuple_GetFloat(pTuple, 3, &diffuseColor.a))
+		if (!PyTuple_GetFloat(pTuple, 3, &diffuseColor.w))
 			return Py_BuildException();
 	}
 

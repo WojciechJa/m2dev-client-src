@@ -2,11 +2,11 @@
 
 
 #include "EterBase/FileLoader.h"
+#include "DirectXMathHelpers.h"
+#include "GrpBase.h"
 
 #include <map>
 #include <vector>
-
-#include <d3dx9.h>
 
 template<typename T>
 class CTransitor
@@ -77,9 +77,9 @@ class CTransitor
 		T		m_TargetValue;
 };
 
-typedef CTransitor<float>			TTransitorFloat;
-typedef CTransitor<D3DXVECTOR3>		TTransitorVector3;
-typedef CTransitor<D3DXCOLOR>		TTransitorColor;
+typedef CTransitor<float>				TTransitorFloat;
+typedef CTransitor<DirectX::SimpleMath::Vector3>			TTransitorVector3;
+typedef CTransitor<D3DXCOLOR>			TTransitorColor;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -91,10 +91,12 @@ void PrintfTabs(FILE * File, int iTabCount, const char * c_szString, ...);
 extern bool	LoadTextData(const char * c_szFileName, CTokenMap & rstTokenMap);
 extern bool	LoadMultipleTextData(const char * c_szFileName, CTokenVectorMap & rstTokenVectorMap);
 
-extern D3DXVECTOR3 TokenToVector(CTokenVector & rVector);
-extern D3DXCOLOR TokenToColor(CTokenVector & rVector);
+extern DirectX::SimpleMath::Vector3 TokenToVector(CTokenVector & rVector);
+extern DirectX::SimpleMath::Vector4 TokenToColor(CTokenVector & rVector);
 
 #define GOTO_CHILD_NODE(TextFileLoader, Index) CTextFileLoader::CGotoChild Child(TextFileLoader, Index);
 
 extern DWORD GetMaxTextureWidth();
 extern DWORD GetMaxTextureHeight();
+
+

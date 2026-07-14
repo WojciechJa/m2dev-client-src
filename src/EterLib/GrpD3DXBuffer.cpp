@@ -4,12 +4,12 @@
 
 CDirect3DXBuffer::CDirect3DXBuffer()
 {
-	m_lpd3dxBuffer=NULL;
+	m_pBlob = nullptr;
 }
 
-CDirect3DXBuffer::CDirect3DXBuffer(LPD3DXBUFFER lpd3dxBuffer)
+CDirect3DXBuffer::CDirect3DXBuffer(ID3DBlob* pBlob)
 {
-	m_lpd3dxBuffer=lpd3dxBuffer;
+	m_pBlob = pBlob;
 }
 
 CDirect3DXBuffer::~CDirect3DXBuffer()
@@ -19,23 +19,23 @@ CDirect3DXBuffer::~CDirect3DXBuffer()
 
 void CDirect3DXBuffer::Destroy()
 {
-	safe_release(m_lpd3dxBuffer);
+	safe_release(m_pBlob);
 }
 
-void CDirect3DXBuffer::Create(LPD3DXBUFFER lpd3dxBuffer)
+void CDirect3DXBuffer::Create(ID3DBlob* pBlob)
 {
 	Destroy();
-	m_lpd3dxBuffer=lpd3dxBuffer;
+	m_pBlob = pBlob;
 }
 
 void*CDirect3DXBuffer::GetPointer()
 {
-	assert(m_lpd3dxBuffer!=NULL);
-	return m_lpd3dxBuffer->GetBufferPointer();
+	assert(m_pBlob != NULL);
+	return m_pBlob->GetBufferPointer();
 }
 
 int  CDirect3DXBuffer::GetSize()
 {
-	assert(m_lpd3dxBuffer!=NULL);
-	return m_lpd3dxBuffer->GetBufferSize();
+	assert(m_pBlob != NULL);
+	return static_cast<int>(m_pBlob->GetBufferSize());
 }

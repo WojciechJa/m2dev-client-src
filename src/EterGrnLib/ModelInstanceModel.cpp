@@ -73,7 +73,7 @@ granny_world_pose* CGrannyModelInstance::__GetWorldPosePtr() const
 	if (!s_bLoggedMissingWorldPose)
 	{
 		s_bLoggedMissingWorldPose = true;
-		TraceError("DX11_GRANNY_GUARD world_pose_unavailable fallback=skip_pose_update");
+		TraceError("DX11_GRANNY_GUARD world_pose_unavailable action=skip_pose_update");
 	}
 	return NULL;	
 }
@@ -212,9 +212,9 @@ bool CGrannyModelInstance::__IsDeformableVertexBuffer()
 	return m_kLocalDeformableVertexBuffer.IsEmpty();
 }
 
-ID3D11Buffer* CGrannyModelInstance::__GetDeformableD3DVertexBufferPtr()
+ID3D11Buffer* CGrannyModelInstance::__GetDeformableVertexBufferPtr()
 {
-	return __GetDeformableVertexBufferRef().GetD3DVertexBuffer();
+	return __GetDeformableVertexBufferRef().GetVertexBuffer();
 }
 
 CGraphicVertexBuffer& CGrannyModelInstance::__GetDeformableVertexBufferRef()
@@ -236,7 +236,7 @@ void CGrannyModelInstance::__CreateDynamicVertexBuffer()
 	{
 		if (!m_kLocalDeformableVertexBuffer.Create(vtxCount,
 									   FVF_XYZ|FVF_NORMAL|FVF_TEX1,
-									   D3DUSAGE_DYNAMIC, D3DPOOL_DEFAULT
+									   GRP_USAGE_DYNAMIC, GRP_POOL_DEFAULT
 		))
 			return;
 	}	
@@ -310,8 +310,7 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 	if (!pDevice || !m_pModel || m_bDX11VertexBuffersReady)
 		return;
 
-	// DX11 Model Sync M3-EGRN-33: VB/IB upload from CPU shadow buffers (strict mode) or DX9 fallback (hybrid mode).
-	// Current implementation: Priority 1: CPU shadow buffers (both modes), Priority 2: DX9 Lock (hybrid only).
+	// DX11-only upload contract: VB/IB upload from CPU shadow buffers.
 	// Future upgrade path:
 	// 1) build DX11 buffers directly from Granny mesh/index source data, or
 	// 2) replace Granny runtime with a modern skeletal pipeline (e.g. glTF + custom skinning cache).
@@ -319,9 +318,7 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 
 	DestroyDX11VertexBuffers();
 
-	// DX11 Model Sync M3-EGRN-33: VB/IB upload source selection.
-	// Priority 1: CPU shadow buffers (strict & hybrid mode), Priority 2: DX9 VB/IB Lock (hybrid mode only).
-	// In strict mode, only CPU shadow is available.
+	// DX11-only upload source selection: CPU shadow buffers.
 	void* pLockedIndices = nullptr;
 	void* pLockedRigidVertices = nullptr;
 	bool bModelDataLocked = false;
@@ -345,14 +342,13 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 		}
 	}
 
-	// 2. Create DX11 rigid vertex buffer (static, copy from CPU shadow or DX9)
-	// DX11 Model Sync M3-EGRN17.B + M3-EGRN-33: Rigid VB upload - prefer CPU shadow buffer first (strict & hybrid), fallback to DX9 Lock (hybrid only)
+	// 2. Create DX11 rigid vertex buffer (static, copy from CPU shadow)
 	const int iRigidVertexCount = m_pModel->GetRigidVertexCount();
 	const bool bRigidVBRequired = (iRigidVertexCount > 0);
 	bool bRigidVBReady = !bRigidVBRequired;
 	if (iRigidVertexCount > 0)
 	{
-		// Priority 1: Try CPU shadow buffer (available in both strict and hybrid mode)
+		// CPU shadow is required for strict DX11 uploads.
 		if (!bModelDataLocked)
 		{
 			bModelDataLocked = m_pModel->LockVertices(&pLockedIndices, &pLockedRigidVertices);
@@ -374,8 +370,7 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 
 		TPNTVertex* pVertexData = nullptr;
 		const UINT uRigidVertexStride = std::max<UINT>(static_cast<UINT>(sizeof(TPNTVertex)), m_pModel->GetRigidVertexStride());
-		bool bNeedUnlockDX9VB = false;
-		const char* pszDataSource = "none";
+		const char* pszDataSource = "cpu_shadow_unavailable";
 
 		// Use CPU shadow if available
 		if (pLockedRigidVertices)
@@ -397,39 +392,6 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 				s_dwRigidCPUShadowCount = 0u;
 			}
 		}
-#if !defined(DX11_STRICT_ONLY)
-		// Priority 2: Fallback to D3D9 VB Lock (hybrid mode only, never reached in strict mode due to #ifdef guard)
-		else
-		{
-			ID3D11Buffer* pDX9RigidVB = m_pModel->GetPNTD3DVertexBuffer();
-			if (pDX9RigidVB)
-			{
-				HRESULT hrLock = pDX9RigidVB->Lock(0, 0, (void**)&pVertexData, D3DLOCK_READONLY);
-				if (FAILED(hrLock) || !pVertexData)
-					pVertexData = nullptr;
-				else
-				{
-					bNeedUnlockDX9VB = true;
-					pszDataSource = "dx9_vb";
-
-					// DX11 Model Sync M3-EGRN-33: Throttled telemetry for DX9 fallback usage (hybrid mode only)
-					static DWORD s_dwLastDX9FallbackHeartbeatMS = 0u;
-					static DWORD s_dwDX9RigidVBFallbackCount = 0u;
-					++s_dwDX9RigidVBFallbackCount;
-
-					const DWORD dwNow = GetTickCount();
-					if (0u == s_dwLastDX9FallbackHeartbeatMS || (dwNow - s_dwLastDX9FallbackHeartbeatMS) >= 5000u)
-					{
-						s_dwLastDX9FallbackHeartbeatMS = dwNow;
-						TraceError("DX11_EGRN33_RIGID_VB_DX9_FALLBACK_HEARTBEAT source=dx9_vb count=%u interval_ms=5000 mode=hybrid_only",
-							s_dwDX9RigidVBFallbackCount);
-						s_dwDX9RigidVBFallbackCount = 0u;
-					}
-				}
-			}
-		}
-#endif // DX11_STRICT_ONLY
-
 		if (pVertexData)
 		{
 			// Validate source data before passing to D3D11
@@ -438,10 +400,6 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 			{
 				TraceError("DX11_CHARACTER_RIGID_VB_INVALID_DATA ptr=%p size=%u count=%d stride=%u",
 					pVertexData, expectedByteSize, iRigidVertexCount, uRigidVertexStride);
-#if !defined(DX11_STRICT_ONLY)
-				if (bNeedUnlockDX9VB && m_pModel->GetPNTD3DVertexBuffer())
-					m_pModel->GetPNTD3DVertexBuffer()->Unlock();
-#endif
 				DestroyDX11VertexBuffers();
 				if (bModelDataLocked)
 					m_pModel->UnlockVertices();
@@ -466,10 +424,6 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 			initData.pSysMem = pVertexData;
 
 			HRESULT hr = pDevice->CreateBuffer(&vbDesc, &initData, &m_pDX11RigidVertexBuffer);
-#if !defined(DX11_STRICT_ONLY)
-			if (bNeedUnlockDX9VB && m_pModel->GetPNTD3DVertexBuffer())
-				m_pModel->GetPNTD3DVertexBuffer()->Unlock();
-#endif
 
 			if (FAILED(hr))
 			{
@@ -502,14 +456,13 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 		}
 	}
 
-	// 3. Create DX11 index buffer (copy from CPU shadow or DX9)
-	// DX11 Model Sync M3-EGRN17.B + M3-EGRN-33: Index buffer upload - prefer CPU shadow buffer first (strict & hybrid), fallback to DX9 Lock (hybrid only)
+	// 3. Create DX11 index buffer (copy from CPU shadow)
 	const int iIndexCount = m_pModel->GetIdxCount();
 	const bool bIndexBufferRequired = (iIndexCount > 0);
 	bool bIndexBufferReady = !bIndexBufferRequired;
 	if (iIndexCount > 0)
 	{
-		// Priority 1: Try CPU shadow buffer (available in both strict and hybrid mode)
+		// CPU shadow is required for strict DX11 uploads.
 		if (!bModelDataLocked)
 		{
 			bModelDataLocked = m_pModel->LockVertices(&pLockedIndices, &pLockedRigidVertices);
@@ -530,8 +483,7 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 		}
 
 		WORD* pIndexData = nullptr;
-		bool bNeedUnlockDX9IB = false;
-		const char* pszIndexSource = "none";
+		const char* pszIndexSource = "cpu_shadow_unavailable";
 
 		// Use CPU shadow if available
 		if (pLockedIndices)
@@ -553,25 +505,6 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 				s_dwIndexCPUShadowCount = 0u;
 			}
 		}
-#if !defined(DX11_STRICT_ONLY)
-		// Priority 2: Fallback to D3D9 IB Lock (hybrid mode only, never reached in strict mode due to #ifdef guard)
-		else
-		{
-			ID3D11Buffer* pDX9IndexBuf = m_pModel->GetD3DIndexBuffer();
-			if (pDX9IndexBuf)
-			{
-				HRESULT hrLock = pDX9IndexBuf->Lock(0, 0, (void**)&pIndexData, D3DLOCK_READONLY);
-				if (FAILED(hrLock) || !pIndexData)
-					pIndexData = nullptr;
-				else
-				{
-					bNeedUnlockDX9IB = true;
-					pszIndexSource = "dx9_ib";
-				}
-			}
-		}
-#endif // DX11_STRICT_ONLY
-
 		if (pIndexData)
 		{
 			// Validate source data before passing to D3D11
@@ -580,10 +513,6 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 			{
 				TraceError("DX11_CHARACTER_INDEX_BUFFER_INVALID_DATA ptr=%p size=%u count=%d",
 					pIndexData, expectedByteSize, iIndexCount);
-#if !defined(DX11_STRICT_ONLY)
-				if (bNeedUnlockDX9IB && m_pModel->GetD3DIndexBuffer())
-					m_pModel->GetD3DIndexBuffer()->Unlock();
-#endif
 				DestroyDX11VertexBuffers();
 				if (bModelDataLocked)
 					m_pModel->UnlockVertices();
@@ -608,10 +537,6 @@ void CGrannyModelInstance::CreateDX11VertexBuffers(ID3D11Device* pDevice)
 			initData.pSysMem = pIndexData;
 
 			HRESULT hr = pDevice->CreateBuffer(&ibDesc, &initData, &m_pDX11IndexBuffer);
-#if !defined(DX11_STRICT_ONLY)
-			if (bNeedUnlockDX9IB && m_pModel->GetD3DIndexBuffer())
-				m_pModel->GetD3DIndexBuffer()->Unlock();
-#endif
 
 			if (FAILED(hr))
 			{
@@ -725,7 +650,6 @@ void CGrannyModelInstance::UpdateDX11DeformableVertexBuffer(ID3D11DeviceContext*
 	}
 
 	// DX11 Model Sync M3-EGRN-33: Get deformed data from deformable VB (already updated by Deform()).
-	// In strict mode: CPU-side buffer. In hybrid mode: DX9 dynamic VB.
 	CGraphicVertexBuffer& rkDeformableVB = __GetDeformableVertexBufferRef();
 	TPNTVertex* pSrcVertices = nullptr;
 	if (!rkDeformableVB.Lock((void**)&pSrcVertices))

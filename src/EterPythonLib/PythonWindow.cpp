@@ -1266,7 +1266,8 @@ namespace UI
 	void CBar::OnRender()
 	{
 		CPythonGraphic::Instance().SetDiffuseColor(m_dwColor);
-		CPythonGraphic::Instance().RenderBar2d(m_rect.left, m_rect.top, m_rect.right, m_rect.bottom);
+		// Match the half-pixel center convention used by textured DX11 UI quads.
+		CPythonGraphic::Instance().RenderBar2d(m_rect.left - 0.5f, m_rect.top - 0.5f, m_rect.right - 0.5f, m_rect.bottom - 0.5f);
 	}
 
 	///////////////////////////////////////////////////////////////////////////////////////////////

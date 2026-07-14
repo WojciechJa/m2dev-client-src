@@ -29,9 +29,16 @@ void CLightInstance::OnSetDataPointer(CEffectElementBase * pElement)
 
 	m_iLoopCount = m_pData->GetLoopCount();
 
-	D3DLIGHT9 Light;
+	SLightDesc Light;
 	m_pData->InitializeLight(Light);
-	CLightManager::Instance().RegisterLight(LIGHT_TYPE_DYNAMIC, &m_LightID, Light);
+
+	ELightType eLightType = LIGHT_TYPE_DYNAMIC;
+	// Infinite loop effect lights are long-lived scene contributors and should be
+	// classified as static for DX11 telemetry/slot policy.
+	if (m_pData->isLoop() && 0 == m_pData->GetLoopCount())
+		eLightType = LIGHT_TYPE_STATIC;
+
+	CLightManager::Instance().RegisterLight(eLightType, &m_LightID, Light);
 }
 
 bool CLightInstance::OnUpdate(float fElapsedTime)
@@ -102,6 +109,18 @@ bool CLightInstance::OnUpdate(float fElapsedTime)
 		m_pData->GetPosition(m_fLocalTime,pos);
 		D3DXVec3TransformCoord(&pos,&pos,mc_pmatLocal);
 		pLight->SetPosition(pos.x,pos.y,pos.z);
+
+		if (m_pData->m_eLightType != LIGHT_DESC_TYPE_POINT)
+		{
+			D3DXVECTOR3 vDirection = m_pData->m_vDirection;
+			D3DXVec3TransformNormal(&vDirection, &vDirection, mc_pmatLocal);
+			const float fLengthSq = D3DXVec3LengthSq(&vDirection);
+			if (fLengthSq > 0.000001f)
+			{
+				D3DXVec3Normalize(&vDirection, &vDirection);
+				pLight->SetDirection(vDirection.x, vDirection.y, vDirection.z);
+			}
+		}
 
 	}
 

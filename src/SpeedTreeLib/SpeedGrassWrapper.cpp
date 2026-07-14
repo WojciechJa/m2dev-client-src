@@ -21,17 +21,113 @@
 //		Web:   http://www.idvinc.com
 
 #include "StdAfx.h"
+#include "Constants.h"  // Must be included early for USE_SPEEDGRASS definition
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unordered_set>
 #include <vector>
+
+#include "SpeedGrassRT.h"       // Base class for stub implementations
+#include "SpeedGrassWrapper.h"  // Include class definition with GrassVertex
+#include "GrassVertex.h"         // Grass vertex structure
+
+class CMapOutdoor
+{
+public:
+	float GetHeight(float* pPos);
+	bool GetBrushColor(float fX, float fY, float* pLowColor, float* pHighColor);
+};
 
 using namespace std;
 
 #ifdef USE_SPEEDGRASS
 
+// Helper function for random number generation (legacy grass support)
+static inline float GetRandom(float fMin, float fMax)
+{
+	static bool bSeeded = false;
+	if (!bSeeded)
+	{
+		srand(static_cast<unsigned int>(time(nullptr)));
+		bSeeded = true;
+	}
+	float fRange = fMax - fMin;
+	return fMin + (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * fRange;
+}
 
-///////////////////////////////////////////////////////////////////////  
+static inline uint32_t HashGrassSample(int ix, int iy)
+{
+	uint32_t x = static_cast<uint32_t>(ix) * 0x9E3779B9u;
+	uint32_t y = static_cast<uint32_t>(iy) * 0x85EBCA6Bu;
+	uint32_t h = x ^ (y + 0xC2B2AE35u);
+	h ^= (h >> 16);
+	h *= 0x7FEB352Du;
+	h ^= (h >> 15);
+	h *= 0x846CA68Bu;
+	h ^= (h >> 16);
+	return h;
+}
+
+static inline float HashToUnitFloat(uint32_t h)
+{
+	return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000u);
+}
+
+///////////////////////////////////////////////////////////////////////
+//	Stubs for CSpeedGrassRT base class methods
+// These are required for linking but not used in DX11 path
+
+// Constructor stub
+CSpeedGrassRT::CSpeedGrassRT() :
+	m_nNumRegions(0),
+	m_nNumRegionCols(0),
+	m_nNumRegionRows(0),
+	m_pRegions(nullptr),
+	m_bAllRegionsCulled(false)
+{
+	m_afBoundingBox[0] = 0.0f;
+	m_afBoundingBox[1] = 0.0f;
+	m_afBoundingBox[2] = 0.0f;
+	m_afBoundingBox[3] = 1.0f;
+	m_afBoundingBox[4] = 1.0f;
+	m_afBoundingBox[5] = 1.0f;
+}
+
+// Destructor stub
+CSpeedGrassRT::~CSpeedGrassRT()
+{
+	delete[] m_pRegions;
+	m_pRegions = nullptr;
+	m_nNumRegions = 0;
+	m_nNumRegionCols = 0;
+	m_nNumRegionRows = 0;
+	m_bAllRegionsCulled = true;
+}
+
+// ParseBsfFile stub - DX11 uses GenerateGrassVertices instead
+bool CSpeedGrassRT::ParseBsfFile(const char* pFilename, unsigned int nNumBlades,
+                                 unsigned int uiRows, unsigned int uiCols, float fCollisionDistance)
+{
+	// Stub - DX11 implementation doesn't use BSF file parsing
+	// Grass data is loaded through the existing terrain system
+	(void)pFilename;
+	(void)nNumBlades;
+	(void)fCollisionDistance;
+
+	m_nNumRegionCols = static_cast<int>(uiCols);
+	m_nNumRegionRows = static_cast<int>(uiRows);
+	delete[] m_pRegions;
+	m_pRegions = nullptr;
+	m_nNumRegions = 0;
+	m_bAllRegionsCulled = true;
+	return false;
+}
+
+///////////////////////////////////////////////////////////////////////
 //	CSpeedGrassWrapper::CSpeedGrassWrapper
 
 CSpeedGrassWrapper::CSpeedGrassWrapper() : m_pMapOutdoor(NULL), m_lpD3DTexure8(NULL)//m_uiTexture(0)
@@ -126,190 +222,372 @@ bool CSpeedGrassWrapper::InitFromBsfFile(const char* pFilename,
 }
 
 
-///////////////////////////////////////////////////////////////////////  
+///////////////////////////////////////////////////////////////////////
 //	CSpeedGrassWrapper::Color
 
 float CSpeedGrassWrapper::Color(float fX, float fY, const float* pNormal, float* pTopColor, float* pBottomColor) const
 {
-	const float c_fColorAdjust = 0.3f;	// controls how much the color of the top vertices of each grass blade can vary
-	const float c_fColorThrow = 1.0f;	// controls how much the r, g, and b components can vary
-	const float c_fColorRandomness = 0.01f;	// controls how much the r, g, and b components can vary
-	const float c_TopLight = 0.75f;
-
-	float afLowColor[4] = { 0.0f }, afHighColor[4] = { 0.0f };
-	if (m_pMapOutdoor->GetBrushColor(fX, fY, afLowColor, afHighColor))
+	// Stub implementation for DX11 grass rendering
+	// The DX11 path uses GenerateGrassVertices instead of this legacy method
+	if (pTopColor)
 	{
-		pBottomColor[0] = afLowColor[2];
-		pBottomColor[1] = afLowColor[1];
-		pBottomColor[2] = afLowColor[0];
-
-		float fColorThrow = GetRandom(0.0f, c_fColorThrow);
-		pTopColor[0] = VecInterpolate(pBottomColor[0], afHighColor[2], fColorThrow) + GetRandom(-c_fColorRandomness, c_fColorRandomness);
-		pTopColor[1] = VecInterpolate(pBottomColor[1], afHighColor[1], fColorThrow) + GetRandom(-c_fColorRandomness, c_fColorRandomness);
-		pTopColor[2] = VecInterpolate(pBottomColor[2], afHighColor[0], fColorThrow) + GetRandom(-c_fColorRandomness, c_fColorRandomness);
-
-		float fLargest = pTopColor[0];
-		if (pTopColor[1] > fLargest)
-			fLargest = pTopColor[1];
-		if (pTopColor[2] > fLargest)
-			fLargest = pTopColor[2];
-		if (fLargest > 1.0f)
-		{
-			pTopColor[0] /= fLargest;
-			pTopColor[1] /= fLargest;
-			pTopColor[2] /= fLargest;
-		}
-		pTopColor[0] = max(0.0f, pTopColor[0]);
-		pTopColor[1] = max(0.0f, pTopColor[1]);
-		pTopColor[2] = max(0.0f, pTopColor[2]);
+		pTopColor[0] = 0.5f;
+		pTopColor[1] = 0.7f;
+		pTopColor[2] = 0.3f;
 	}
-
-	return afLowColor[3];
+	if (pBottomColor)
+	{
+		pBottomColor[0] = 0.3f;
+		pBottomColor[1] = 0.5f;
+		pBottomColor[2] = 0.2f;
+	}
+	return 1.0f;
 }
 
 
-///////////////////////////////////////////////////////////////////////  
+///////////////////////////////////////////////////////////////////////
 //	CSpeedGrassWrapper::Height
 
 float CSpeedGrassWrapper::Height(float fX, float fY, float* pNormal) const
 {
-	float fHeight = 0.0f;
-	float afPos[3] = { fX, fY, 0.0f };
-	fHeight = m_pMapOutdoor->GetHeight(afPos);
-
-	pNormal[0] = 0.0f;
-	pNormal[1] = 0.0f;
-	pNormal[2] = 1.0f;
-
-	return fHeight;
+	// Stub implementation for DX11 grass rendering
+	// The DX11 path uses GenerateGrassVertices instead of this legacy method
+	if (pNormal)
+	{
+		pNormal[0] = 0.0f;
+		pNormal[1] = 0.0f;
+		pNormal[2] = 1.0f;
+	}
+	return 0.0f;
 }
 
 
-///////////////////////////////////////////////////////////////////////  
+///////////////////////////////////////////////////////////////////////
 //	CSpeedGrassWrapper::InitGraphics
 
 void CSpeedGrassWrapper::InitGraphics(void)
 {
-	// load texture
-//	m_uiTexture = LoadDDS((c_strDataPath + string("brush_2.dds")).c_str( ));
-	CGraphicImage * pImage = (CGraphicImage *) CResourceManager::Instance().GetResourcePointer("D:/ymir work/special/brush_2.dds");
-	m_GrassImageInstance.SetImagePointer(pImage);
-	m_lpD3DTexure8 = m_GrassImageInstance.GetTexturePointer()->GetD3DTexture();
+	// Stub implementation for DX11 grass rendering
+	// The DX11 path uses GenerateGrassVertices and doesn't need legacy texture loading
+	// Legacy initialization is handled by the DX11 renderer
+}
 
-	// prepare static vertex buffers
-	for (int i = 0; i < m_nNumRegions; ++i)
+///////////////////////////////////////////////////////////////////////
+//	CSpeedGrassWrapper::GenerateGrassVertices
+//	DX11: Generate grass geometry for DX11 rendering with LOD
+
+bool CSpeedGrassWrapper::GenerateGrassVertices(std::vector<GrassVertex>& outVertices,
+												UINT& outRegionCount,
+												UINT& outBladeCount,
+												const DirectX::SimpleMath::Vector3& cameraPos,
+												float lodNearDistance,
+												float lodFarDistance,
+												float& outLodBlendFactor) const
+{
+	if (!m_pRegions)
 	{
-		SRegion* pRegion = m_pRegions + i;
+		if (!m_pMapOutdoor)
+			return false;
 
-//		pRegion->m_pVertexBuffer = new CIdvVertexBuffer;
+		const float safeNearDistance = std::max(1.0f, lodNearDistance);
+		const float safeFarDistance = std::max(safeNearDistance + 1.0f, lodFarDistance);
+		const float lodRange = std::max(1.0f, safeFarDistance - safeNearDistance);
+		const float sampleStep = std::max(120.0f, std::min(320.0f, safeFarDistance / 14.0f));
+		const int sampleRadius = std::max(1, static_cast<int>(std::ceil(safeFarDistance / sampleStep)));
+		const UINT maxBlades = 12000u;
 
-		// setup up temporary buffer to copy later
-		const int c_nNumCorners = 4;
-		unsigned int uiNumBlades = pRegion->m_vBlades.size( );
-		unsigned int uiBufferSize = uiNumBlades * c_nNumCorners * c_nGrassVertexTotalSize;
-		unsigned char* pBuffer = new unsigned char[uiBufferSize];
+		outVertices.clear();
+		outVertices.reserve(static_cast<size_t>((sampleRadius * 2 + 1) * (sampleRadius * 2 + 1)) * 6u);
+		outBladeCount = 0u;
+		outRegionCount = 0u;
+		outLodBlendFactor = 1.0f;
 
-		// setup initial pointers for individual attribute copying
-		float* pTexCoords0 = reinterpret_cast<float*>(pBuffer + 0);
-		float* pTexCoords1 = reinterpret_cast<float*>(pTexCoords0 + c_nGrassVertexTexture0Size * uiNumBlades * c_nNumCorners / sizeof(float));
-		unsigned char* pColors = (unsigned char*) pTexCoords1 + c_nGrassVertexTexture1Size * uiNumBlades * c_nNumCorners;
-		float* pPositions = reinterpret_cast<float*>(pColors + c_nGrassVertexColorSize * uiNumBlades * c_nNumCorners);
+		float lodBlendAccum = 0.0f;
+		UINT lodBlendSamples = 0u;
+		std::unordered_set<uint32_t> regionKeys;
+		regionKeys.reserve(256);
 
-		for (vector<SBlade>::const_iterator iBlade = pRegion->m_vBlades.begin( ); iBlade != pRegion->m_vBlades.end( ); ++iBlade)
+		for (int gy = -sampleRadius; gy <= sampleRadius; ++gy)
 		{
-			float fS1 = float(iBlade->m_ucWhichTexture) / c_nNumBladeMaps;
-			float fS2 = float(iBlade->m_ucWhichTexture + 1) / c_nNumBladeMaps;
-
-			for (int nCorner = 0; nCorner < c_nNumCorners; ++nCorner)
+			for (int gx = -sampleRadius; gx <= sampleRadius; ++gx)
 			{
-				// texcoord 0
-				switch (nCorner)
-				{
-				case 0:
-					pTexCoords0[0] = fS2;
-					pTexCoords0[1] = 1.0f;
-					break;
-				case 1:
-					pTexCoords0[0] = fS1;
-					pTexCoords0[1] = 1.0f;
-					break;
-				case 2:
-					pTexCoords0[0] = fS1;
-					pTexCoords0[1] = 0.0f;
-					break;
-				case 3:
-					pTexCoords0[0] = fS2;
-					pTexCoords0[1] = 0.0f;
-					break;
-				default:
-					assert(false);
-				}	
-				pTexCoords0 += c_nGrassVertexTexture0Size / sizeof(float);
-			
-				// texcoord 1
-				switch (nCorner)
-				{
-				case 0:
-					pTexCoords1[0] = c_nShaderGrassBillboard;
-					pTexCoords1[2] = iBlade->m_fThrow;
-					break;
-				case 1:
-					pTexCoords1[0] = c_nShaderGrassBillboard + 1;
-					pTexCoords1[2] = iBlade->m_fThrow;
-					break;
-				case 2:
-					pTexCoords1[0] = c_nShaderGrassBillboard + 2;
-					pTexCoords1[2] = 0.0f;
-					break;
-				case 3:
-					pTexCoords1[0] = c_nShaderGrassBillboard + 3;
-					pTexCoords1[2] = 0.0f;
-					break;
-				default:
-					assert(false);
-				}	
-				// same for all corners
-				pTexCoords1[1] = iBlade->m_fSize;
-				pTexCoords1[3] = iBlade->m_fNoise;
-				pTexCoords1 += c_nGrassVertexTexture1Size / sizeof(float);
+				const uint32_t h = HashGrassSample(gx, gy);
+				const float jitterX = HashToUnitFloat(h) - 0.5f;
+				const float jitterY = HashToUnitFloat(h ^ 0xA5A5A5A5u) - 0.5f;
+				const float worldX = cameraPos.x + (static_cast<float>(gx) + jitterX * 0.6f) * sampleStep;
+				const float worldY = cameraPos.y + (static_cast<float>(gy) + jitterY * 0.6f) * sampleStep;
 
-				// color
-				unsigned long ulColor = 0;
-				if (nCorner == 0 || nCorner == 1)
-					ulColor = (int(iBlade->m_afTopColor[0] * 255.0f) << 0) +
-						      (int(iBlade->m_afTopColor[1] * 255.0f) << 8) +
-						      (int(iBlade->m_afTopColor[2] * 255.0f) << 16) +
-						      0xff000000;
-				else
-					ulColor = (int(iBlade->m_afBottomColor[0] * 255.0f) << 0) +
-						      (int(iBlade->m_afBottomColor[1] * 255.0f) << 8) +
-						      (int(iBlade->m_afBottomColor[2] * 255.0f) << 16) +
-						      0xff000000;
-				memcpy(pColors, &ulColor, c_nGrassVertexColorSize);
-				pColors += c_nGrassVertexColorSize;
+				const float deltaX = worldX - cameraPos.x;
+				const float deltaY = worldY - cameraPos.y;
+				const float distance = std::sqrt(deltaX * deltaX + deltaY * deltaY);
+				if (distance > safeFarDistance)
+					continue;
 
-				// position
-				memcpy(pPositions, iBlade->m_afPos, c_nGrassVertexPositionSize);
-				pPositions += c_nGrassVertexPositionSize / sizeof(float);
+				const float lodBlend = std::max(0.0f, std::min(1.0f, (distance - safeNearDistance) / lodRange));
+				const uint32_t lodStride = (lodBlend < 0.33f) ? 1u : ((lodBlend < 0.66f) ? 2u : 4u);
+				if ((h % lodStride) != 0u)
+					continue;
+
+				// Terrain-anchored placement for DX11 fallback path.
+				float aPos[3] = { worldX, worldY, 0.0f };
+				const float worldZ = m_pMapOutdoor->GetHeight(aPos);
+				if (!std::isfinite(worldZ) || std::fabs(worldZ) > 1000000.0f)
+					continue;
+
+				// Use default grass colors (green gradient)
+				float lowColor[4] = { 0.33f, 0.48f, 0.24f, 1.0f };
+				float highColor[4] = { 0.54f, 0.70f, 0.35f, 1.0f };
+				float brushLow[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				float brushHigh[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				if (m_pMapOutdoor->GetBrushColor(worldX, worldY, brushLow, brushHigh))
+				{
+					lowColor[0] = std::clamp(lowColor[0] * brushLow[0], 0.0f, 1.0f);
+					lowColor[1] = std::clamp(lowColor[1] * brushLow[1], 0.0f, 1.0f);
+					lowColor[2] = std::clamp(lowColor[2] * brushLow[2], 0.0f, 1.0f);
+					highColor[0] = std::clamp(highColor[0] * brushHigh[0], 0.0f, 1.0f);
+					highColor[1] = std::clamp(highColor[1] * brushHigh[1], 0.0f, 1.0f);
+					highColor[2] = std::clamp(highColor[2] * brushHigh[2], 0.0f, 1.0f);
+				}
+
+				GrassVertex v0, v1, v2, v3;
+				v0.position.x = worldX; v0.position.y = worldY; v0.position.z = worldZ;
+				v1.position.x = worldX; v1.position.y = worldY; v1.position.z = worldZ;
+				v2.position.x = worldX; v2.position.y = worldY; v2.position.z = worldZ;
+				v3.position.x = worldX; v3.position.y = worldY; v3.position.z = worldZ;
+
+				v0.uv.x = 1.0f; v0.uv.y = 0.0f;
+				v1.uv.x = 0.0f; v1.uv.y = 0.0f;
+				v2.uv.x = 0.0f; v2.uv.y = 1.0f;
+				v3.uv.x = 1.0f; v3.uv.y = 1.0f;
+
+				v0.color.x = lowColor[0]; v0.color.y = lowColor[1]; v0.color.z = lowColor[2]; v0.color.w = lowColor[3];
+				v1.color.x = lowColor[0]; v1.color.y = lowColor[1]; v1.color.z = lowColor[2]; v1.color.w = lowColor[3];
+				v2.color.x = highColor[0]; v2.color.y = highColor[1]; v2.color.z = highColor[2]; v2.color.w = highColor[3];
+				v3.color.x = highColor[0]; v3.color.y = highColor[1]; v3.color.z = highColor[2]; v3.color.w = highColor[3];
+
+				// Triangle list quad: (v0,v1,v2) + (v0,v2,v3)
+				outVertices.push_back(v0);
+				outVertices.push_back(v1);
+				outVertices.push_back(v2);
+				outVertices.push_back(v0);
+				outVertices.push_back(v2);
+				outVertices.push_back(v3);
+
+				++outBladeCount;
+				lodBlendAccum += lodBlend;
+				++lodBlendSamples;
+				regionKeys.insert(HashGrassSample(gx / 2, gy / 2));
+
+				if (outBladeCount >= maxBlades)
+					break;
 			}
+
+			if (outBladeCount >= maxBlades)
+				break;
 		}
 
-//		assert((unsigned char*) pTexCoords0 - pBuffer == c_nGrassVertexTexture0Size * uiNumBlades * c_nNumCorners);
-//		assert(pTexCoords1 - pTexCoords0 == (c_nGrassVertexTexture1Size * uiNumBlades * c_nNumCorners) / sizeof(float));
-//		assert(pColors - (unsigned char*) pTexCoords1 == c_nGrassVertexColorSize * uiNumBlades * c_nNumCorners);
-//		assert((unsigned char*) pPositions - pColors == c_nGrassVertexPositionSize * uiNumBlades * c_nNumCorners);
+		if (outBladeCount == 0u)
+		{
+			outVertices.clear();
+			outRegionCount = 0u;
+			outLodBlendFactor = 1.0f;
+			return false;
+		}
 
-//		pRegion->m_pVertexBuffer->SetBuffer(pBuffer, uiBufferSize, true);
-//		pRegion->m_pVertexBuffer->SetStride(CIdvVertexBuffer::VERTEX_TEXCOORD0, 2, GL_FLOAT, 0, 0);
-//		pRegion->m_pVertexBuffer->SetStride(CIdvVertexBuffer::VERTEX_TEXCOORD1, 4, GL_FLOAT, 0, (unsigned char*) pTexCoords0 - pBuffer);
-//		pRegion->m_pVertexBuffer->SetStride(CIdvVertexBuffer::VERTEX_COLOR, 4, GL_UNSIGNED_BYTE, 0, (unsigned char*) pTexCoords1 - pBuffer);
-//		pRegion->m_pVertexBuffer->SetStride(CIdvVertexBuffer::VERTEX_POSITION, 3, GL_FLOAT, 0, pColors - pBuffer);
+		outRegionCount = static_cast<UINT>(regionKeys.size());
+		if (0u == outRegionCount)
+			outRegionCount = 1u;
 
- 		DWORD dwFVF = D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1;
-// 		pRegion->m_VertexBuffer.Create();
-		
-		delete[] pBuffer;
+		outLodBlendFactor = (lodBlendSamples > 0u) ? (lodBlendAccum / static_cast<float>(lodBlendSamples)) : 0.0f;
+		return true;
 	}
+
+	if (m_nNumRegions <= 0 || m_nNumRegions > 131072)
+	{
+		outVertices.clear();
+		outRegionCount = 0u;
+		outBladeCount = 0u;
+		outLodBlendFactor = 1.0f;
+		return false;
+	}
+
+	// Count total visible blades and calculate LOD factor
+	outBladeCount = 0;
+	outRegionCount = 0;
+	float totalDistance = 0.0f;
+	UINT lodRegionCount = 0;
+
+	for (int i = 0; i < m_nNumRegions; ++i)
+	{
+		const SRegion& region = m_pRegions[i];
+		if (!region.m_bCulled)
+		{
+			outBladeCount += static_cast<UINT>(region.m_vBlades.size());
+			outRegionCount++;
+
+			// Calculate distance from camera to region center
+			DirectX::SimpleMath::Vector3 regionCenter(
+				region.m_afCenter[0],
+				region.m_afCenter[1],
+				region.m_afCenter[2]
+			);
+			float distance = DirectX::SimpleMath::Vector3::Distance(regionCenter, cameraPos);
+			totalDistance += distance;
+			lodRegionCount++;
+		}
+	}
+
+	if (outBladeCount == 0)
+	{
+		outLodBlendFactor = 1.0f;  // Far LOD (no grass)
+		return false;
+	}
+
+	// Calculate average LOD blend factor
+	float avgDistance = lodRegionCount > 0 ? totalDistance / lodRegionCount : 0.0f;
+	float lodRange = lodFarDistance - lodNearDistance;
+	outLodBlendFactor = (avgDistance - lodNearDistance) / lodRange;
+	outLodBlendFactor = std::max(0.0f, std::min(1.0f, outLodBlendFactor));  // Clamp to [0,1]
+
+	// Calculate blade skip factor based on LOD
+	// LOD 0 (near): 100% blades (skipFactor = 1.0)
+	// LOD 1 (medium): 50% blades (skipFactor = 2.0)
+	// LOD 2 (far): 25% blades (skipFactor = 4.0)
+	UINT skipFactor = 1;
+	if (outLodBlendFactor < 0.33f)
+	{
+		skipFactor = 1;  // Near LOD: render all blades
+	}
+	else if (outLodBlendFactor < 0.66f)
+	{
+		skipFactor = 2;  // Medium LOD: render 50% of blades
+	}
+	else
+	{
+		skipFactor = 4;  // Far LOD: render 25% of blades
+	}
+
+	// Each blade becomes a quad (6 vertices in triangle-list topology)
+	outVertices.clear();
+	outVertices.reserve((outBladeCount / skipFactor) * 6);
+
+	UINT bladeCounter = 0;
+
+	// Iterate through all regions and blades
+	for (int i = 0; i < m_nNumRegions; ++i)
+	{
+		const SRegion& region = m_pRegions[i];
+
+		// Skip culled regions
+		if (region.m_bCulled)
+			continue;
+
+		// Calculate distance-based LOD for this region
+		DirectX::SimpleMath::Vector3 regionCenter(
+			region.m_afCenter[0],
+			region.m_afCenter[1],
+			region.m_afCenter[2]
+		);
+		float regionDistance = DirectX::SimpleMath::Vector3::Distance(regionCenter, cameraPos);
+
+		// Skip regions beyond far distance
+		if (regionDistance > lodFarDistance)
+			continue;
+
+		// Calculate region-specific LOD blend factor
+		float regionLodBlend = (regionDistance - lodNearDistance) / lodRange;
+		regionLodBlend = std::max(0.0f, std::min(1.0f, regionLodBlend));
+
+		// Determine skip factor for this region
+		UINT regionSkipFactor = 1;
+		if (regionLodBlend < 0.33f)
+		{
+			regionSkipFactor = 1;  // Near
+		}
+		else if (regionLodBlend < 0.66f)
+		{
+			regionSkipFactor = 2;  // Medium
+		}
+		else
+		{
+			regionSkipFactor = 4;  // Far
+		}
+
+		// Process each blade in the region with LOD-based skipping
+		UINT bladeIndex = 0;
+		for (const SBlade& blade : region.m_vBlades)
+		{
+			// Skip blades based on LOD factor (strided sampling for even distribution)
+			if (bladeIndex % regionSkipFactor != 0)
+			{
+				bladeIndex++;
+				continue;
+			}
+			bladeIndex++;
+
+			GrassVertex v0, v1, v2, v3;
+
+			// Position (same for all vertices - grass blade position)
+			v0.position.x = blade.m_afPos[0];
+			v0.position.y = blade.m_afPos[1];
+			v0.position.z = blade.m_afPos[2];
+
+			v1.position.x = blade.m_afPos[0];
+			v1.position.y = blade.m_afPos[1];
+			v1.position.z = blade.m_afPos[2];
+
+			v2.position.x = blade.m_afPos[0];
+			v2.position.y = blade.m_afPos[1];
+			v2.position.z = blade.m_afPos[2];
+
+			v3.position.x = blade.m_afPos[0];
+			v3.position.y = blade.m_afPos[1];
+			v3.position.z = blade.m_afPos[2];
+
+			// UV coordinates (quad texture mapping)
+			v0.uv.x = 1.0f;  v0.uv.y = 1.0f;  // Bottom-right
+			v1.uv.x = 0.0f;  v1.uv.y = 1.0f;  // Bottom-left
+			v2.uv.x = 0.0f;  v2.uv.y = 0.0f;  // Top-left
+			v3.uv.x = 1.0f;  v3.uv.y = 0.0f;  // Top-right
+
+			// Color - use bottom color for base, top color for tip
+			// V0, V1: Bottom of blade (darker)
+			v0.color.x = blade.m_afBottomColor[0];
+			v0.color.y = blade.m_afBottomColor[1];
+			v0.color.z = blade.m_afBottomColor[2];
+			v0.color.w = 1.0f;
+
+			v1.color.x = blade.m_afBottomColor[0];
+			v1.color.y = blade.m_afBottomColor[1];
+			v1.color.z = blade.m_afBottomColor[2];
+			v1.color.w = 1.0f;
+
+			// V2, V3: Top of blade (lighter)
+			v2.color.x = blade.m_afTopColor[0];
+			v2.color.y = blade.m_afTopColor[1];
+			v2.color.z = blade.m_afTopColor[2];
+			v2.color.w = 1.0f;
+
+			v3.color.x = blade.m_afTopColor[0];
+			v3.color.y = blade.m_afTopColor[1];
+			v3.color.z = blade.m_afTopColor[2];
+			v3.color.w = 1.0f;
+
+			// Add vertices to form a quad (triangle list)
+			outVertices.push_back(v0);
+			outVertices.push_back(v1);
+			outVertices.push_back(v2);
+			outVertices.push_back(v0);
+			outVertices.push_back(v2);
+			outVertices.push_back(v3);
+			bladeCounter++;
+		}
+	}
+
+	// Update outBladeCount to reflect actual blades rendered after LOD
+	outBladeCount = bladeCounter;
+
+	return true;
 }
 
 #endif // USE_SPEEDGRASS

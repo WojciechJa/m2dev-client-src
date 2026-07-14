@@ -1,18 +1,20 @@
 #pragma once
 
+#include <d3dcompiler.h>
+
 class CDirect3DXBuffer
 {
 	public:
 		CDirect3DXBuffer();
-		CDirect3DXBuffer(LPD3DXBUFFER lpd3dxBuffer);
+		CDirect3DXBuffer(ID3DBlob* pBlob);
 		virtual ~CDirect3DXBuffer();
 
 		void Destroy();
-		void Create(LPD3DXBUFFER lpd3dxBuffer);
+		void Create(ID3DBlob* pBlob);
 
 		void*GetPointer();
 		int  GetSize();
 
 	protected:
-		LPD3DXBUFFER m_lpd3dxBuffer;
+		ID3DBlob* m_pBlob;
 };

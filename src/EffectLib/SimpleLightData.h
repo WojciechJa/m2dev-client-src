@@ -1,7 +1,8 @@
 #pragma once
 
-#include <d3dx9.h>
+#include "EterLib/DirectXMathHelpers.h"
 
+#include "EterLib/LightDesc.h"
 #include "EterLib/TextFileLoader.h"
 
 #include "Type.h"
@@ -24,7 +25,7 @@ class CLightData : public CEffectElementBase
 		{
 			return m_iLoopCount;
 		}
-		void InitializeLight(D3DLIGHT9& light);
+		void InitializeLight(SLightDesc& light);
 
 	protected:
 		void OnClear();
@@ -39,6 +40,8 @@ class CLightData : public CEffectElementBase
 		
 		D3DXCOLOR m_cAmbient;
 		D3DXCOLOR m_cDiffuse;
+		D3DXVECTOR3 m_vDirection;
+		ELightDescType m_eLightType;
 
 		BOOL m_bLoopFlag;
 		int m_iLoopCount;
@@ -46,6 +49,9 @@ class CLightData : public CEffectElementBase
 		float m_fAttenuation0;
 		float m_fAttenuation1;
 		float m_fAttenuation2;
+		float m_fFalloff;
+		float m_fTheta;
+		float m_fPhi;
 
 	public:
 		static void DestroySystem();
@@ -55,3 +61,4 @@ class CLightData : public CEffectElementBase
 
 		static CDynamicPool<CLightData>		ms_kPool;
 };
+

@@ -1,9 +1,11 @@
 #include "StdAfx.h"
 #include "EterBase/Random.h"
-#include "EterLib/StateManager.h"
 #include "ParticleSystemData.h"
 #include "ParticleSystemInstance.h"
 #include "ParticleInstance.h"
+#include "EffectManager.h"
+#include "EterLib/GrpDeviceDX11.h"
+#include <cmath>
 
 CDynamicPool<CParticleSystemInstance>	CParticleSystemInstance::ms_kPool;
 float CParticleSystemInstance::ms_fGlobalEmissionScale = 1.0f;
@@ -345,114 +347,279 @@ bool CParticleSystemInstance::OnUpdate(float fElapsedTime)
 	return true;
 }
 
-namespace NParticleRenderer
-{
-	struct TwoSideRenderer
-	{
-		const D3DXMATRIX * pmat;
-		TwoSideRenderer(const D3DXMATRIX * pmat=NULL)
-			: pmat(pmat)
-		{
-		}
-		
-		inline void operator () (CParticleInstance * pInstance)
-		{
-			pInstance->Transform(pmat,D3DXToRadian(-30.0f));
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-
-			pInstance->Transform(pmat,D3DXToRadian(+30.0f));
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-		}
-	};
-	
-	struct ThreeSideRenderer
-	{
-		const D3DXMATRIX * pmat;
-		ThreeSideRenderer(const D3DXMATRIX * pmat=NULL)
-			: pmat(pmat)
-		{
-		}
-		
-		inline void operator () (CParticleInstance * pInstance)
-		{
-			pInstance->Transform(pmat);
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-			pInstance->Transform(pmat,D3DXToRadian(-60.0f));
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-			pInstance->Transform(pmat,D3DXToRadian(+60.0f));
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-		}
-	};
-	
-	struct NormalRenderer
-	{
-		inline void operator () (CParticleInstance * pInstance)
-		{
-			pInstance->Transform();
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-		}
-	};
-	struct AttachRenderer
-	{
-		const D3DXMATRIX* pmat;
-		AttachRenderer(const D3DXMATRIX * pmat)
-			: pmat(pmat)
-		{
-		}
-		
-		inline void operator () (CParticleInstance * pInstance)
-		{
-			pInstance->Transform(pmat);
-			STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, pInstance->GetParticleMeshPointer(), sizeof(TPTVertex));
-		}
-	};
-}
-
 void CParticleSystemInstance::OnRender()
 {
-	CScreen::Identity();
-	STATEMANAGER.SetRenderState(D3DRS_SRCBLEND, m_pParticleProperty->m_bySrcBlendType);
-	STATEMANAGER.SetRenderState(D3DRS_DESTBLEND, m_pParticleProperty->m_byDestBlendType);
-	STATEMANAGER.SetTextureStageState(0,D3DTSS_COLOROP,m_pParticleProperty->m_byColorOperationType);
-	if (m_pParticleProperty->m_byBillboardType < BILLBOARD_TYPE_2FACE)
+	CEffectManager& rMgr = CEffectManager::Instance();
+	CGraphicDeviceDX11* pGrpDevice = CGraphicDeviceDX11::GetActiveDevice();
+	if (rMgr.EnsureDX11EffectResourcesReady() && pGrpDevice && pGrpDevice->IsValid())
 	{
-		if (!m_pParticleProperty->m_bAttachFlag)
+		ID3D11DeviceContext* pContext = pGrpDevice->GetContext();
+		if (pContext)
 		{
-			auto obj = NParticleRenderer::NormalRenderer();
-			ForEachParticleRendering(obj);
-		}
-		else
-		{
-			auto obj = NParticleRenderer::AttachRenderer(mc_pmatLocal);
-			ForEachParticleRendering(obj);
+			// Skip effect rendering during depth-only passes (no RTV bound).
+			ID3D11RenderTargetView* pCurrentRTV = nullptr;
+			ID3D11DepthStencilView* pCurrentDSV = nullptr;
+			pContext->OMGetRenderTargets(1, &pCurrentRTV, &pCurrentDSV);
+			const bool bHasRTV = (pCurrentRTV != nullptr);
+			const bool bHasDSV = (pCurrentDSV != nullptr);
+			if (pCurrentRTV)
+				pCurrentRTV->Release();
+			if (pCurrentDSV)
+				pCurrentDSV->Release();
+			if (!bHasRTV)
+			{
+				if (bHasDSV)
+				{
+					static DWORD s_dwDepthOnlySkipLogMS = 0u;
+					const DWORD dwNow = ELTimer_GetMSec();
+					if (0u == s_dwDepthOnlySkipLogMS || (dwNow - s_dwDepthOnlySkipLogMS) >= 5000u)
+					{
+						s_dwDepthOnlySkipLogMS = dwNow;
+						TraceError("DX11_EFFECT_PARTICLE_SKIP reason=depth_only_pass");
+					}
+				}
+				return;
+			}
+
+			ID3D11InputLayout* pInputLayout = rMgr.GetDX11EffectInputLayout();
+			ID3D11VertexShader* pVS = rMgr.GetDX11EffectVertexShader();
+			ID3D11PixelShader* pPS = rMgr.GetDX11EffectPixelShader();
+			ID3D11Buffer* pCB = rMgr.GetDX11EffectConstantBuffer();
+			ID3D11SamplerState* pSampler = rMgr.GetDX11EffectSamplerState();
+			if (!pInputLayout || !pVS || !pPS || !pCB || !pSampler)
+				return;
+
+			// DX11 native parity for particles: no backface culling + no depth writes.
+			ID3D11RasterizerState* pNoCullRS = rMgr.GetDX11EffectNoCullRasterizerState();
+			ID3D11DepthStencilState* pDepthReadOnlyDSS = rMgr.GetDX11EffectDepthReadOnlyState();
+			if (!pNoCullRS || !pDepthReadOnlyDSS)
+			{
+				static DWORD s_dwLastMissingPipelineStateLogMS = 0u;
+				const DWORD dwNow = ELTimer_GetMSec();
+				if (0u == s_dwLastMissingPipelineStateLogMS || (dwNow - s_dwLastMissingPipelineStateLogMS) >= 2000u)
+				{
+					s_dwLastMissingPipelineStateLogMS = dwNow;
+					TraceError(
+						"DX11_EFFECT_PARTICLE_SKIP reason=missing_pipeline_state no_cull=%u depth_readonly=%u",
+						pNoCullRS ? 1u : 0u,
+						pDepthReadOnlyDSS ? 1u : 0u);
+				}
+				return;
+			}
+
+			if (!rMgr.EnsureDX11EffectDynamicVB(4u))
+				return;
+
+			ID3D11Buffer* pDynamicVB = rMgr.GetDX11EffectDynamicVB();
+			if (!pDynamicVB)
+				return;
+
+			ID3D11RasterizerState* pPrevRS = nullptr;
+			ID3D11DepthStencilState* pPrevDSS = nullptr;
+			UINT uPrevStencilRef = 0;
+			pContext->RSGetState(&pPrevRS);
+			pContext->OMGetDepthStencilState(&pPrevDSS, &uPrevStencilRef);
+			pContext->RSSetState(pNoCullRS);
+			pContext->OMSetDepthStencilState(pDepthReadOnlyDSS, 0u);
+
+			pContext->IASetInputLayout(pInputLayout);
+			pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+			pContext->VSSetShader(pVS, nullptr, 0);
+			pContext->PSSetShader(pPS, nullptr, 0);
+			pContext->VSSetConstantBuffers(0, 1, &pCB);
+			pContext->PSSetConstantBuffers(0, 1, &pCB);
+			pContext->PSSetSamplers(0, 1, &pSampler);
+
+			const BYTE bySrcBlend = m_pParticleProperty ? m_pParticleProperty->m_bySrcBlendType : static_cast<BYTE>(GRP_BLEND_SRCALPHA);
+			const BYTE byDestBlend = m_pParticleProperty ? m_pParticleProperty->m_byDestBlendType : static_cast<BYTE>(GRP_BLEND_INVSRCALPHA);
+			ID3D11BlendState* pBlendState = rMgr.ResolveDX11EffectBlendState(true, bySrcBlend, byDestBlend);
+
+			const float afBlendFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+			pContext->OMSetBlendState(pBlendState, afBlendFactor, 0xFFFFFFFFu);
+
+			D3DXMATRIX matViewProj;
+			D3DXMatrixMultiply(&matViewProj, &CGraphicBase::GetViewMatrix(), &CGraphicBase::GetProjMatrix());
+
+			struct SEffectCBData
+			{
+				D3DXMATRIX matViewProj;
+				D3DXVECTOR4 vColorFactor;
+				D3DXVECTOR4 vEffectParams;
+			};
+
+			DWORD dwDX11DrawCount = 0;
+			UINT uDX11PrimitiveCount = 0u;
+			D3D11_MAPPED_SUBRESOURCE mapped = {};
+			int iInvalidGeometrySkips = 0;
+
+			const auto DrawParticleDX11 = [&](CParticleInstance* pInstance, ID3D11ShaderResourceView* pSRV) -> bool
+			{
+				if (!pInstance || !pSRV)
+					return false;
+
+				const TPTVertex* pParticleVerts = pInstance->GetParticleMeshPointer();
+				if (!pParticleVerts)
+					return false;
+
+				// Guard against malformed particle quads (NaN/Inf/absurd coords) that can explode into
+				// screen-sized "fan" artifacts when the selection/target effect is hovered.
+				for (UINT uVert = 0; uVert < 4u; ++uVert)
+				{
+					const D3DXVECTOR3& kPos = pParticleVerts[uVert].position;
+					if (!std::isfinite(kPos.x) || !std::isfinite(kPos.y) || !std::isfinite(kPos.z) ||
+						std::fabs(kPos.x) > 1000000.0f || std::fabs(kPos.y) > 1000000.0f || std::fabs(kPos.z) > 1000000.0f)
+					{
+						++iInvalidGeometrySkips;
+						return false;
+					}
+				}
+
+				SEffectCBData cbData = {};
+				cbData.matViewProj = matViewProj;
+				cbData.vColorFactor = D3DXVECTOR4(
+					pInstance->m_Color.r,
+					pInstance->m_Color.g,
+					pInstance->m_Color.b,
+					pInstance->m_Color.a);
+				cbData.vEffectParams = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);
+				pContext->UpdateSubresource(pCB, 0, nullptr, &cbData, 0, 0);
+				pContext->PSSetShaderResources(0, 1, &pSRV);
+
+				HRESULT hr = pContext->Map(pDynamicVB, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+				if (FAILED(hr) || !mapped.pData)
+					return false;
+
+				memcpy(mapped.pData, pParticleVerts, sizeof(TPTVertex) * 4u);
+				pContext->Unmap(pDynamicVB, 0);
+
+				UINT uStride = sizeof(TPTVertex);
+				UINT uOffset = 0;
+				pContext->IASetVertexBuffers(0, 1, &pDynamicVB, &uStride, &uOffset);
+				pContext->Draw(4, 0);
+				++dwDX11DrawCount;
+				uDX11PrimitiveCount += 2u;
+				return true;
+			};
+
+			for (DWORD dwFrameIndex = 0; dwFrameIndex < m_kVct_pkImgInst.size(); ++dwFrameIndex)
+			{
+				CGraphicImageInstance* pImageInst = m_kVct_pkImgInst[dwFrameIndex];
+				ID3D11ShaderResourceView* pSRV = rMgr.GetEffectTextureSRV(pImageInst);
+				if (!pSRV)
+					continue;
+
+				TParticleInstanceList::iterator itor = m_ParticleInstanceListVector[dwFrameIndex].begin();
+				for (; itor != m_ParticleInstanceListVector[dwFrameIndex].end(); ++itor)
+				{
+					CParticleInstance* pInstance = *itor;
+					if (!pInstance || !InFrustum(pInstance))
+						continue;
+
+					if (m_pParticleProperty->m_byBillboardType < BILLBOARD_TYPE_2FACE)
+					{
+						if (!m_pParticleProperty->m_bAttachFlag)
+							pInstance->Transform();
+						else
+							pInstance->Transform(mc_pmatLocal);
+						DrawParticleDX11(pInstance, pSRV);
+					}
+					else if (m_pParticleProperty->m_byBillboardType == BILLBOARD_TYPE_2FACE)
+					{
+						if (!m_pParticleProperty->m_bAttachFlag)
+						{
+							pInstance->Transform(nullptr, D3DXToRadian(-30.0f));
+							DrawParticleDX11(pInstance, pSRV);
+							pInstance->Transform(nullptr, D3DXToRadian(+30.0f));
+							DrawParticleDX11(pInstance, pSRV);
+						}
+						else
+						{
+							pInstance->Transform(mc_pmatLocal, D3DXToRadian(-30.0f));
+							DrawParticleDX11(pInstance, pSRV);
+							pInstance->Transform(mc_pmatLocal, D3DXToRadian(+30.0f));
+							DrawParticleDX11(pInstance, pSRV);
+						}
+					}
+					else if (m_pParticleProperty->m_byBillboardType == BILLBOARD_TYPE_3FACE)
+					{
+						if (!m_pParticleProperty->m_bAttachFlag)
+						{
+							pInstance->Transform();
+							DrawParticleDX11(pInstance, pSRV);
+							pInstance->Transform(nullptr, D3DXToRadian(-60.0f));
+							DrawParticleDX11(pInstance, pSRV);
+							pInstance->Transform(nullptr, D3DXToRadian(+60.0f));
+							DrawParticleDX11(pInstance, pSRV);
+						}
+						else
+						{
+							pInstance->Transform(mc_pmatLocal);
+							DrawParticleDX11(pInstance, pSRV);
+							pInstance->Transform(mc_pmatLocal, D3DXToRadian(-60.0f));
+							DrawParticleDX11(pInstance, pSRV);
+							pInstance->Transform(mc_pmatLocal, D3DXToRadian(+60.0f));
+							DrawParticleDX11(pInstance, pSRV);
+						}
+					}
+				}
+			}
+
+			ID3D11ShaderResourceView* pNullSRV = nullptr;
+			pContext->PSSetShaderResources(0, 1, &pNullSRV);
+			pContext->OMSetBlendState(nullptr, afBlendFactor, 0xFFFFFFFFu);
+			pContext->RSSetState(pPrevRS);
+			pContext->OMSetDepthStencilState(pPrevDSS, uPrevStencilRef);
+			if (pPrevRS)
+				pPrevRS->Release();
+			if (pPrevDSS)
+				pPrevDSS->Release();
+
+			if (dwDX11DrawCount > 0)
+			{
+				pGrpDevice->IncrementFrameDrawCalls(dwDX11DrawCount, uDX11PrimitiveCount);
+
+				extern void ReportImGuiEffectsDrawCalls(UINT32 draws, UINT64 prims);
+				ReportImGuiEffectsDrawCalls(dwDX11DrawCount, static_cast<UINT64>(uDX11PrimitiveCount));
+
+				rMgr.AddDX11SubmittedEffectCount(dwDX11DrawCount);
+				rMgr.AddDX11SubmittedParticleCount(dwDX11DrawCount);  // W4.2: telemetry split
+			}
+
+			if (iInvalidGeometrySkips > 0)
+			{
+				static DWORD s_dwInvalidParticleGeomTick = 0u;
+				const DWORD dwNow = ELTimer_GetMSec();
+				if (0u == s_dwInvalidParticleGeomTick || (dwNow - s_dwInvalidParticleGeomTick) >= 2000u)
+				{
+					s_dwInvalidParticleGeomTick = dwNow;
+					TraceError("DX11_EFFECT_PARTICLE_SKIP reason=invalid_geometry skipped=%d", iInvalidGeometrySkips);
+				}
+			}
+			return;
 		}
 	}
-	else if (m_pParticleProperty->m_byBillboardType == BILLBOARD_TYPE_2FACE)
+
+	if (pGrpDevice && pGrpDevice->IsValid())
 	{
-		if (!m_pParticleProperty->m_bAttachFlag)
+		static DWORD s_dwLastStrictSkipLogMS = 0u;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwLastStrictSkipLogMS || (dwNow - s_dwLastStrictSkipLogMS) >= 2000u)
 		{
-			auto obj = NParticleRenderer::TwoSideRenderer();
-			ForEachParticleRendering(obj);
+			s_dwLastStrictSkipLogMS = dwNow;
+			TraceError("DX11_PARTICLE_SKIP reason=dx11_resources_not_ready_or_context_missing");
 		}
-		else
-		{
-			auto obj = NParticleRenderer::TwoSideRenderer(mc_pmatLocal);
-			ForEachParticleRendering(obj);
-		}
+		return;
 	}
-	else if (m_pParticleProperty->m_byBillboardType == BILLBOARD_TYPE_3FACE)
+
+	// Full-DX11 migration policy: no DX9 fallback path in particle renderer.
+	static DWORD s_dwLastRuntimeInactiveLogMS = 0u;
+	const DWORD dwNowRuntime = ELTimer_GetMSec();
+	if (0u == s_dwLastRuntimeInactiveLogMS || (dwNowRuntime - s_dwLastRuntimeInactiveLogMS) >= 3000u)
 	{
-		if (!m_pParticleProperty->m_bAttachFlag)
-		{
-			auto obj = NParticleRenderer::ThreeSideRenderer();
-			ForEachParticleRendering(obj);
-		}
-		else
-		{
-			auto obj = NParticleRenderer::ThreeSideRenderer(mc_pmatLocal);
-			ForEachParticleRendering(obj);
-		}
+		s_dwLastRuntimeInactiveLogMS = dwNowRuntime;
+		TraceError("DX11_PARTICLE_SKIP reason=dx11_runtime_inactive");
 	}
+	return;
 }
 
 void CParticleSystemInstance::OnSetDataPointer(CEffectElementBase * pElement)

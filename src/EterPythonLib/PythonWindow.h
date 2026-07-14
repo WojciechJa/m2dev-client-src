@@ -96,6 +96,9 @@ namespace UI
 															//        체크 하는 특화된 함수
 
 			void			__RemoveReserveChildren();
+			void			BeginChildTraversal();
+			void			EndChildTraversal();
+			bool			IsTraversingChildren() const { return m_iChildTraversalDepth > 0; }
 
 			void			AddFlag(DWORD flag)		{ SET_BIT(m_dwFlag, flag);		}
 			void			RemoveFlag(DWORD flag)	{ REMOVE_BIT(m_dwFlag, flag);	}
@@ -109,7 +112,7 @@ namespace UI
 
 			virtual void	OnRender();
 			virtual void	OnUpdate();
-			virtual void	OnChangePosition(){}
+			virtual void	OnChangePosition();
 
 			virtual void	OnSetFocus();
 			virtual void	OnKillFocus();
@@ -162,7 +165,7 @@ namespace UI
 			virtual BOOL	OnPressExitKey();
 			///////////////////////////////////////
 
-			virtual void	SetColor(DWORD dwColor){}
+			virtual void	SetColor(DWORD dwColor);
 			virtual BOOL	OnIsType(DWORD dwType);
 			/////////////////////////////////////
 
@@ -191,6 +194,8 @@ namespace UI
 			TWindowContainer	m_pChildList;
 
 			BOOL				m_isUpdatingChildren;
+			BOOL				m_isRenderingChildren;
+			int					m_iChildTraversalDepth;
 			TWindowContainer	m_pReserveChildList;
 		
 #ifdef _DEBUG
@@ -203,7 +208,7 @@ namespace UI
 	{
 		public:
 			CLayer(PyObject * ppyObject) : CWindow(ppyObject) {}
-			virtual ~CLayer() {}
+			virtual ~CLayer() = default;
 
 			BOOL IsWindow() { return FALSE; }
 	};

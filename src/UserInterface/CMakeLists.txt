@@ -1,8 +1,14 @@
 ﻿file(GLOB_RECURSE FILE_SOURCES "*.h" "*.c" "*.cpp")
 
+set(M2_CLIENT_RUNTIME_DIR "${CMAKE_BINARY_DIR}/bin" CACHE PATH
+	"Output directory for classic client executables")
+
 add_executable(UserInterface WIN32 ${FILE_SOURCES} ${CMAKE_SOURCE_DIR}/src/UserInterface/UserInterface.rc)
-set_target_properties(UserInterface PROPERTIES LINK_FLAGS "/level='requireAdministrator' /uiAccess='false'"
-	RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+set_target_properties(UserInterface PROPERTIES LINK_FLAGS "/level='asInvoker' /uiAccess='false'"
+	RUNTIME_OUTPUT_DIRECTORY ${M2_CLIENT_RUNTIME_DIR}
+	RUNTIME_OUTPUT_DIRECTORY_DEBUG ${M2_CLIENT_RUNTIME_DIR}
+	RUNTIME_OUTPUT_DIRECTORY_RELEASE ${M2_CLIENT_RUNTIME_DIR}
+	RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${M2_CLIENT_RUNTIME_DIR}
 	OUTPUT_NAME_DEBUG "Metin2_Debug"
 	OUTPUT_NAME_RELEASE "Metin2_Release"
 	OUTPUT_NAME_RELWITHDEBINFO "Metin2_RelWithDebInfo"
@@ -44,5 +50,17 @@ target_link_libraries(UserInterface
 	version
 	Dbghelp
 )
+
+if(BUILD_DEBUG_UI)
+	target_link_libraries(UserInterface PRIVATE DebugUI)
+	target_include_directories(UserInterface PRIVATE
+		${CMAKE_SOURCE_DIR}/vendor/imgui
+		${CMAKE_SOURCE_DIR}/vendor/imgui/backends
+	)
+endif()
+
+if(DX11_STRICT_ONLY)
+	add_dependencies(UserInterface dx11_strict_gate)
+endif()
 
 GroupSourcesByFolder(UserInterface)

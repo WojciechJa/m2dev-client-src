@@ -59,13 +59,12 @@ class CGrannyModel : public CReferenceObject
 		granny_model * GetGrannyModelPointer();
 		const CGrannyMesh* GetMeshPointer(int iMesh) const;
 
-	ID3D11Buffer* GetPNTD3DVertexBuffer() const;
-	ID3D11Buffer* GetD3DIndexBuffer() const;
+	ID3D11Buffer* GetRigidVertexBuffer() const;
+	ID3D11Buffer* GetIndexBuffer() const;
 
 		const CGrannyModel::TMeshNode*  GetMeshNodeList(CGrannyMesh::EType eMeshType, CGrannyMaterial::EType eMtrlType) const;
 
-	// DX11 Model Sync M3-EGRN17.C: Lock/Unlock implementations in .cpp
-	// (CPU-shadow-backed in strict mode, compatibility path in hybrid mode).
+	// DX11 strict path: Lock/Unlock use CPU-shadow-backed buffers in .cpp.
 	bool LockVertices(void** indicies, void** vertices) const;
 	void UnlockVertices() const;
 
@@ -124,4 +123,3 @@ class CGrannyModel : public CReferenceObject
 		void OnSelfDestruct() override;
 
 };
-

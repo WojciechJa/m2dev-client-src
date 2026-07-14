@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "SkyBox.h"
 #include "Camera.h"
 #include "ResourceManager.h"
@@ -26,6 +26,8 @@ struct SBootstrapUIVertex
 static D3DXMATRIX gs_matSkyDX11World = CGraphicBase::GetIdentityMatrix();
 static float gs_fSkyDX11UOffset = 0.0f;
 static float gs_fSkyDX11VOffset = 0.0f;
+static float gs_fSkyDX11UScale = 1.0f;
+static float gs_fSkyDX11VScale = 1.0f;
 static ID3D11BlendState* gs_pSkyDX11BlendState = NULL;
 static UINT gs_uSkyDX11ExpectedQuads = 0u;
 static UINT gs_uSkyDX11SubmittedQuads = 0u;
@@ -39,6 +41,7 @@ static bool gs_bSkyDX11DiffuseSampled = false;
 static float gs_fSkyDX11DiffuseMin = 1.0f;
 static float gs_fSkyDX11DiffuseMax = 0.0f;
 static ID3D11SamplerState* gs_pSkyDX11ClampSamplerState = NULL;
+static ID3D11SamplerState* gs_pSkyDX11CloudSamplerState = NULL;
 static ID3D11PixelShader* gs_pSkyDX11CloudCombinePixelShader = NULL;
 static ID3D11VertexShader* gs_pSkyDX11WorldVertexShader = NULL;
 static ID3D11Buffer* gs_pSkyDX11WorldVSConstantBuffer = NULL;
@@ -97,14 +100,32 @@ inline TGradientColor SampleSkyGradientNormalized(const TVectorGradientColor& rk
 inline TVectorGradientColor BuildSkyGradientLUT(const TVectorGradientColor& rkSource, size_t uRequiredSamples)
 {
 	const size_t uCount = std::max<size_t>(1u, uRequiredSamples);
-	TVectorGradientColor rkOut;
-	rkOut.resize(uCount);
+	TVectorGradientColor kOut(uCount);
+	if (rkSource.empty())
+	{
+		const TGradientColor kDefault = GetDefaultSkyGradient();
+		for (size_t i = 0; i < uCount; ++i)
+			kOut[i] = kDefault;
+		return kOut;
+	}
+
+	auto SampleEdge = [&](float fT) -> TColor
+	{
+		const float fClampedT = std::min(1.0f, std::max(0.0f, fT));
+		const float fPos = fClampedT * static_cast<float>(rkSource.size());
+		const size_t uSegment = std::min(static_cast<size_t>(fPos), rkSource.size() - 1u);
+		const float fLocalT = (fClampedT >= 1.0f)
+			? 1.0f
+			: (fPos - static_cast<float>(uSegment));
+		return LerpSkyColor(rkSource[uSegment].m_FirstColor, rkSource[uSegment].m_SecondColor, fLocalT);
+	};
+
 	for (size_t i = 0; i < uCount; ++i)
 	{
-		const float fT = (uCount <= 1u) ? 0.0f : (static_cast<float>(i) / static_cast<float>(uCount - 1u));
-		rkOut[i] = SampleSkyGradientNormalized(rkSource, fT);
+		kOut[i].m_FirstColor = SampleEdge(static_cast<float>(i) / static_cast<float>(uCount));
+		kOut[i].m_SecondColor = SampleEdge(static_cast<float>(i + 1u) / static_cast<float>(uCount));
 	}
-	return rkOut;
+	return kOut;
 }
 
 bool EnsureSkyDX11ClampSampler(ID3D11Device* pDevice)
@@ -138,6 +159,24 @@ bool EnsureSkyDX11ClampSampler(ID3D11Device* pDevice)
 	}
 
 	return true;
+}
+
+bool EnsureSkyDX11CloudSampler(ID3D11Device* pDevice)
+{
+	if (!pDevice)
+		return false;
+	if (gs_pSkyDX11CloudSamplerState)
+		return true;
+
+	D3D11_SAMPLER_DESC kSamplerDesc = {};
+	kSamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	kSamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	kSamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	kSamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	kSamplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	kSamplerDesc.MinLOD = 0.0f;
+	kSamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+	return SUCCEEDED(pDevice->CreateSamplerState(&kSamplerDesc, &gs_pSkyDX11CloudSamplerState)) && gs_pSkyDX11CloudSamplerState;
 }
 
 bool EnsureSkyDX11CloudCombineShader(ID3D11Device* pDevice)
@@ -254,6 +293,7 @@ bool EnsureSkyDX11WorldVertexShader(ID3D11Device* pDevice)
 		"{"
 		"    VSOut output;"
 		"    output.pos = mul(float4(input.pos, 1.0f), uWorldViewProj);"
+		"    output.pos.z = output.pos.w;"
 		"    output.col = input.col;"
 		"    output.uv = input.uv;"
 		"    return output;"
@@ -396,14 +436,30 @@ bool DrawSkyPrimitiveDX11(const TPDTVertex* pVertices,
 			return false;
 		pSamplerState = gs_pSkyDX11ClampSamplerState;
 	}
+	else if (SKY_DX11_SHADING_CLOUD_COMBINE == gs_eSkyDX11ShadingMode)
+	{
+		if (!EnsureSkyDX11CloudSampler(pDevice))
+			return false;
+		pSamplerState = gs_pSkyDX11CloudSamplerState;
+	}
 
 	if (!pInputLayout || !pVertexShader || !pPixelShader || !pVertexBuffer || !pDepthReadState || !pRasterizerState || !pSamplerState || !pWhiteSRV)
 		return false;
 
 	CCamera* pCurrentCamera = CCameraManager::Instance().GetCurrentCamera();
-	const D3DXMATRIX& matView = pCurrentCamera ? pCurrentCamera->GetViewMatrix() : CGraphicBase::GetViewMatrix();
+	D3DXMATRIX matView = pCurrentCamera ? pCurrentCamera->GetViewMatrix() : CGraphicBase::GetViewMatrix();
 	const D3DXMATRIX& matProj = CGraphicBase::GetProjMatrix();
-	const D3DXMATRIX& matWorld = gs_matSkyDX11World;
+	D3DXMATRIX matWorld = gs_matSkyDX11World;
+	if (pCurrentCamera)
+	{
+		const D3DXVECTOR3 v3Eye = pCurrentCamera->GetEye();
+		matWorld._41 -= v3Eye.x;
+		matWorld._42 -= v3Eye.y;
+		matWorld._43 -= v3Eye.z;
+		matView._41 = 0.0f;
+		matView._42 = 0.0f;
+		matView._43 = 0.0f;
+	}
 	D3DXMATRIX matWorldView;
 	D3DXMATRIX matWorldViewProj;
 	D3DXMatrixMultiply(&matWorldView, &matWorld, &matView);
@@ -439,8 +495,8 @@ bool DrawSkyPrimitiveDX11(const TPDTVertex* pVertices,
 		akVertices[i].g = g;
 		akVertices[i].b = b;
 		akVertices[i].a = a;
-		akVertices[i].u = pVertices[i].texCoord.x + gs_fSkyDX11UOffset;
-		akVertices[i].v = pVertices[i].texCoord.y + gs_fSkyDX11VOffset;
+		akVertices[i].u = pVertices[i].texCoord.x * gs_fSkyDX11UScale + gs_fSkyDX11UOffset;
+		akVertices[i].v = pVertices[i].texCoord.y * gs_fSkyDX11VScale + gs_fSkyDX11VOffset;
 	}
 
 	D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
@@ -836,20 +892,27 @@ void CSkyBox::Destroy()
 
 void CSkyBox::SetSkyBoxScale(const D3DXVECTOR3 & c_rv3Scale)
 {
+	if (fabsf(m_fScaleX - c_rv3Scale.x) <= 0.001f &&
+		fabsf(m_fScaleY - c_rv3Scale.y) <= 0.001f &&
+		fabsf(m_fScaleZ - c_rv3Scale.z) <= 0.001f)
+		return;
+
 	m_fScaleX = c_rv3Scale.x;
 	m_fScaleY = c_rv3Scale.y;
 	m_fScaleZ = c_rv3Scale.z;
 
 	m_bSkyMatrixUpdated = true;
 	D3DXMatrixScaling(&m_matWorld, m_fScaleX, m_fScaleY, m_fScaleZ);
+	m_matWorld._41 = m_v3Position.x;
+	m_matWorld._42 = m_v3Position.y;
+	m_matWorld._43 = m_v3Position.z;
 }
 
 void CSkyBox::SetGradientLevel(BYTE byUpper, BYTE byLower)
 {
-	// Validate gradient levels to ensure smooth sky rendering
-	// Minimum values: 2 upper strips (prevent blocky sky), 4 lower strips (smooth terrain transition)
-	m_ucVirticalGradientLevelUpper = std::max<BYTE>(byUpper, 2);
-	m_ucVirticalGradientLevelLower = std::max<BYTE>(byLower, 4);
+	// Preserve the strip topology authored in .msenv; only guard division by zero.
+	m_ucVirticalGradientLevelUpper = std::max<BYTE>(byUpper, 1);
+	m_ucVirticalGradientLevelLower = std::max<BYTE>(byLower, 1);
 }
 
 void CSkyBox::SetFaceTexture( const char* c_szFileName, int iFaceIndex )
@@ -1325,6 +1388,8 @@ void CSkyBox::Render()
 	gs_matSkyDX11World = m_matWorld;
 	gs_fSkyDX11UOffset = 0.0f;
 	gs_fSkyDX11VOffset = 0.0f;
+	gs_fSkyDX11UScale = 1.0f;
+	gs_fSkyDX11VScale = 1.0f;
     // DX11 native sky pass: opaque/no-blend for faces; clouds use dedicated cloud blend in RenderCloud().
     gs_pSkyDX11BlendState = NULL;
 	gs_uSkyDX11ExpectedQuads = 0u;
@@ -1545,12 +1610,10 @@ void CSkyBox::RenderCloud()
 	CGraphicTexture* pCloudTexture = pCloudGraphicImageInstance ? pCloudGraphicImageInstance->GetTexturePointer() : NULL;
 
 	DWORD dwCurTime = CTimer::Instance().GetCurrentMillisecond();
-	m_fCloudPositionU += m_fCloudScrollSpeedU * (float)( dwCurTime - m_dwlastTime ) * 0.001f;
-	if (m_fCloudPositionU >= 1.0f)
-		m_fCloudPositionU = 0.0f;
-	m_fCloudPositionV += m_fCloudScrollSpeedV * (float)( dwCurTime - m_dwlastTime ) * 0.001f;
-	if (m_fCloudPositionV >= 1.0f)
-		m_fCloudPositionV = 0.0f;
+	m_fCloudPositionU = fmodf(m_fCloudPositionU + m_fCloudScrollSpeedU * (float)(dwCurTime - m_dwlastTime) * 0.001f, 1.0f);
+	m_fCloudPositionV = fmodf(m_fCloudPositionV + m_fCloudScrollSpeedV * (float)(dwCurTime - m_dwlastTime) * 0.001f, 1.0f);
+	if (m_fCloudPositionU < 0.0f) m_fCloudPositionU += 1.0f;
+	if (m_fCloudPositionV < 0.0f) m_fCloudPositionV += 1.0f;
 	m_dwlastTime = dwCurTime;
 
 	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
@@ -1560,6 +1623,8 @@ void CSkyBox::RenderCloud()
 	gs_matSkyDX11World = m_matWorldCloud;
 	gs_fSkyDX11UOffset = m_fCloudPositionU;
 	gs_fSkyDX11VOffset = m_fCloudPositionV;
+	gs_fSkyDX11UScale = m_fCloudTextureScaleX;
+	gs_fSkyDX11VScale = m_fCloudTextureScaleY;
 	gs_eSkyDX11ShadingMode = SKY_DX11_SHADING_CLOUD_COMBINE;
 	gs_szSkyDX11Mode = "cloud_combine";
 	gs_pSkyDX11BlendState = pDX11Device->GetBootstrapUICloudBlendState();

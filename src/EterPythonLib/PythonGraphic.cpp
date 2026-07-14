@@ -141,7 +141,7 @@ void CPythonGraphic::SetOmniLight()
 
 	pStateManager11->SetLight(0, &kLight);
 	pStateManager11->SetLightEnable(0, TRUE);
-	pStateManager11->SetRenderState(D3DRS_LIGHTING, TRUE);
+	pStateManager11->SetLightingEnabled(true);
 	pStateManager11->ApplyState();
 }
 
@@ -561,7 +561,7 @@ void CPythonGraphic::PushState()
 		curState.viewportDX11.MaxDepth = 1.0f;
 	}
 
-	//STATEMANAGER.SaveTransform(D3DTS_WORLD, &m_SaveWorldMatrix);
+//STATEMANAGER.SaveTransform(GRP_TS_WORLD, &m_SaveWorldMatrix);
 
 	m_stateStack.push(curState);
 	//CCamera::Instance().PushParams();
@@ -577,7 +577,7 @@ void CPythonGraphic::PopState()
 	
 	TState & rState = m_stateStack.top();
 
-	//STATEMANAGER.RestoreTransform(D3DTS_WORLD);
+//STATEMANAGER.RestoreTransform(GRP_TS_WORLD);
 	ms_matProj = rState.matProj;
 	ms_matView = rState.matView;
 
@@ -638,8 +638,8 @@ void CPythonGraphic::RenderAlphaImage(CGraphicImageInstance* pImageInstance, flo
 	float width = (float) pImageInstance->GetWidth();
 	float height = (float) pImageInstance->GetHeight();
 
-	const DWORD dwLeftColor = D3DCOLOR_COLORVALUE(1.0f, 1.0f, 1.0f, aLeft);
-	const DWORD dwRightColor = D3DCOLOR_COLORVALUE(1.0f, 1.0f, 1.0f, aRight);
+	const DWORD dwLeftColor = GetColor(1.0f, 1.0f, 1.0f, aLeft);
+	const DWORD dwRightColor = GetColor(1.0f, 1.0f, 1.0f, aRight);
 
 	RenderTextureBox(x,
 					 y,
@@ -904,7 +904,7 @@ CPythonGraphic::CPythonGraphic()
 	m_lightColor = GetColor(1.0f, 1.0f, 1.0f);
 	m_darkColor = GetColor(0.0f, 0.0f, 0.0f);
 	
-	memset(&m_backupViewport, 0, sizeof(D3DVIEWPORT9));
+	memset(&m_backupViewport, 0, sizeof(GrpViewport));
 
 	m_fOrthoDepth = 1000.0f;
 }

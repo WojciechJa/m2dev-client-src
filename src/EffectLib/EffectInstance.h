@@ -58,10 +58,10 @@ class CEffectInstance : public CGraphicObjectInstance
 		void UpdateSound();
 		void OnUpdate();
 		void OnRender();
-		void OnBlendRender() {} // Not used
-		void OnRenderToShadowMap() {} // Not used
-		void OnRenderShadow() {} // Not used
-		void OnRenderPCBlocker() {} // Not used
+		void OnBlendRender();
+		void OnRenderToShadowMap();
+		void OnRenderShadow();
+		void OnRenderPCBlocker();
 
 	protected:
 		void					__Initialize();
@@ -70,9 +70,9 @@ class CEffectInstance : public CGraphicObjectInstance
 		void					__SetMeshData(CEffectMeshScript * pMesh);
 		void					__SetLightData(CLightData * pData);
 
-		virtual void			OnUpdateCollisionData(const CStaticCollisionDataVector * pscdVector) {} // Not used
-		virtual void			OnUpdateHeighInstance(CAttributeInstance * pAttributeInstance) {}
-		virtual bool			OnGetObjectHeight(float fX, float fY, float * pfHeight) { return false; }
+		virtual void			OnUpdateCollisionData(const CStaticCollisionDataVector * pscdVector);
+		virtual void			OnUpdateHeighInstance(CAttributeInstance * pAttributeInstance);
+		virtual bool			OnGetObjectHeight(float fX, float fY, float * pfHeight);
 
 	protected:
 		BOOL					m_isAlive;

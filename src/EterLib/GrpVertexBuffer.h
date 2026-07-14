@@ -10,8 +10,8 @@ class CGraphicVertexBuffer : public CGraphicBase
 		virtual ~CGraphicVertexBuffer();
 
 		void	Destroy();
-		virtual bool	Create(int vtxCount, DWORD fvf, DWORD usage, D3DPOOL d3dPool);
-		bool	CreateWithStride(int vtxCount, DWORD vertexStride, DWORD usage, D3DPOOL d3dPool);
+		virtual bool	Create(int vtxCount, DWORD fvf, DWORD usage, GrpPoolType poolType);
+		bool	CreateWithStride(int vtxCount, DWORD vertexStride, DWORD usage, GrpPoolType poolType);
 
 		bool	CreateDeviceObjects();
 		void	DestroyDeviceObjects();
@@ -32,9 +32,7 @@ class CGraphicVertexBuffer : public CGraphicBase
 		int		GetVertexStride() const;
 		DWORD	GetFlexibleVertexFormat() const;
 
-		inline	ID3D11Buffer* GetD3DVertexBuffer() const	{ return m_lpd3dVB; }
-		// M2-GRPBASE-TYPE-CUT-73: DX11-native API (replaces legacy GetD3DVertexBuffer)
-		inline	ID3D11Buffer* GetD3D11Buffer() const { return m_lpd3dVB; }
+		inline	ID3D11Buffer* GetVertexBuffer() const { return m_lpd3dVB; }
 		inline	DWORD GetBufferSize() const	{ return m_dwBufferSize; }
 
 		bool	IsEmpty() const;
@@ -49,7 +47,7 @@ class CGraphicVertexBuffer : public CGraphicBase
 		DWORD					m_dwFVF;
 		DWORD					m_dwVertexStride;  // DX11: explicit stride (0 = use FVF)
 		DWORD					m_dwUsage;
-		D3DPOOL					m_d3dPool;
+		GrpPoolType				m_poolType;
 		int						m_vtxCount;
 		DWORD					m_dwLockFlag;
 		std::vector<BYTE>		m_cpuShadowVertices;

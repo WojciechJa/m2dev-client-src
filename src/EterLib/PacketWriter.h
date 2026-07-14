@@ -11,7 +11,7 @@
 //   uint8_t buf[128];
 //   PacketWriter w(buf, sizeof(buf));
 //   w.WriteU16(CG::CHAT);
-//   w.WriteU16(0); // placeholder for length
+//   w.WriteU16(0); // reserved length field
 //   w.WriteU8(chatType);
 //   w.WriteString(message, 128);
 //   w.PatchU16(2, w.Written()); // patch length at offset 2

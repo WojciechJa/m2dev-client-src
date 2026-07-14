@@ -15,13 +15,13 @@
 #pragma warning(disable:4201 4512 4238 4239)
 #endif
 
-#include <d3d9.h>
-#include <d3dx9.h>
-
-#define DIRECTINPUT_VERSION 0x0800
-
-#include <dinput.h>
-
+// DX11 core headers
+#include <d3d11.h>
+#include <dxgi.h>
+#include <d3dcompiler.h>
+#include <DirectXMath.h>
+#include "DirectXMathHelpers.h"
+#include "GrpBase.h"
 #pragma warning ( disable : 4201 )
 #include <mmsystem.h>
 #pragma warning ( default : 4201 )
@@ -41,3 +41,4 @@
 #ifndef VC_EXTRALEAN
 #include <winsock.h>
 #endif
+

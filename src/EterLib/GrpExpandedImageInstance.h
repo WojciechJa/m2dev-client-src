@@ -38,6 +38,7 @@ class CGraphicExpandedImageInstance : public CGraphicImageInstance
 		void Initialize();
 
 		void OnRender();
+		bool OnRenderDX11();
 		void OnSetImagePointer();
 
 		BOOL OnIsType(DWORD dwType);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <d3dx9.h>
+#include "EterLib/DirectXMathHelpers.h"
 
 #include "Eterlib/GrpScreen.h"
 #include "Eterlib/Resource.h"
@@ -101,6 +101,16 @@ class CEffectMeshScript : public CEffectElementBase
 			TTimeEventTableFloat TimeEventAlpha;
 			
 			SMeshData()
+				: byBillboardType(MESH_BILLBOARD_TYPE_NONE)
+				, bBlendingEnable(TRUE)
+				, byBlendingSrcType(GRP_BLEND_SRCCOLOR)
+				, byBlendingDestType(GRP_BLEND_ONE)
+				, bTextureAlphaEnable(TRUE)
+				, byColorOperationType(GRP_TOP_MODULATE)
+				, ColorFactor(1.0f, 1.0f, 1.0f, 1.0f)
+				, bTextureAnimationLoopEnable(TRUE)
+				, fTextureAnimationFrameDelay(0.02f)
+				, dwTextureAnimationStartFrame(0u)
 			{
 				TimeEventAlpha.clear();
 			}
@@ -155,3 +165,4 @@ class CEffectMeshScript : public CEffectElementBase
 
 		static CDynamicPool<CEffectMeshScript> ms_kPool;	
 };
+

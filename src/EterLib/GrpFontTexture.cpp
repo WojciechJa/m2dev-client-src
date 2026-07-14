@@ -7,8 +7,12 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_SYNTHESIS_H
 
 #include <cmath>
+
+// M2-UI-TEXTTAIL-PARITY-26: Forward declaration to reset text startup guard on phase changes
+extern void ResetDX11TextStartupGuard();
 
 // Gamma LUT to sharpen grayscale anti-aliasing edges.
 static struct SAlphaGammaLUT {
@@ -76,6 +80,9 @@ bool CGraphicFontTexture::CreateDeviceObjects()
 {
 	if (!m_ftFace)
 		return true;
+
+	// M2-UI-TEXTTAIL-PARITY-26: Reset text startup guard on phase changes (alt-tab, resize, fullscreen)
+	ResetDX11TextStartupGuard();
 
 	// After device reset: wipe GPU textures, clear atlas state, and
 	// re-render all previously cached characters on demand.
@@ -184,7 +191,7 @@ bool CGraphicFontTexture::AppendTexture()
 {
 	CGraphicImageTexture* pNewTexture = new CGraphicImageTexture;
 
-	if (!pNewTexture->Create(m_atlasWidth, m_atlasHeight, D3DFMT_A8R8G8B8))
+	if (!pNewTexture->Create(m_atlasWidth, m_atlasHeight, GRP_FMT_A8R8G8B8))
 	{
 		delete pNewTexture;
 		return false;
@@ -280,10 +287,11 @@ CGraphicFontTexture::TCharacterInfomation* CGraphicFontTexture::UpdateCharacterI
 	if (FT_Load_Glyph(m_ftFace, glyphIndex, FT_LOAD_TARGET_LCD) != 0)
 		return NULL;
 
-	if (FT_Render_Glyph(m_ftFace->glyph, FT_RENDER_MODE_LCD) != 0)
-		return NULL;
-
 	FT_GlyphSlot slot = m_ftFace->glyph;
+	FT_GlyphSlot_Embolden(slot);
+
+	if (FT_Render_Glyph(slot, FT_RENDER_MODE_LCD) != 0)
+		return NULL;
 	FT_Bitmap& bitmap = slot->bitmap;
 
 	int glyphBitmapWidth = bitmap.width / 3;  // LCD bitmap is 3x wider (R,G,B per pixel)
@@ -409,4 +417,21 @@ void CGraphicFontTexture::SelectTexture(DWORD dwTexture)
 {
 	assert(CheckTextureIndex(dwTexture));
 	m_lpd3dTexture = m_pFontTextureVector[dwTexture]->GetD3DTexture();
+}
+
+DWORD CGraphicFontTexture::GetTexturePageCount() const
+{
+	return static_cast<DWORD>(m_pFontTextureVector.size());
+}
+
+ID3D11ShaderResourceView* CGraphicFontTexture::GetTexturePageSRV(DWORD dwTexture) const
+{
+	if (dwTexture >= m_pFontTextureVector.size())
+		return nullptr;
+
+	const CGraphicImageTexture* pTexture = m_pFontTextureVector[dwTexture];
+	if (!pTexture)
+		return nullptr;
+
+	return pTexture->GetD3D11TextureSRV();
 }

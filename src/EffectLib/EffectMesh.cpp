@@ -1,8 +1,92 @@
 #include "StdAfx.h"
-#include "Eterlib/StateManager.h"
 #include "Eterlib/ResourceManager.h"
 #include "PackLib/PackManager.h"
 #include "EffectMesh.h"
+#include <cmath>
+#include <unordered_set>
+
+namespace
+{
+	bool HasJpegExtension(const std::string& stLowerPath)
+	{
+		const size_t stLen = stLowerPath.size();
+		if (stLen >= 4 && 0 == stLowerPath.compare(stLen - 4, 4, ".jpg"))
+			return true;
+		if (stLen >= 5 && 0 == stLowerPath.compare(stLen - 5, 5, ".jpeg"))
+			return true;
+		return false;
+	}
+
+	std::string ResolveEffectTexturePath(const std::string& stPath)
+	{
+		if (stPath.empty())
+			return stPath;
+
+		std::string stLower = stPath;
+		for (size_t i = 0; i < stLower.size(); ++i)
+		{
+			if (stLower[i] == '\\')
+				stLower[i] = '/';
+			stLower[i] = static_cast<char>(tolower(static_cast<unsigned char>(stLower[i])));
+		}
+
+		if (std::string::npos == stLower.find("/effect/etc/click/") || !HasJpegExtension(stLower))
+			return stPath;
+
+		std::string stDDS = stPath;
+		const size_t stDotPos = stDDS.find_last_of('.');
+		if (std::string::npos == stDotPos)
+			return stPath;
+
+		stDDS.replace(stDotPos, std::string::npos, ".dds");
+		if (CPackManager::Instance().IsExist(stDDS))
+		{
+			static std::unordered_set<std::string> s_kLoggedRemaps;
+			if (s_kLoggedRemaps.insert(stPath).second)
+			{
+				TraceError("DX11_TARGET_TEXTURE_REMAP source=%s remap=%s", stPath.c_str(), stDDS.c_str());
+			}
+			return stDDS;
+		}
+
+		return stPath;
+	}
+
+	bool ValidateEffectFrameIndices(const std::vector<int>& rkGeomIndices,
+		const std::vector<int>& rkTexIndices,
+		DWORD dwVertexCount,
+		DWORD dwTexVertexCount,
+		int* piBadGeomIndex,
+		int* piBadTexIndex)
+	{
+		if (piBadGeomIndex)
+			*piBadGeomIndex = -1;
+		if (piBadTexIndex)
+			*piBadTexIndex = -1;
+
+		const size_t stIndexCount = rkGeomIndices.size();
+		for (size_t i = 0; i < stIndexCount; ++i)
+		{
+			const int iGeomIndex = rkGeomIndices[i];
+			if (iGeomIndex < 0 || iGeomIndex >= static_cast<int>(dwVertexCount))
+			{
+				if (piBadGeomIndex)
+					*piBadGeomIndex = iGeomIndex;
+				return false;
+			}
+
+			const int iTexIndex = rkTexIndices[i];
+			if (iTexIndex < 0 || iTexIndex >= static_cast<int>(dwTexVertexCount))
+			{
+				if (piBadTexIndex)
+					*piBadTexIndex = iTexIndex;
+				return false;
+			}
+		}
+
+		return true;
+	}
+}
 
 CDynamicPool<CEffectMesh::SEffectMeshData> CEffectMesh::SEffectMeshData::ms_kPool;
 
@@ -163,9 +247,31 @@ BOOL CEffectMesh::__LoadData_Ver002(int iSize, const BYTE * c_pbBuf)
 			c_pbBuf += rFrameData.dwIndexCount*sizeof(int);
 
 			///////////////////////////////
+			int iBadGeomIndex = -1;
+			int iBadTexIndex = -1;
+			if (!ValidateEffectFrameIndices(iIndexVector,
+				iTextureIndexVector,
+				rFrameData.dwVertexCount,
+				rFrameData.dwTextureVertexCount,
+				&iBadGeomIndex,
+				&iBadTexIndex))
+			{
+				TraceError(
+					"DX11_EFFECT_MESH_DATA_SKIP reason=invalid_index mesh=%d frame=%d geom_index=%d tex_index=%d file=%s",
+					static_cast<int>(n),
+					i,
+					iBadGeomIndex,
+					iBadTexIndex,
+					GetFileName());
+				rFrameData.fVisibility = 0.0f;
+				rFrameData.dwIndexCount = 0u;
+				rFrameData.PDTVertexVector.clear();
+				continue;
+			}
 
 			rFrameData.PDTVertexVector.clear();
 			rFrameData.PDTVertexVector.resize(rFrameData.dwIndexCount);
+			bool bInvalidTexCoord = false;
 			for (DWORD j = 0; j < rFrameData.dwIndexCount; ++j)
 			{
 				TPTVertex & rVertex = rFrameData.PDTVertexVector[j];
@@ -178,7 +284,24 @@ BOOL CEffectMesh::__LoadData_Ver002(int iSize, const BYTE * c_pbBuf)
 
 				rVertex.position = v3VertexVector[dwIndex];
 				rVertex.texCoord = v3TextureVertexVector[dwTextureIndex];
+				if (!std::isfinite(rVertex.texCoord.x) || !std::isfinite(rVertex.texCoord.y))
+				{
+					bInvalidTexCoord = true;
+					break;
+				}
 				rVertex.texCoord.y *= -1;
+			}
+			if (bInvalidTexCoord)
+			{
+				TraceError(
+					"DX11_EFFECT_MESH_DATA_SKIP reason=invalid_texcoord mesh=%d frame=%d file=%s",
+					static_cast<int>(n),
+					i,
+					GetFileName());
+				rFrameData.fVisibility = 0.0f;
+				rFrameData.dwIndexCount = 0u;
+				rFrameData.PDTVertexVector.clear();
+				continue;
 			}
 		}
 
@@ -214,8 +337,8 @@ BOOL CEffectMesh::__LoadData_Ver002(int iSize, const BYTE * c_pbBuf)
 
 					strTextureFileName = strPathName;
 					strTextureFileName += c_rstrFileName;
-
-					CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(strTextureFileName.c_str());
+					const std::string stResolvedPath = ResolveEffectTexturePath(strTextureFileName);
+					CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(stResolvedPath.c_str());
 
 					pMeshData->pImageVector.push_back(pImage);
 				}
@@ -223,7 +346,8 @@ BOOL CEffectMesh::__LoadData_Ver002(int iSize, const BYTE * c_pbBuf)
 		}
 		else
 		{
-			CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(pMeshData->szDiffuseMapFileName);
+			const std::string stResolvedPath = ResolveEffectTexturePath(pMeshData->szDiffuseMapFileName);
+			CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(stResolvedPath.c_str());
 
 			pMeshData->pImageVector.push_back(pImage);
 		}
@@ -307,9 +431,31 @@ BOOL CEffectMesh::__LoadData_Ver001(int iSize, const BYTE * c_pbBuf)
 			c_pbBuf += rFrameData.dwIndexCount*sizeof(int);
 
 			///////////////////////////////
+			int iBadGeomIndex = -1;
+			int iBadTexIndex = -1;
+			if (!ValidateEffectFrameIndices(iIndexVector,
+				iTextureIndexVector,
+				rFrameData.dwVertexCount,
+				rFrameData.dwTextureVertexCount,
+				&iBadGeomIndex,
+				&iBadTexIndex))
+			{
+				TraceError(
+					"DX11_EFFECT_MESH_DATA_SKIP reason=invalid_index mesh=%d frame=%d geom_index=%d tex_index=%d file=%s",
+					static_cast<int>(n),
+					i,
+					iBadGeomIndex,
+					iBadTexIndex,
+					GetFileName());
+				rFrameData.fVisibility = 0.0f;
+				rFrameData.dwIndexCount = 0u;
+				rFrameData.PDTVertexVector.clear();
+				continue;
+			}
 
 			rFrameData.PDTVertexVector.clear();
 			rFrameData.PDTVertexVector.resize(rFrameData.dwIndexCount);
+			bool bInvalidTexCoord = false;
 			for (DWORD j = 0; j < rFrameData.dwIndexCount; ++j)
 			{
 				TPTVertex & rVertex = rFrameData.PDTVertexVector[j];
@@ -322,7 +468,24 @@ BOOL CEffectMesh::__LoadData_Ver001(int iSize, const BYTE * c_pbBuf)
 
 				rVertex.position = v3VertexVector[dwIndex];
 				rVertex.texCoord = v3TextureVertexVector[dwTextureIndex];
+				if (!std::isfinite(rVertex.texCoord.x) || !std::isfinite(rVertex.texCoord.y))
+				{
+					bInvalidTexCoord = true;
+					break;
+				}
 				rVertex.texCoord.y *= -1;
+			}
+			if (bInvalidTexCoord)
+			{
+				TraceError(
+					"DX11_EFFECT_MESH_DATA_SKIP reason=invalid_texcoord mesh=%d frame=%d file=%s",
+					static_cast<int>(n),
+					i,
+					GetFileName());
+				rFrameData.fVisibility = 0.0f;
+				rFrameData.dwIndexCount = 0u;
+				rFrameData.PDTVertexVector.clear();
+				continue;
 			}
 		}
 
@@ -358,8 +521,8 @@ BOOL CEffectMesh::__LoadData_Ver001(int iSize, const BYTE * c_pbBuf)
 
 					strTextureFileName = strPathName;
 					strTextureFileName += c_rstrFileName;
-
-					CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(strTextureFileName.c_str());
+					const std::string stResolvedPath = ResolveEffectTexturePath(strTextureFileName);
+					CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(stResolvedPath.c_str());
 
 					pMeshData->pImageVector.push_back(pImage);
 				}
@@ -367,7 +530,8 @@ BOOL CEffectMesh::__LoadData_Ver001(int iSize, const BYTE * c_pbBuf)
 		}
 		else
 		{
-			CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(pMeshData->szDiffuseMapFileName);
+			const std::string stResolvedPath = ResolveEffectTexturePath(pMeshData->szDiffuseMapFileName);
+			CGraphicImage * pImage = (CGraphicImage *)CResourceManager::Instance().GetResourcePointer(stResolvedPath.c_str());
 
 			pMeshData->pImageVector.push_back(pImage);
 		}
@@ -457,11 +621,11 @@ void CEffectMeshScript::ReserveMeshData(DWORD dwMeshCount)
 
 		rMeshData.byBillboardType = MESH_BILLBOARD_TYPE_NONE;
 		rMeshData.bBlendingEnable = TRUE;
-		rMeshData.byBlendingSrcType = D3DBLEND_SRCCOLOR;
-		rMeshData.byBlendingDestType = D3DBLEND_ONE;
-		rMeshData.bTextureAlphaEnable = FALSE;
+		rMeshData.byBlendingSrcType = GRP_BLEND_SRCCOLOR;
+		rMeshData.byBlendingDestType = GRP_BLEND_ONE;
+		rMeshData.bTextureAlphaEnable = TRUE;
 
-		rMeshData.byColorOperationType = D3DTOP_MODULATE;
+		rMeshData.byColorOperationType = GRP_TOP_MODULATE;
 		rMeshData.ColorFactor = D3DXCOLOR(1.0f, 1.0f, 1.0f, 1.0f);
 
 		rMeshData.bTextureAnimationLoopEnable = true;
@@ -643,6 +807,11 @@ BOOL CEffectMeshScript::OnLoadScript(CTextFileLoader & rTextFileLoader)
 			return FALSE;
 		if (!rTextFileLoader.GetTokenByte("blendingdesttype", &rMeshData.byBlendingDestType))
 			return FALSE;
+		if (!rTextFileLoader.GetTokenBoolean("texturealphaenable", &rMeshData.bTextureAlphaEnable))
+		{
+			// Legacy scripts may miss this token; default to enabled alpha sampling in DX11.
+			rMeshData.bTextureAlphaEnable = TRUE;
+		}
 
 		if (!rTextFileLoader.GetTokenBoolean("textureanimationloopenable", &rMeshData.bTextureAnimationLoopEnable))
 			return FALSE;
@@ -655,7 +824,7 @@ BOOL CEffectMeshScript::OnLoadScript(CTextFileLoader & rTextFileLoader)
 
 		if (!rTextFileLoader.GetTokenByte("coloroperationtype", &rMeshData.byColorOperationType))
 		{
-			rMeshData.byColorOperationType = D3DTOP_MODULATE;
+			rMeshData.byColorOperationType = GRP_TOP_MODULATE;
 		}
 		if (!rTextFileLoader.GetTokenColor("colorfactor", &rMeshData.ColorFactor))
 		{

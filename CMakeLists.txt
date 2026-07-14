@@ -7,6 +7,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ASan support
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ENABLE_DX11_RENDERER "Enable DX11 renderer migration scaffolding" ON)
+option(DX11_STRICT_ONLY "Enable strict DX11-only migration mode (disables DX9 legacy link in DirectX interface)" ON)
+option(BUILD_DEBUG_UI "Build the optional ImGui diagnostics overlay" OFF)
+option(BUILD_WORLDEDITOR "Build the separate WorldEditor target" OFF)
+option(BUILD_SPEEDTREE_ATLAS_PACKER "Build the experimental SpeedTree atlas tool" OFF)
+set(SHADER_CACHE_VERSION "1" CACHE STRING "Shader cache version used by runtime config")
 
 set(CMAKE_MODULE_PATH
 	${CMAKE_MODULE_PATH}
@@ -63,13 +69,40 @@ add_definitions(-DPy_NO_ENABLE_SHARED)
 add_compile_definitions("$<$<CONFIG:Debug>:DEBUG>")
 add_compile_definitions("$<$<CONFIG:RelWithDebInfo>:_DISTRIBUTE>")
 add_compile_definitions("$<$<CONFIG:Release>:_DISTRIBUTE>")
+add_compile_definitions(SHADER_CACHE_VERSION=${SHADER_CACHE_VERSION})
+
+if(ENABLE_DX11_RENDERER)
+	add_compile_definitions(ENABLE_DX11_RENDERER=1)
+endif()
+
+if(DX11_STRICT_ONLY)
+	add_compile_definitions(DX11_STRICT_ONLY=1)
+endif()
+
+if(BUILD_DEBUG_UI)
+	add_compile_definitions(BUILD_DEBUG_UI=1)
+endif()
 
 include_directories("src")
 include_directories("extern/include")
 include_directories("vendor/libsodium/src/libsodium/include")
 include_directories("vendor/freetype-2.13.3/include")
+include_directories("vendor/imgui")
+include_directories("vendor/imgui/backends")
 
-# Add subdirectories for libraries and executables
+add_custom_target(dx11_strict_gate
+	COMMAND ${CMAKE_COMMAND} -E echo "DX11 strict migration gate scan"
+	COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/dx11_strict_scan.ps1" -RepoRoot "${CMAKE_CURRENT_SOURCE_DIR}" -ManifestPath "${CMAKE_CURRENT_SOURCE_DIR}/tools/dx11_strict_scan_manifest.txt"
+	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+if(DX11_STRICT_ONLY)
+	# Enforce strict scan during normal builds when strict mode is enabled.
+	add_custom_target(dx11_strict_gate_all ALL DEPENDS dx11_strict_gate)
+endif()
+
+# Dependency targets must exist before first-party libraries link them.
 add_subdirectory(vendor)
-add_subdirectory(src)
 add_subdirectory(extern)
+add_subdirectory(src)
+add_subdirectory(tools)

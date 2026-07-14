@@ -108,7 +108,7 @@ namespace UI
 
 			void ClearAllSlot();
 			void ClearSlot(DWORD dwIndex);
-			void SetSlot(DWORD dwIndex, DWORD dwVirtualNumber, BYTE byWidth, BYTE byHeight, CGraphicImage * pImage, D3DXCOLOR& diffuseColor);
+			void SetSlot(DWORD dwIndex, DWORD dwVirtualNumber, BYTE byWidth, BYTE byHeight, CGraphicImage * pImage, DirectX::SimpleMath::Color& diffuseColor);
 			void SetSlotCount(DWORD dwIndex, DWORD dwCount);
 			void SetSlotCountNew(DWORD dwIndex, DWORD dwGrade, DWORD dwCount);
 			void SetSlotCoolTime(DWORD dwIndex, float fCoolTime, float fElapsedTime = 0.0f);

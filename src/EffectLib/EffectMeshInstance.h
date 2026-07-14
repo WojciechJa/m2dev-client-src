@@ -5,6 +5,7 @@
 #include "EffectElementBaseInstance.h"
 #include "FrameController.h"
 #include "EffectMesh.h"
+#include "EffectRenderClass.h"
 
 class CEffectMeshInstance : public CEffectElementBaseInstance
 {
@@ -19,6 +20,8 @@ class CEffectMeshInstance : public CEffectElementBaseInstance
 	public:
 		CEffectMeshInstance();
 		virtual ~CEffectMeshInstance();
+		void SetDX11RenderClass(EEffectRenderClass eRenderClass) { m_eDX11RenderClass = eRenderClass; }
+		void SetOwnerEffectCRC(DWORD dwEffectCRC) { m_dwOwnerEffectCRC = dwEffectCRC; }
 
 	public:
 		static void DestroySystem();
@@ -36,6 +39,7 @@ class CEffectMeshInstance : public CEffectElementBaseInstance
 
 		bool OnUpdate(float fElapsedTime);
 		void OnRender();
+		void OnRenderDX11();  // DX11 render path (Batch W2)
 
 		BOOL isActive();
 
@@ -47,4 +51,6 @@ class CEffectMeshInstance : public CEffectElementBaseInstance
 		std::vector<TTextureInstance>			m_TextureInstanceVector;
 
 		CEffectMesh::TRef						m_roMesh;
+		EEffectRenderClass						m_eDX11RenderClass;
+		DWORD									m_dwOwnerEffectCRC;
 };

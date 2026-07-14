@@ -1,5 +1,8 @@
 #pragma once
 
+#include "GrpBase.h"
+#include <cmath>
+
 float CrossProduct2D(float x1, float y1, float x2, float y2);
 
 bool IsInTriangle2D(float ax, float ay, float bx, float by, float cx, float cy, float tx, float ty);

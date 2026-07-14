@@ -1,5 +1,7 @@
 #pragma once
 
+#include <d3d11.h>
+
 #include "EterLib/GrpTextInstance.h"
 #include "EterLib/GrpMarkInstance.h"
 #include "EterLib/GrpImageInstance.h"
@@ -18,7 +20,7 @@ class CPythonGraphic : public CScreen, public CSingleton<CPythonGraphic>
 		void PushState();
 		void PopState();
 
-		LPDIRECT3D9EX GetD3D();
+		ID3D11Device* GetDX11Device();
 
 		float GetOrthoDepth();
 		void SetInterfaceRenderState();
@@ -48,8 +50,9 @@ class CPythonGraphic : public CScreen, public CSingleton<CPythonGraphic>
 	protected:
 		typedef struct SState
 		{
-			D3DXMATRIX matView;
-			D3DXMATRIX matProj;
+			DirectX::SimpleMath::Matrix matView;
+			DirectX::SimpleMath::Matrix matProj;
+			D3D11_VIEWPORT viewportDX11;  // M2-CHARSELECT-FIX-39: Save/restore DX11 viewport in PushState/PopState
 		} TState;
 
 		DWORD		m_lightColor;
@@ -58,11 +61,12 @@ class CPythonGraphic : public CScreen, public CSingleton<CPythonGraphic>
 	protected:
 		std::stack<TState>						m_stateStack;
 
-		D3DXMATRIX								m_SaveWorldMatrix;
+		DirectX::SimpleMath::Matrix				m_SaveWorldMatrix;
 
 		CCullingManager							m_CullingManager;
 
-		D3DVIEWPORT9							m_backupViewport;
+	GrpViewport								m_backupViewport;
+		D3D11_VIEWPORT							m_backupViewportDX11;
 
 		float									m_fOrthoDepth;
 };

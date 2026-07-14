@@ -1,12 +1,55 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "CullingManager.h"
 #include "GrpObjectInstance.h"
+#include "Camera.h"
+#include "UserInterface/config.h"
+#include <cmath>
+#include <EterBase/Timer.h>
 
 //#define COUNT_SHOWING_SPHERE
 
 #ifdef COUNT_SHOWING_SPHERE
 int showingcount = 0;
 #endif
+
+namespace
+{
+inline bool IsFiniteFloat(float v)
+{
+	return std::isfinite(v);
+}
+
+inline bool IsValidSphere(const Vector3d& center, float radius)
+{
+	return IsFiniteFloat(center.x) &&
+		IsFiniteFloat(center.y) &&
+		IsFiniteFloat(center.z) &&
+		IsFiniteFloat(radius) &&
+		radius > 0.0f;
+}
+
+inline bool IsReasonableSphere(const Vector3d& center, float radius)
+{
+	// Keep culling inputs safely inside SpherePack spatial envelope.
+	// Root/leaf trees use large radii, but corrupted bounds can still produce
+	// extreme centers that violate parent-child invariants during AddChild.
+	const float kMaxAbsCenter = 1500000.0f;
+	const float kMaxRadius = 200000.0f;
+	return fabsf(center.x) <= kMaxAbsCenter &&
+		fabsf(center.y) <= kMaxAbsCenter &&
+		fabsf(center.z) <= kMaxAbsCenter &&
+		radius <= kMaxRadius;
+}
+
+inline bool IsBuildingLikeObject(const CGraphicObjectInstance* pInstance)
+{
+	if (!pInstance)
+		return false;
+
+	const int iType = pInstance->GetType();
+	return (iType == THING_OBJECT || iType == DUNGEON_OBJECT || iType == ACTOR_OBJECT);
+}
+}
 
 void CCullingManager::RayTraceCallback(const Vector3d &/*p1*/,          // source pos of ray
 							  const Vector3d &/*dir*/,          // dest pos of ray
@@ -29,7 +72,7 @@ void CCullingManager::RayTraceCallback(const Vector3d &/*p1*/,          // sourc
 }
 
 
-void CCullingManager::VisibilityCallback(const Frustum &/*f*/,SpherePack *sphere,ViewState state)
+void CCullingManager::VisibilityCallback(const Frustum &f,SpherePack *sphere,ViewState state)
 {
 #ifdef SPHERELIB_STRICT
 		if (sphere->IS_SPHERE)
@@ -37,14 +80,72 @@ void CCullingManager::VisibilityCallback(const Frustum &/*f*/,SpherePack *sphere
 #endif
 
 	CGraphicObjectInstance * pInstance = (CGraphicObjectInstance*)sphere->GetUserData();
-	/*if (state == VS_PARTIAL)
+	bool bVisible = (state != VS_OUTSIDE);
+	bool bYFlipRescued = false;
+	bool bDistanceRescued = false;
+
+	if (!bVisible &&
+		DX11RuntimeConfig::kObjectCullingYFlipRescue &&
+		IsBuildingLikeObject(pInstance))
 	{
-		Vector3d v;
-		float r;
-		pInstance->GetBoundingSphere(v,r);
-		state = f.ViewVolumeTest(v,r);
-	}*/
-	if (state == VS_OUTSIDE)
+		D3DXVECTOR3 v3Center(0.0f, 0.0f, 0.0f);
+		float fRadius = 0.0f;
+		if (pInstance->GetBoundingSphere(v3Center, fRadius))
+		{
+			Vector3d kCenterYFlipped;
+			kCenterYFlipped.Set(v3Center.x, -v3Center.y, v3Center.z);
+			const ViewState eAltState = f.ViewVolumeTest(kCenterYFlipped, fRadius);
+			if (eAltState != VS_OUTSIDE)
+			{
+				bVisible = true;
+				bYFlipRescued = true;
+			}
+		}
+	}
+
+	if (!bVisible &&
+		DX11RuntimeConfig::kObjectCullingDistanceRescue &&
+		IsBuildingLikeObject(pInstance))
+	{
+		CCamera* pCamera = CCameraManager::Instance().GetCurrentCamera();
+		if (pCamera)
+		{
+			const D3DXVECTOR3& rv3Eye = pCamera->GetEye();
+			const D3DXVECTOR3& rv3Pos = pInstance->GetPosition();
+			const float dx = rv3Eye.x - rv3Pos.x;
+			const float dy = rv3Eye.y - rv3Pos.y;
+			const float dz = rv3Eye.z - rv3Pos.z;
+			const float fDistSq = dx * dx + dy * dy + dz * dz;
+			const float fMaxDist = DX11RuntimeConfig::kObjectCullingDistanceRescueRange;
+			if (fDistSq <= (fMaxDist * fMaxDist))
+			{
+				bVisible = true;
+				bDistanceRescued = true;
+			}
+		}
+	}
+
+	static DWORD s_dwLastCullingRescueLogMS = 0u;
+	static DWORD s_dwYFlipRescueCount = 0u;
+	static DWORD s_dwDistanceRescueCount = 0u;
+	if (bYFlipRescued)
+		++s_dwYFlipRescueCount;
+	if (bDistanceRescued)
+		++s_dwDistanceRescueCount;
+
+	const DWORD dwNow = ELTimer_GetMSec();
+	if ((s_dwYFlipRescueCount > 0u || s_dwDistanceRescueCount > 0u) &&
+		(0u == s_dwLastCullingRescueLogMS || (dwNow - s_dwLastCullingRescueLogMS) >= 5000u))
+	{
+		s_dwLastCullingRescueLogMS = dwNow;
+		TraceError("DX11_OBJECT_CULL_RESCUE y_flip=%u distance=%u",
+			s_dwYFlipRescueCount,
+			s_dwDistanceRescueCount);
+		s_dwYFlipRescueCount = 0u;
+		s_dwDistanceRescueCount = 0u;
+	}
+
+	if (!bVisible)
 	{
 #ifdef COUNT_SHOWING_SPHERE
 		if (pInstance->isShow())
@@ -53,7 +154,6 @@ void CCullingManager::VisibilityCallback(const Frustum &/*f*/,SpherePack *sphere
 			showingcount--;
 			Tracef("show size : %5d\n",showingcount);
 		}
-
 #endif
 		pInstance->Hide();
 	}
@@ -70,7 +170,6 @@ void CCullingManager::VisibilityCallback(const Frustum &/*f*/,SpherePack *sphere
 		pInstance->Show();
 	}
 }
-
 void CCullingManager::RangeTestCallback(const Vector3d &/*p*/,float /*distance*/,SpherePack *sphere,ViewState state)
 {
 #ifdef SPHERELIB_STRICT
@@ -92,8 +191,8 @@ void CCullingManager::Reset()
 
 void CCullingManager::Update()
 {
-	// TODO : update each object
-	// 하지말고 각자 하게 해보자
+	// NOTE: update each object
+	// í•˜ì§€ë§ê³  ê°ìž í•˜ê²Œ í•´ë³´ìž
 
 	//DWORD time = ELTimer_GetMSec();
 	//Reset();
@@ -122,8 +221,54 @@ CCullingManager::CullingHandle CCullingManager::Register(CGraphicObjectInstance 
 	Tracef("show size : %5d\n",showingcount);
 #endif
 	Vector3d center;
-	float radius;
-	obj->GetBoundingSphere(center,radius);
+	float radius = 0.0f;
+	const bool bHasBoundingSphere = obj->GetBoundingSphere(center, radius);
+
+	if (!bHasBoundingSphere || !IsValidSphere(center, radius) || !IsReasonableSphere(center, radius))
+	{
+		const D3DXVECTOR3& vMin = obj->GetTBBoxMin();
+		const D3DXVECTOR3& vMax = obj->GetTBBoxMax();
+		center.Set(
+			(vMin.x + vMax.x) * 0.5f,
+			(vMin.y + vMax.y) * 0.5f,
+			(vMin.z + vMax.z) * 0.5f);
+
+		const float dx = vMax.x - vMin.x;
+		const float dy = vMax.y - vMin.y;
+		const float dz = vMax.z - vMin.z;
+		radius = sqrtf(dx * dx + dy * dy + dz * dz) * 0.5f;
+
+		if (!IsValidSphere(center, radius) || !IsReasonableSphere(center, radius))
+		{
+			const D3DXVECTOR3& vPos = obj->GetPosition();
+			center.Set(vPos.x, vPos.y, vPos.z);
+			radius = 120.0f;
+		}
+
+		static bool s_bLoggedCullingSphereFallback = false;
+		if (!s_bLoggedCullingSphereFallback)
+		{
+			s_bLoggedCullingSphereFallback = true;
+			TraceError("DX11_CULLING_SPHERE_FALLBACK reason=invalid_object_bounding_sphere");
+		}
+	}
+
+	// Defensive clamp for corrupted/extreme bounds data that can violate SpherePack hierarchy assumptions.
+	const float kMaxReasonableCullingRadius = 200000.0f;
+	if (radius > kMaxReasonableCullingRadius)
+	{
+		static bool s_bLoggedCullingSphereClamp = false;
+		if (!s_bLoggedCullingSphereClamp)
+		{
+			s_bLoggedCullingSphereClamp = true;
+			TraceError(
+				"DX11_CULLING_SPHERE_CLAMP reason=radius_too_large old=%.2f new=%.2f",
+				radius,
+				kMaxReasonableCullingRadius);
+		}
+		radius = kMaxReasonableCullingRadius;
+	}
+
 	return m_Factory->AddSphere_(center,radius,obj, false);
 }
 
@@ -174,3 +319,5 @@ void CCullingManager::FindRayDistance(const Vector3d &p1, const Vector3d &dir, f
 	m_list.clear();
 	m_Factory->RayTrace(p1,dir,this);
 }
+
+

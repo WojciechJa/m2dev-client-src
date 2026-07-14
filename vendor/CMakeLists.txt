@@ -1,6 +1,12 @@
 add_subdirectory(lzo-2.10)
 add_subdirectory(mio)
 add_subdirectory(libsodium)
+if(BUILD_DEBUG_UI)
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/imgui/CMakeLists.txt")
+		message(FATAL_ERROR "BUILD_DEBUG_UI requires vendor/imgui")
+	endif()
+	add_subdirectory(imgui)
+endif()
 
 ## zstd is a bit tricky
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "BUILD SHARED LIBRARIES" FORCE)
@@ -19,6 +25,11 @@ if (WIN32)
 	set_target_properties(lzo2 PROPERTIES FOLDER vendor)
 	set_target_properties(sodium PROPERTIES FOLDER vendor)
 	set_target_properties(freetype PROPERTIES FOLDER vendor)
+	if(BUILD_DEBUG_UI)
+		set_target_properties(imgui PROPERTIES FOLDER vendor/imgui)
+		set_target_properties(imgui_backend_dx11 PROPERTIES FOLDER vendor/imgui)
+		set_target_properties(imgui_backend_win32 PROPERTIES FOLDER vendor/imgui)
+	endif()
 
 	## zstd stuff
 	set_target_properties(zstd PROPERTIES FOLDER vendor/zstd)

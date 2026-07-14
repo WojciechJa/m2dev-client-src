@@ -48,6 +48,7 @@ class CGrannyMesh
 		bool					IsTwoSide() const;
 
 		int						GetVertexCount() const;
+		size_t					GetVertexStride() const;
 		
 		// WORK
 		int *					GetDefaultBoneIndices() const;

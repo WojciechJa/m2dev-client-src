@@ -1,4 +1,4 @@
-/* Copyright (C) Graham Rhodes, 2001. 
+/* Copyright (C) Graham Rhodes, 2001.
  * All rights reserved worldwide.
  *
  * This software is provided "as is" without express or implied
@@ -25,13 +25,15 @@
 #ifndef _lineintersect_utils_h
 #define _lineintersect_utils_h
 
-void IntersectLineSegments(const D3DXVECTOR3 & A1,
-                           const D3DXVECTOR3 & A2, 
-                           const D3DXVECTOR3 & B1,
-                           const D3DXVECTOR3 & B2,
-                           //bool infinite_lines, /*float epsilon,*/ 
-						   D3DXVECTOR3 & OutA, 
-						   D3DXVECTOR3 & OutB);
+#include "GrpBase.h"
+
+void IntersectLineSegments(const TPosition & A1,
+                           const TPosition & A2,
+                           const TPosition & B1,
+                           const TPosition & B2,
+                           //bool infinite_lines, /*float epsilon,*/
+						   TPosition & OutA,
+						   TPosition & OutB);
 
 
 void IntersectLineSegments(const float A1x, const float A1y, const float A1z,

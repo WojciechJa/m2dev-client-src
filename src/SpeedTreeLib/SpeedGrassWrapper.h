@@ -22,8 +22,13 @@
 
 
 #pragma once
-//#include "SpeedGrassRT.h"
+#include "SpeedGrassRT.h"
 #ifdef USE_SPEEDGRASS
+
+// DX11: Forward declarations and includes
+#include "GrassVertex.h"
+#include <vector>
+
 // forward reference
 //class CScene;
 class CMapOutdoor;
@@ -41,10 +46,19 @@ public:
 		void							SetMapOutdoor(CMapOutdoor* pMapOutdoor)	{ m_pMapOutdoor = pMapOutdoor; }
 		int								Draw(float fDensity);
 		bool							InitFromBsfFile(const char* pFilename,
-														unsigned int nNumBlades, 
-														unsigned int uiRows, 
-														unsigned int uiCols, 
+														unsigned int nNumBlades,
+														unsigned int uiRows,
+														unsigned int uiCols,
 														float fCollisionDistance);
+
+		// DX11: Generate grass geometry for DX11 rendering
+		bool							GenerateGrassVertices(std::vector<GrassVertex>& outVertices,
+																UINT& outRegionCount,
+																UINT& outBladeCount,
+																const DirectX::SimpleMath::Vector3& cameraPos,
+																float lodNearDistance,
+																float lodFarDistance,
+																float& outLodBlendFactor) const;
 
 private:
 virtual float							Color(float fX, float fY, const float* pNormal, float* pTopColor, float* pBottomColor) const;
@@ -53,7 +67,7 @@ virtual	float							Height(float fX, float fY, float* pNormal) const;
 
 		CMapOutdoor *					m_pMapOutdoor;
 
-		LPDIRECT3DTEXTURE9				m_lpD3DTexure8;
+		void*							m_lpD3DTexure8;		// DX11: Legacy DX9 texture (unused)
 
 		CGraphicImageInstance			m_GrassImageInstance;
 };

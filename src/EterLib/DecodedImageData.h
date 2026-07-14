@@ -1,9 +1,9 @@
 #ifndef __INC_ETERLIB_DECODEDIMAGEDATA_H__
 #define __INC_ETERLIB_DECODEDIMAGEDATA_H__
 
+#include "GrpBase.h"
 #include <vector>
 #include <cstdint>
-#include <d3d9.h>
 
 // Decoded image data for GPU upload
 struct TDecodedImageData
@@ -20,7 +20,7 @@ struct TDecodedImageData
 	int width;
 	int height;
 	EFormat format;
-	D3DFORMAT d3dFormat;
+	GrpFormatType formatType;
 	bool isDDS;
 	int mipLevels;
 
@@ -28,7 +28,7 @@ struct TDecodedImageData
 		: width(0)
 		, height(0)
 		, format(FORMAT_UNKNOWN)
-		, d3dFormat(D3DFMT_UNKNOWN)
+		, formatType(GRP_FMT_UNKNOWN)
 		, isDDS(false)
 		, mipLevels(1)
 	{
@@ -40,7 +40,7 @@ struct TDecodedImageData
 		width = 0;
 		height = 0;
 		format = FORMAT_UNKNOWN;
-		d3dFormat = D3DFMT_UNKNOWN;
+		formatType = GRP_FMT_UNKNOWN;
 		isDDS = false;
 		mipLevels = 1;
 	}

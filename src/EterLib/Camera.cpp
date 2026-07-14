@@ -16,6 +16,11 @@ void CCamera::SetCameraMaxDistance(float fMax)
 	CAMERA_MAX_DISTANCE = fMax;
 }
 
+float CCamera::GetCameraMaxDistance()
+{
+	return CAMERA_MAX_DISTANCE;
+}
+
 float CCamera::GetTargetHeight()
 {
 	return m_fTarget_;
@@ -56,12 +61,12 @@ m_isLock(false)
 
 	m_fTarget_						= CAMERA_TARGET_STANDARD;
 
-	m_v3AngularAcceleration			= D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-	m_v3AngularVelocity				= D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+	m_v3AngularAcceleration			= DirectX::SimpleMath::Vector3(0.0f, 0.0f, 0.0f);
+	m_v3AngularVelocity				= DirectX::SimpleMath::Vector3(0.0f, 0.0f, 0.0f);
 
 	m_bProcessTerrainCollision		= true;
 
-    SetViewParams(D3DXVECTOR3(0.0f,0.0f,1.0f), D3DXVECTOR3(0.0f,0.0f,0.0f), D3DXVECTOR3(0.0f,1.0f,0.0f));
+    SetViewParams(DirectX::SimpleMath::Vector3(0.0f,0.0f,1.0f), DirectX::SimpleMath::Vector3(0.0f,0.0f,0.0f), DirectX::SimpleMath::Vector3(0.0f,1.0f,0.0f));
 }
 
 CCamera::~CCamera()
@@ -210,7 +215,7 @@ void CCamera::ResetNumScreenBuilding()
 
 //////////////////////////////////////////////////////////////////////////
 // Property
-void CCamera::SetViewParams( const D3DXVECTOR3 &v3Eye, const D3DXVECTOR3& v3Target, const D3DXVECTOR3& v3Up)
+void CCamera::SetViewParams( const DirectX::SimpleMath::Vector3 &v3Eye, const DirectX::SimpleMath::Vector3& v3Target, const DirectX::SimpleMath::Vector3& v3Up)
 {
 	if (IsLock())
 		return;
@@ -227,7 +232,7 @@ void CCamera::SetViewParams( const D3DXVECTOR3 &v3Eye, const D3DXVECTOR3& v3Targ
 	SetViewMatrix();
 }
 
-void CCamera::SetEye(const D3DXVECTOR3 & v3Eye)
+void CCamera::SetEye(const DirectX::SimpleMath::Vector3 & v3Eye)
 {
 	if (IsLock())
 		return;
@@ -237,7 +242,7 @@ void CCamera::SetEye(const D3DXVECTOR3 & v3Eye)
 	SetViewMatrix();
 }
 
-void CCamera::SetTarget(const D3DXVECTOR3 & v3Target)
+void CCamera::SetTarget(const DirectX::SimpleMath::Vector3 & v3Target)
 {
 	if (IsLock())
 		return;
@@ -247,7 +252,7 @@ void CCamera::SetTarget(const D3DXVECTOR3 & v3Target)
 	SetViewMatrix();
 }
 
-void CCamera::SetUp(const D3DXVECTOR3 & v3Up)
+void CCamera::SetUp(const DirectX::SimpleMath::Vector3 & v3Up)
 {
 	if (IsLock())
 		return;
@@ -257,7 +262,7 @@ void CCamera::SetUp(const D3DXVECTOR3 & v3Up)
 	SetViewMatrix();
 }
 
-bool IsNaN(const D3DXVECTOR3& v)
+bool IsNaN(const DirectX::SimpleMath::Vector3& v)
 {
 	return std::isnan(v.x) || std::isnan(v.y) || std::isnan(v.z);
 }
@@ -268,17 +273,17 @@ void CCamera::SetViewMatrix()
 	m_v3View = m_v3Target - m_v3Eye;
 	if (IsNaN(m_v3View))
 	{
-		m_v3View = D3DXVECTOR3(0.0f, 0.0f, 1.0f);
+		m_v3View = DirectX::SimpleMath::Vector3(0.0f, 0.0f, 1.0f);
 	}
 
 	// v3CenterRay is the reverse of the view vector
-	D3DXVECTOR3 v3CenterRay = -m_v3View;
+	DirectX::SimpleMath::Vector3 v3CenterRay = -m_v3View;
 
 	// Calculate roll (if this function uses m_v3View, ensure it’s valid)
 	CalculateRoll();
 
 	// Compute the distance from eye to target
-	m_fDistance = D3DXVec3Length(&m_v3View);
+	m_fDistance = DXMath::Vec3Length(&m_v3View);
 	if (std::isnan(m_fDistance))
 	{
 		m_fDistance = 0.0f;
@@ -289,43 +294,43 @@ void CCamera::SetViewMatrix()
 	// Normalize the view vector if possible
 	if (m_fDistance > FLT_EPSILON)
 	{
-		D3DXVec3Normalize(&m_v3View, &m_v3View);
+		DXMath::Vec3Normalize(&m_v3View, &m_v3View);
 	}
 	else
 	{
 		// Avoid dividing by zero; set to a default forward direction
-		m_v3View = D3DXVECTOR3(0.0f, 0.0f, 1.0f);
+		m_v3View = DirectX::SimpleMath::Vector3(0.0f, 0.0f, 1.0f);
 	}
 
 	// Compute the cross product for the right vector and normalize
-	D3DXVec3Cross(&m_v3Cross, &m_v3Up, &m_v3View);
-	float crossLength = D3DXVec3Length(&m_v3Cross);
+	DXMath::Vec3Cross(&m_v3Cross, &m_v3Up, &m_v3View);
+	float crossLength = DXMath::Vec3Length(&m_v3Cross);
 	if (crossLength > FLT_EPSILON)
 	{
-		D3DXVec3Normalize(&m_v3Cross, &m_v3Cross);
+		DXMath::Vec3Normalize(&m_v3Cross, &m_v3Cross);
 	}
 	else
 	{
 		// Use a default right vector if the cross product is near zero
-		m_v3Cross = D3DXVECTOR3(1.0f, 0.0f, 0.0f);
+		m_v3Cross = DirectX::SimpleMath::Vector3(1.0f, 0.0f, 0.0f);
 	}
 
 	// Recompute the up vector and normalize
-	D3DXVec3Cross(&m_v3Up, &m_v3View, &m_v3Cross);
-	float upLength = D3DXVec3Length(&m_v3Up);
+	DXMath::Vec3Cross(&m_v3Up, &m_v3View, &m_v3Cross);
+	float upLength = DXMath::Vec3Length(&m_v3Up);
 	if (upLength > FLT_EPSILON)
 	{
-		D3DXVec3Normalize(&m_v3Up, &m_v3Up);
+		DXMath::Vec3Normalize(&m_v3Up, &m_v3Up);
 	}
 	else
 	{
 		// Use a default up vector.
-		m_v3Up = D3DXVECTOR3(0.0f, 1.0f, 0.0f);
+		m_v3Up = DirectX::SimpleMath::Vector3(0.0f, 1.0f, 0.0f);
 	}
 
 	// Calculate the pitch angle from the up vector
-	D3DXVECTOR3 val = D3DXVECTOR3(0.0f, 0.0f, 1.0f);
-	m_fPitch = D3DXVec3Dot(&m_v3Up, &val);
+	DirectX::SimpleMath::Vector3 val = DirectX::SimpleMath::Vector3(0.0f, 0.0f, 1.0f);
+	m_fPitch = DXMath::Vec3Dot(&m_v3Up, &val);
 	// Clamp the dot product so acosf is safe
 	if (m_fPitch >= 1.0f)
 		m_fPitch = 1.0f;
@@ -336,22 +341,37 @@ void CCamera::SetViewMatrix()
 	{
 		m_fPitch = 0.0f;
 	}
-	m_fPitch *= (180.0f / D3DX_PI);
+	m_fPitch *= (180.0f / DirectX::XM_PI);
 	if (m_v3View.z > 0)
 		m_fPitch = -m_fPitch;
 
 	// Build the view matrix.
-	D3DXMatrixLookAtRH(&m_matView, &m_v3Eye, &m_v3Target, &m_v3Up);
+	{
+		const DirectX::XMMATRIX kView =
+			DirectX::XMMatrixLookAtRH(
+				DirectX::XMLoadFloat3(&m_v3Eye),
+				DirectX::XMLoadFloat3(&m_v3Target),
+				DirectX::XMLoadFloat3(&m_v3Up));
+		DirectX::XMStoreFloat4x4(&m_matView, kView);
+	}
 
 	// Compute the determinant and check it.
-	float fDeterminantD3DMatView = D3DXMatrixDeterminant(&m_matView);
+	float fDeterminantD3DMatView = 0.0f;
+	{
+		const DirectX::XMMATRIX kView = DirectX::XMLoadFloat4x4(&m_matView);
+		const DirectX::XMVECTOR kDet = DirectX::XMMatrixDeterminant(kView);
+		fDeterminantD3DMatView = DirectX::XMVectorGetX(kDet);
+	}
 	if (std::isnan(fDeterminantD3DMatView) || fabs(fDeterminantD3DMatView) < FLT_EPSILON)
 	{
-		D3DXMatrixIdentity(&m_matInverseView);
+		DXMath::MatrixIdentity(&m_matInverseView);
 	}
 	else
 	{
-		D3DXMatrixInverse(&m_matInverseView, &fDeterminantD3DMatView, &m_matView);
+		const DirectX::XMMATRIX kView = DirectX::XMLoadFloat4x4(&m_matView);
+		DirectX::XMVECTOR kDet = {};
+		const DirectX::XMMATRIX kInvView = DirectX::XMMatrixInverse(&kDet, kView);
+		DirectX::XMStoreFloat4x4(&m_matInverseView, kInvView);
 	}
 
 	m_matBillboard = m_matInverseView;
@@ -375,29 +395,29 @@ void CCamera::SetViewMatrix()
 	m_kCameraLeftToTerrainRay.SetDirection(-m_v3Cross, 3.0f * m_fTerrainCollisionRadius);
 	m_kCameraRightToTerrainRay.SetDirection(m_v3Cross, 3.0f * m_fTerrainCollisionRadius);
 
-	D3DXVECTOR3 temp = (v3CenterRay - m_fTerrainCollisionRadius * m_v3Up);
+	DirectX::SimpleMath::Vector3 temp = (v3CenterRay - m_fTerrainCollisionRadius * m_v3Up);
 	m_kTargetToCameraBottomRay.SetDirection(v3CenterRay - m_fTerrainCollisionRadius * m_v3Up,
-		D3DXVec3Length(&temp));
+		DXMath::Vec3Length(&temp));
 
 	m_kLeftObjectCollisionRay.SetStartPoint(m_v3Target);
 	m_kTopObjectCollisionRay.SetStartPoint(m_v3Target);
 	m_kRightObjectCollisionRay.SetStartPoint(m_v3Target);
 	m_kBottomObjectCollisionRay.SetStartPoint(m_v3Target);
 
-	D3DXVECTOR3 val1 = (v3CenterRay + m_fObjectCollisionRadius * m_v3Cross);
-	m_kLeftObjectCollisionRay.SetDirection(val1, D3DXVec3Length(&val1));
+	DirectX::SimpleMath::Vector3 val1 = (v3CenterRay + m_fObjectCollisionRadius * m_v3Cross);
+	m_kLeftObjectCollisionRay.SetDirection(val1, DXMath::Vec3Length(&val1));
 
-	D3DXVECTOR3 val2 = (v3CenterRay - m_fObjectCollisionRadius * m_v3Cross);
-	m_kRightObjectCollisionRay.SetDirection(val2, D3DXVec3Length(&val2));
+	DirectX::SimpleMath::Vector3 val2 = (v3CenterRay - m_fObjectCollisionRadius * m_v3Cross);
+	m_kRightObjectCollisionRay.SetDirection(val2, DXMath::Vec3Length(&val2));
 
-	D3DXVECTOR3 val3 = (v3CenterRay + m_fObjectCollisionRadius * m_v3Up);
-	m_kTopObjectCollisionRay.SetDirection(val3, D3DXVec3Length(&val3));
+	DirectX::SimpleMath::Vector3 val3 = (v3CenterRay + m_fObjectCollisionRadius * m_v3Up);
+	m_kTopObjectCollisionRay.SetDirection(val3, DXMath::Vec3Length(&val3));
 
-	D3DXVECTOR3 val4 = (v3CenterRay - m_fObjectCollisionRadius * m_v3Up);
-	m_kBottomObjectCollisionRay.SetDirection(val4, D3DXVec3Length(&val4));
+	DirectX::SimpleMath::Vector3 val4 = (v3CenterRay - m_fObjectCollisionRadius * m_v3Up);
+	m_kBottomObjectCollisionRay.SetDirection(val4, DXMath::Vec3Length(&val4));
 }
 
-void CCamera::Move(const D3DXVECTOR3 & v3Displacement)
+void CCamera::Move(const DirectX::SimpleMath::Vector3 & v3Displacement)
 {
 	if (IsLock())
 		return;
@@ -416,7 +436,7 @@ void CCamera::Zoom(float fRatio)
 	if (fRatio == 1.0f)
 		return;
 
-	D3DXVECTOR3 v3Temp = m_v3Eye - m_v3Target;
+	DirectX::SimpleMath::Vector3 v3Temp = m_v3Eye - m_v3Target;
 	v3Temp *= fRatio;
 	m_v3Eye = v3Temp + m_v3Target;
 
@@ -428,8 +448,8 @@ void CCamera::MoveAlongView(float fDistance)
 	if (IsLock())
 		return;
 
-	D3DXVECTOR3 v3Temp;
-	D3DXVec3Normalize(&v3Temp, &m_v3View);
+	DirectX::SimpleMath::Vector3 v3Temp;
+	DXMath::Vec3Normalize(&v3Temp, &m_v3View);
 	
 	m_v3Eye += v3Temp * fDistance;
 	m_v3Target += v3Temp * fDistance;
@@ -442,8 +462,8 @@ void CCamera::MoveAlongCross(float fDistance)
 	if (IsLock())
 		return;
 
-	D3DXVECTOR3 v3Temp;
-	D3DXVec3Normalize(&v3Temp, &m_v3Cross);
+	DirectX::SimpleMath::Vector3 v3Temp;
+	DXMath::Vec3Normalize(&v3Temp, &m_v3Cross);
 
 	m_v3Eye += v3Temp * fDistance;
 	m_v3Target += v3Temp * fDistance;
@@ -456,8 +476,8 @@ void CCamera::MoveAlongUp(FLOAT fDistance)
 	if (IsLock())
 		return;
 
-	D3DXVECTOR3 v3Temp ;
-	D3DXVec3Normalize(&v3Temp, &m_v3Up);
+	DirectX::SimpleMath::Vector3 v3Temp ;
+	DXMath::Vec3Normalize(&v3Temp, &m_v3Up);
 	m_v3Target += v3Temp * fDistance;
 	m_v3Eye += v3Temp * fDistance;
 	SetViewMatrix();
@@ -476,8 +496,8 @@ void CCamera::MoveFront(float fDistance)
 	if (IsLock())
 		return;
 
-	D3DXVECTOR3 v3Temp = D3DXVECTOR3(m_v3View.x, m_v3View.y, 0.0f);
-	D3DXVec3Normalize(&v3Temp, &v3Temp);
+	DirectX::SimpleMath::Vector3 v3Temp = DirectX::SimpleMath::Vector3(m_v3View.x, m_v3View.y, 0.0f);
+	DXMath::Vec3Normalize(&v3Temp, &v3Temp);
 
 	m_v3Eye += v3Temp * fDistance; 
 	m_v3Target += v3Temp * fDistance;
@@ -498,10 +518,10 @@ void CCamera::MoveVertical(float fDistance)
 
 //void CCamera::RotateUpper(float fDegree)
 //{
-//	D3DXMATRIX matRot;
-//	D3DXMatrixRotationAxis(&matRot, &m_v3Cross, -D3DXToRadian(fDegree));
-//	D3DXVec3TransformCoord(&m_v3View, &m_v3View, &matRot) ;
-//    D3DXVec3Cross(&m_v3Up, &m_v3View, &m_v3Cross);
+//	DirectX::SimpleMath::Matrix matRot;
+//	DXMath::MatrixRotationAxis(&matRot, &m_v3Cross, -DirectX::XMConvertToRadians(fDegree));
+//	DXMath::Vec3TransformCoord(&m_v3View, &m_v3View, &matRot) ;
+//    DXMath::Vec3Cross(&m_v3Up, &m_v3View, &m_v3Cross);
 //
 //	m_v3Target = m_v3Eye + m_v3View;
 //
@@ -513,7 +533,7 @@ void CCamera::RotateEyeAroundTarget(float fPitchDegree, float fRollDegree)
 	if (IsLock())
 		return;
 
-	D3DXMATRIX matRot, matRotPitch, matRotRoll;
+	DirectX::SimpleMath::Matrix matRot, matRotPitch, matRotRoll;
 
 	// 머리위로 넘어가기 막기...
 	if (m_fPitch + fPitchDegree > 80.0f)
@@ -525,16 +545,16 @@ void CCamera::RotateEyeAroundTarget(float fPitchDegree, float fRollDegree)
 		fPitchDegree = -80.0f - m_fPitch;
 	}
 
-	D3DXMatrixRotationAxis(&matRotPitch, &m_v3Cross, D3DXToRadian(fPitchDegree));
+	DXMath::MatrixRotationAxis(&matRotPitch, &m_v3Cross, DirectX::XMConvertToRadians(fPitchDegree));
 
-	D3DXMatrixRotationZ(&matRotRoll, -D3DXToRadian(fRollDegree));
+	DXMath::MatrixRotationZ(&matRotRoll, -DirectX::XMConvertToRadians(fRollDegree));
 	matRot = matRotPitch * matRotRoll;
 
-	D3DXVECTOR3 v3Temp = m_v3Eye - m_v3Target;
-	D3DXVec3TransformCoord(&m_v3Eye, &v3Temp, &matRot);
+	DirectX::SimpleMath::Vector3 v3Temp = m_v3Eye - m_v3Target;
+	DXMath::Vec3TransformCoord(&m_v3Eye, &v3Temp, &matRot);
 	m_v3Eye += m_v3Target;
 
-	SetUp(D3DXVECTOR3(0.0f, 0.0f, 1.0f));
+	SetUp(DirectX::SimpleMath::Vector3(0.0f, 0.0f, 1.0f));
 
 	m_fRoll += fRollDegree;
 
@@ -544,28 +564,28 @@ void CCamera::RotateEyeAroundTarget(float fPitchDegree, float fRollDegree)
 		m_fRoll += 360.0f;
 }
 
-void CCamera::RotateEyeAroundPoint(const D3DXVECTOR3 & v3Point, float fPitchDegree, float fRollDegree)
+void CCamera::RotateEyeAroundPoint(const DirectX::SimpleMath::Vector3 & v3Point, float fPitchDegree, float fRollDegree)
 {
 //	if (IsLock())
 //		return;
 
-	D3DXMATRIX matRot, matRotPitch, matRotRoll;
+	DirectX::SimpleMath::Matrix matRot, matRotPitch, matRotRoll;
 
-	D3DXMatrixRotationAxis(&matRotPitch, &m_v3Cross, D3DXToRadian(fPitchDegree));
+	DXMath::MatrixRotationAxis(&matRotPitch, &m_v3Cross, DirectX::XMConvertToRadians(fPitchDegree));
 
-	D3DXMatrixRotationZ(&matRotRoll, -D3DXToRadian(fRollDegree));
+	DXMath::MatrixRotationZ(&matRotRoll, -DirectX::XMConvertToRadians(fRollDegree));
 	matRot = matRotPitch * matRotRoll;
 	
-	D3DXVECTOR3 v3Temp = m_v3Eye - v3Point;
-	D3DXVec3TransformCoord(&m_v3Eye, &v3Temp, &matRot);
+	DirectX::SimpleMath::Vector3 v3Temp = m_v3Eye - v3Point;
+	DXMath::Vec3TransformCoord(&m_v3Eye, &v3Temp, &matRot);
 	m_v3Eye += v3Point;
 	
 	const auto vv2 = (v3Temp + m_v3Up);
-	D3DXVec3TransformCoord(&m_v3Up, &vv2, &matRot);
+	DXMath::Vec3TransformCoord(&m_v3Up, &vv2, &matRot);
 	m_v3Up -= (m_v3Eye - v3Point);
 	
 	v3Temp = m_v3Target - v3Point;
-	D3DXVec3TransformCoord(&m_v3Target, &v3Temp, &matRot);
+	DXMath::Vec3TransformCoord(&m_v3Target, &v3Temp, &matRot);
 	m_v3Target += v3Point;
 
 	SetViewMatrix();
@@ -597,19 +617,19 @@ void CCamera::SetDistance(const float fdistance)
 
 void CCamera::CalculateRoll()
 {
-	D3DXVECTOR2 v2ViewXY;
+	DirectX::SimpleMath::Vector2 v2ViewXY;
 	v2ViewXY.x = m_v3View.x;
 	v2ViewXY.y = m_v3View.y;
- 	D3DXVec2Normalize(&v2ViewXY, &v2ViewXY);
-	const auto vv = D3DXVECTOR2(0.0f, 1.0f);
-	float fDot = D3DXVec2Dot(&v2ViewXY, &vv);
+ 	DXMath::Vec2Normalize(&v2ViewXY, &v2ViewXY);
+	const auto vv = DirectX::SimpleMath::Vector2(0.0f, 1.0f);
+	float fDot = DXMath::Vec2Dot(&v2ViewXY, &vv);
 	if (fDot >= 1)
 		fDot = 1;
 	else if (fDot <= -1)
 		fDot = -1;
 	fDot = acosf(fDot);
-	fDot *= (180.0f / D3DX_PI);
-	float fCross = D3DXVec2CCW (&v2ViewXY, &vv);
+	fDot *= (180.0f / DirectX::XM_PI);
+	const float fCross = (v2ViewXY.x * vv.y) - (v2ViewXY.y * vv.x);
 	if ( 0 > fCross)
 	{
 		fDot = -fDot;
@@ -709,3 +729,7 @@ void CCameraManager::SetTerrainCollision(bool bEnable)
 {
 	m_pCurrentCamera->SetTerrainCollision(bEnable);
 }
+
+
+
+

@@ -4,7 +4,6 @@
 
 #include "EterBase/Random.h"
 #include "EterLib/Camera.h"
-#include "EterLib/StateManager.h"
 
 CDynamicPool<CParticleInstance> CParticleInstance::ms_kPool;
 
@@ -179,8 +178,6 @@ void CParticleInstance::UpdateAirResistance(float time, float elapsedTime)
 
 void CParticleInstance::Transform(const D3DXMATRIX * c_matLocal)
 {
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, m_Color);
-
 	D3DXVECTOR3 v3Up;
 	D3DXVECTOR3 v3Cross;
 
@@ -238,7 +235,7 @@ void CParticleInstance::Transform(const D3DXMATRIX * c_matLocal)
 			{
 				// NOTE : Rotation Routine. Camera의 Up Vector와 Cross Vector 자체를 View Vector 기준으로
 				//        Rotation 시킨다.
-				// FIXME : 반드시 최적화 할 것!
+				// NOTE! : 반드시 최적화 할 것!
 				if (m_fRotation==0.0f)
 				{
 					v3Up = -c_rv3Cross;
@@ -330,8 +327,6 @@ void CParticleInstance::Transform(const D3DXMATRIX * c_matLocal)
 
 void CParticleInstance::Transform(const D3DXMATRIX * c_matLocal, const float c_fZRotation)
 {
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, m_Color);
-
 	D3DXVECTOR3 v3Up;
 	D3DXVECTOR3 v3Cross;
 
@@ -390,7 +385,7 @@ void CParticleInstance::Transform(const D3DXMATRIX * c_matLocal, const float c_f
 			{
 				// NOTE : Rotation Routine. Camera의 Up Vector와 Cross Vector 자체를 View Vector 기준으로
 				//        Rotation 시킨다.
-				// FIXME : 반드시 최적화 할 것!
+				// NOTE! : 반드시 최적화 할 것!
 				if (m_fRotation==0.0f)
 				{
 					v3Up = -c_rv3Cross;

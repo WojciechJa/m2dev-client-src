@@ -41,20 +41,32 @@ jobs:
         shell: pwsh
         run: cmake -S . -B build -DDX11_STRICT_ONLY=ON
 
-      - name: Build project
+      - name: Build verified DX11 foundation
         id: build_project
         shell: pwsh
-        run: cmake --build build --config RelWithDebInfo
+        run: >-
+          cmake --build build --config RelWithDebInfo --target
+          dx11_strict_gate
+          EterLib
+          EffectLib
+          EterGrnLib
+          EterPythonLib
+          SpeedTreeLib
 
       - name: Collect outputs
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path _output | Out-Null
-          Get-ChildItem -Path build/bin -File | Copy-Item -Destination _output
+          $targets = @('EterLib', 'EffectLib', 'EterGrnLib', 'EterPythonLib', 'SpeedTreeLib')
+          foreach ($target in $targets) {
+            $artifact = Get-ChildItem -Path "build/src/$target/RelWithDebInfo" -Filter "$target.lib" -File
+            if (-not $artifact) { throw "Missing build artifact: $target.lib" }
+            Copy-Item -LiteralPath $artifact.FullName -Destination _output
+          }
 
       - name: Upload
         uses: actions/upload-artifact@v6
         with:
-          name: output_win
+          name: dx11_foundation_win
           path: _output
           if-no-files-found: error

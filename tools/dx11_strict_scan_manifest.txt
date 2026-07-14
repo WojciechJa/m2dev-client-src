@@ -1,0 +1,37 @@
+# DX11 strict scan manifest
+#
+# Keep this list aligned with code already committed as strict-migrated. Expand
+# it in the same atomic commit that ports the next subsystem; never point CI at
+# migration files that exist only in a local dirty worktree.
+
+src/EterLib
+src/EffectLib
+src/EterGrnLib/Material.h
+src/EterGrnLib/Material.cpp
+src/EterGrnLib/Mesh.h
+src/EterGrnLib/Mesh.cpp
+src/EterGrnLib/Model.h
+src/EterGrnLib/Model.cpp
+src/EterGrnLib/ModelInstance.h
+src/EterGrnLib/ModelInstance.cpp
+src/EterGrnLib/ModelInstanceModel.cpp
+src/EterGrnLib/ModelInstanceRender.cpp
+src/EterGrnLib/ModelInstanceUpdate.cpp
+src/EterGrnLib/ThingInstance.h
+src/EterGrnLib/ThingInstance.cpp
+src/EterPythonLib/PythonGraphic.h
+src/EterPythonLib/PythonGraphic.cpp
+src/EterPythonLib/PythonGraphicModule.cpp
+src/EterPythonLib/PythonWindow.h
+src/EterPythonLib/PythonWindow.cpp
+src/EterPythonLib/PythonWindowManagerModule.cpp
+src/EterPythonLib/PythonSlotWindow.h
+src/EterPythonLib/PythonSlotWindow.cpp
+src/EterPythonLib/PythonGridSlotWindow.cpp
+src/SpeedTreeLib/SpeedTreeWrapper.h
+src/SpeedTreeLib/SpeedTreeWrapper.cpp
+src/SpeedTreeLib/SpeedGrassRT.cpp
+src/SpeedTreeLib/SpeedTreeForest.cpp
+src/SpeedTreeLib/SpeedTreeForest.h
+src/SpeedTreeLib/SpeedTreeForestDirectX.cpp
+src/SpeedTreeLib/SpeedTreeForestDirectX.h

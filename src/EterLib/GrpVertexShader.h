@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GrpBase.h"
+#include <d3d11.h>
 
 class CVertexShader : public CGraphicBase
 {
@@ -17,5 +18,5 @@ class CVertexShader : public CGraphicBase
 		void Initialize();
 
 	protected:
-		LPDIRECT3DVERTEXSHADER9 m_handle;
+		ID3D11VertexShader* m_handle;
 };

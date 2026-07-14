@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include <io.h>
+#include <unordered_set>
 #include "EterBase/CRC32.h"
 #include "EterBase/Timer.h"
 #include "EterBase/Stl.h"
@@ -314,7 +315,10 @@ CResource * CResourceManager::GetResourcePointer(const char * c_szFileName)
 	if (!IsFileExist(c_szFileName) )
 	{
 		if( pcFileExt == NULL || (stricmp( pcFileExt, ".fnt" ) != 0) ) {
-			TraceError("CResourceManager::GetResourcePointer: File not exist %s", c_szFileName);
+			// Avoid per-frame spam for the same missing resource in debug logs.
+			static std::unordered_set<std::string> s_stMissingResourceLogOnce;
+			if (s_stMissingResourceLogOnce.insert(c_szFileName).second)
+				TraceError("CResourceManager::GetResourcePointer: File not exist %s", c_szFileName);
 		}
 	}
 #endif

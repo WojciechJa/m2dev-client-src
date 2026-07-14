@@ -8,6 +8,8 @@
 #include "StateManager.h"
 #include "GrpDeviceDX11.h"
 
+#include <cmath>
+
 void PixelPositionToD3DXVECTOR3(const D3DXVECTOR3& c_rkPPosSrc, D3DXVECTOR3* pv3Dst)
 {
 	pv3Dst->x=+c_rkPPosSrc.x;
@@ -25,8 +27,8 @@ void D3DXVECTOR3ToPixelPosition(const D3DXVECTOR3& c_rv3Src, D3DXVECTOR3* pv3Dst
 HWND CGraphicBase::ms_hWnd;
 HDC CGraphicBase::ms_hDC;
 
-D3DPRESENT_PARAMETERS	CGraphicBase::ms_d3dPresentParameter = {};
-D3DVIEWPORT9			CGraphicBase::ms_Viewport;
+GrpPresentParameters	CGraphicBase::ms_d3dPresentParameter = {};
+GrpViewport				CGraphicBase::ms_Viewport;
 
 HRESULT					CGraphicBase::ms_hLastResult = NULL;
 
@@ -35,7 +37,7 @@ int						CGraphicBase::ms_iHeight;
 
 DWORD					CGraphicBase::ms_faceCount = 0;
 
-D3DCAPS9				CGraphicBase::ms_d3dCaps;
+GrpCaps					CGraphicBase::ms_d3dCaps;
 
 DWORD					CGraphicBase::ms_dwD3DBehavior = 0;
 
@@ -49,6 +51,9 @@ D3DXMATRIX				CGraphicBase::ms_matInverseViewYAxis;
 
 D3DXMATRIX				CGraphicBase::ms_matWorld;
 D3DXMATRIX				CGraphicBase::ms_matWorldView;
+D3DXMATRIX				CGraphicBase::ms_matDX11WorldViewSnapshot;
+D3DXMATRIX				CGraphicBase::ms_matDX11WorldProjSnapshot;
+bool					CGraphicBase::ms_bDX11WorldProjectionSnapshotValid = false;
 
 D3DXMATRIX				CGraphicBase::ms_matScreen0;
 D3DXMATRIX				CGraphicBase::ms_matScreen1;
@@ -104,10 +109,10 @@ bool CGraphicBase::IsHighTextureMemory()
 
 bool CGraphicBase::IsFastTNL()
 { 
-	if (ms_dwD3DBehavior & D3DCREATE_HARDWARE_VERTEXPROCESSING ||
-		ms_dwD3DBehavior & D3DCREATE_MIXED_VERTEXPROCESSING)
+	if (ms_dwD3DBehavior & GRP_CREATE_HARDWARE_VERTEXPROCESSING ||
+		ms_dwD3DBehavior & GRP_CREATE_MIXED_VERTEXPROCESSING)
 	{
-		if (ms_d3dCaps.VertexShaderVersion>D3DVS_VERSION(1,0))
+	if (ms_d3dCaps.VertexShaderVersion>GRP_VS_VERSION(1,0))
 			return true;
 	}
 	return false;
@@ -115,7 +120,7 @@ bool CGraphicBase::IsFastTNL()
 
 bool CGraphicBase::IsTLVertexClipping()
 {
-	if (ms_d3dCaps.PrimitiveMiscCaps & D3DPMISCCAPS_CLIPTLVERTS)
+	if (ms_d3dCaps.PrimitiveMiscCaps & GRP_PMISCCAPS_CLIPTLVERTS)
 		return true;
 
 	return false;
@@ -226,6 +231,44 @@ const D3DXMATRIX & CGraphicBase::GetIdentityMatrix()
 	return ms_matIdentity;
 }
 
+bool CGraphicBase::ProjectPositionDX11World(float x, float y, float z, float* pfX, float* pfY, float* pfZ)
+{
+	if (!pfX || !pfY || !pfZ)
+		return false;
+
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid() || !ms_bDX11WorldProjectionSnapshotValid)
+		return false;
+
+	UINT uBackBufferWidth = 0u;
+	UINT uBackBufferHeight = 0u;
+	GetBackBufferSize(&uBackBufferWidth, &uBackBufferHeight);
+	if (0u == uBackBufferWidth || 0u == uBackBufferHeight)
+		return false;
+
+	GrpViewport kViewport = ms_Viewport;
+	if (kViewport.Width != uBackBufferWidth || kViewport.Height != uBackBufferHeight || kViewport.MaxZ <= kViewport.MinZ)
+	{
+		kViewport.X = 0.0f;
+		kViewport.Y = 0.0f;
+		kViewport.Width = static_cast<float>(uBackBufferWidth);
+		kViewport.Height = static_cast<float>(uBackBufferHeight);
+		kViewport.MinZ = 0.0f;
+		kViewport.MaxZ = 1.0f;
+	}
+
+	D3DXVECTOR3 kInput(x, y, z);
+	D3DXVECTOR3 kOutput;
+	D3DXVec3Project(&kOutput, &kInput, &kViewport, &ms_matDX11WorldProjSnapshot, &ms_matDX11WorldViewSnapshot, &ms_matIdentity);
+	if (!std::isfinite(kOutput.x) || !std::isfinite(kOutput.y) || !std::isfinite(kOutput.z))
+		return false;
+
+	*pfX = kOutput.x;
+	*pfY = kOutput.y;
+	*pfZ = kOutput.z;
+	return true;
+}
+
 void CGraphicBase::SetEyeCamera(float xEye, float yEye, float zEye,
 								float xCenter, float yCenter, float zCenter,
 								float xUp, float yUp, float zUp)
@@ -250,7 +293,7 @@ void CGraphicBase::SetSimpleCamera(float x, float y, float z, float pitch, float
 
 	UpdateViewMatrix();
 
-	STATEMANAGER.GetTransform(D3DTS_WORLD, &ms_matWorld);
+	STATEMANAGER.GetTransform(GRP_TS_WORLD, &ms_matWorld);
 	ms_matWorldView = ms_matWorld * ms_matView;
 }
 
@@ -266,7 +309,7 @@ void CGraphicBase::SetAroundCamera(float distance, float pitch, float roll, floa
 
 	UpdateViewMatrix();
 
-	STATEMANAGER.GetTransform(D3DTS_WORLD, &ms_matWorld);
+	STATEMANAGER.GetTransform(GRP_TS_WORLD, &ms_matWorld);
 	ms_matWorldView = ms_matWorld * ms_matView;
 }
 
@@ -296,7 +339,7 @@ void CGraphicBase::SetPositionCamera(float fx, float fy, float fz, float distanc
 	UpdateViewMatrix();
 
 	// This is levites's virtual(?) code which you should not trust.
-	STATEMANAGER.GetTransform(D3DTS_WORLD, &ms_matWorld);
+	STATEMANAGER.GetTransform(GRP_TS_WORLD, &ms_matWorld);
 	ms_matWorldView = ms_matWorld * ms_matView;
 }
 
@@ -330,12 +373,21 @@ void CGraphicBase::SetPerspective(float fov, float aspect, float nearz, float fa
 	//CCameraManager::Instance().SetCurrentCamera(CCameraManager::DEFAULT_PERSPECTIVE_CAMERA);
 	const DirectX::XMMATRIX kPerspective = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(fov), ms_fAspect, nearz, farz);
 	DirectX::XMStoreFloat4x4(&ms_matProj, kPerspective);
+	if (CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice())
+	{
+		if (pDX11Device->IsValid())
+		{
+			ms_matDX11WorldProjSnapshot = ms_matProj;
+			ms_matDX11WorldViewSnapshot = ms_matView;
+			ms_bDX11WorldProjectionSnapshotValid = true;
+		}
+	}
 	UpdateProjMatrix();
 }
 
 void CGraphicBase::UpdateProjMatrix()
 {
-	STATEMANAGER.SetTransform(D3DTS_PROJECTION, &ms_matProj);
+	STATEMANAGER.SetTransform(GRP_TS_PROJECTION, &ms_matProj);
 }
 
 void CGraphicBase::UpdateViewMatrix()
@@ -345,7 +397,12 @@ void CGraphicBase::UpdateViewMatrix()
 		return;
 
 	ms_matView = pkCamera->GetViewMatrix();
-	STATEMANAGER.SetTransform(D3DTS_VIEW, &ms_matView);
+	if (CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice())
+	{
+		if (pDX11Device->IsValid() && ms_bDX11WorldProjectionSnapshotValid)
+			ms_matDX11WorldViewSnapshot = ms_matView;
+	}
+	STATEMANAGER.SetTransform(GRP_TS_VIEW, &ms_matView);
 
 	{
 		const DirectX::XMMATRIX kInv = DirectX::XMMatrixInverse(nullptr, DirectX::XMLoadFloat4x4(&ms_matView));

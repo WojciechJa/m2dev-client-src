@@ -40,14 +40,17 @@
 
 #include "EterBase/CRC32.h"
 
-///////////////////////////////////////////////////////////////////////  
+struct SLightDesc;
+
+///////////////////////////////////////////////////////////////////////
 //	Render bit vector
 
 #define Forest_RenderBranches		(1 << 0)
 #define Forest_RenderLeaves			(1 << 1)
 #define Forest_RenderFronds			(1 << 2)
 #define Forest_RenderBillboards		(1 << 3)
-#define Forest_RenderAll			((1 << 4) - 1)
+#define Forest_RenderGrass			(1 << 4)
+#define Forest_RenderAll			((1 << 5) - 1)
 #define Forest_RenderToShadow		(1 << 5)
 #define Forest_RenderToMiniMap		(1 << 6)
 
@@ -80,11 +83,12 @@ class CSpeedTreeForest
 
 		void						Clear();
 
-		void						SetLight(const float * afDirection, const float * afAmbient, const float * afDiffuse);
+		void						SetLight(const SLightDesc& rLight);
 		void						SetFog(float fFogNear, float fFogFar);
 		//////////////////////////////////////////////////////////////////////////
 
 		const float *				GetExtents(void) const						{ return m_afForestExtents; }
+		DWORD						GetTotalInstanceCount() const;
 
 		// wind management
 		float						GetWindStrength(void) const					{ return m_fWindStrength; }
@@ -101,11 +105,11 @@ class CSpeedTreeForest
 		float						m_afLighting[12];
 		float						m_afFog[4];
 
+		float						m_fAccumTime;			// Accumulated time for wind animation
+
 	private:
 		void						AdjustExtents(float x, float y, float z);
-		
+
 		float						m_afForestExtents[6];	// [0] = min x, [1] = min y..., [3] = max x, [4] = max y...
 		float						m_fWindStrength;		// 0.0 = no wind, 1.0 = full strength
-
-		float						m_fAccumTime;
 };

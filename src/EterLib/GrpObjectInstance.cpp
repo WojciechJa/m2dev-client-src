@@ -1,10 +1,38 @@
 #include "StdAfx.h"
 #include "GrpObjectInstance.h"
 #include "EterBase/Timer.h"
+#include <cmath>
+
+namespace
+{
+inline bool IsValidBoundingSphere(const Vector3d& center, float radius)
+{
+	return std::isfinite(center.x) &&
+		std::isfinite(center.y) &&
+		std::isfinite(center.z) &&
+		std::isfinite(radius) &&
+		radius > 0.0f;
+}
+}
 
 void CGraphicObjectInstance::OnInitialize()
 {	
 	ZeroMemory(m_abyPortalID, sizeof(m_abyPortalID));
+}
+
+void CGraphicObjectInstance::OnClear()
+{
+	return;
+}
+
+void CGraphicObjectInstance::OnUpdate()
+{
+	return;
+}
+
+void CGraphicObjectInstance::OnDeform()
+{
+	return;
 }
 
 void CGraphicObjectInstance::Clear()
@@ -318,8 +346,10 @@ void CGraphicObjectInstance::UpdateBoundingSphere()
 	if (m_CullingHandle)
 	{
 		Vector3d center;
-		float radius;
-		GetBoundingSphere(center,radius);
+		float radius = 0.0f;
+		if (!GetBoundingSphere(center, radius) || !IsValidBoundingSphere(center, radius))
+			return;
+
 		if (radius != m_CullingHandle->GetRadius())
 			m_CullingHandle->NewPosRadius(center,radius);
 		else

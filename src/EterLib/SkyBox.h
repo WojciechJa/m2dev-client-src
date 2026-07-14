@@ -183,6 +183,7 @@ protected:
 	unsigned char m_ucVirticalGradientLevelUpper;
 	unsigned char m_ucVirticalGradientLevelLower;
 	TSkyObjectFace m_Faces[6];
+	bool m_bSkyTexturesExpected;  // M3-SKYBOX-ASSET-BIND-73: Flag to distinguish expected textures from missing assets
 };
 
 #endif // !defined(AFX_SKYBOX_H__AB5049E1_8F1C_4C35_9406_45EC7EF4AD1B__INCLUDED_)

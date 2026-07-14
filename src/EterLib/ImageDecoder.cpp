@@ -1,6 +1,5 @@
 #include "StdAfx.h"
 #include "ImageDecoder.h"
-#include "EterImageLib/DDSTextureLoader9.h"
 #include <stb_image.h>
 
 bool CImageDecoder::DecodeImage(const void* pData, size_t dataSize, TDecodedImageData& outImage)

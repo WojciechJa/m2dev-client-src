@@ -39,6 +39,7 @@ class CGraphicImageInstance
 		void Initialize();
 
 		virtual void OnRender();
+		virtual bool OnRenderDX11();
 		virtual void OnSetImagePointer();
 
 		virtual BOOL OnIsType(DWORD dwType);

@@ -43,6 +43,7 @@ class CGraphicTextInstance
 		
 		void Update();
 		void Render(RECT * pClipRect = NULL);
+		bool RenderDX11(RECT * pClipRect = NULL);
 
 		void ShowCursor();
 		void HideCursor();

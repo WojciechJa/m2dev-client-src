@@ -3,6 +3,7 @@
 #include "Eterbase/Stl.h"
 #include "Eterlib/GrpObjectInstance.h"
 #include "Eterlib/GrpShadowTexture.h"
+#include <mutex>
 
 #include "LODController.h"
 		
@@ -89,6 +90,15 @@ class CGraphicThingInstance : public CGraphicObjectInstance
 		void		BlendRenderWithOneTexture();
 		void		BlendRenderWithTwoTexture();
 
+		// W4.1: DX11 world rendering
+		void		RenderWithOneTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
+		void		BlendRenderWithOneTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+		{
+			// Blend rendering uses same DX11 path - both material types rendered together
+			RenderWithOneTextureDX11(pContext, matViewProj);
+		}
+		void		RenderWithTwoTextureDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
+
 		DWORD		GetLODControllerCount() const;
 		CGrannyLODController * GetLODControllerPointer(DWORD dwModelIndex) const;
 		CGrannyLODController * GetLODControllerPointer(DWORD dwModelIndex);
@@ -125,6 +135,9 @@ class CGraphicThingInstance : public CGraphicObjectInstance
 		void		OnRenderShadow();
 		void		OnRenderPCBlocker();
 
+	public:
+		void		RenderToShadowMapDX11(struct ID3D11DeviceContext* pContext, const D3DXMATRIX& c_rmatLightViewProj);  // S1: DX11 shadow caster
+
 	protected:
 		bool									m_bUpdated;
 		float									m_fLastLocalTime;
@@ -137,6 +150,7 @@ class CGraphicThingInstance : public CGraphicObjectInstance
 		D3DXVECTOR3								m_v3Min, m_v3Max;
 
 		std::vector<CGrannyLODController *>		m_LODControllerVector;
+		mutable std::mutex						m_lodControllerMutex;
 		std::vector<TModelThingSet>				m_modelThingSetVector;
 		std::map<DWORD, CGraphicThing::TRef *>	m_roMotionThingMap;
 
@@ -152,7 +166,13 @@ class CGraphicThingInstance : public CGraphicObjectInstance
 		static CGraphicThingInstance* New();
 		static void Delete(CGraphicThingInstance* pkInst);
 
+		// DX11 object submit contract counters (W4): incremented only after real DX11 draw calls.
+		static void ResetDX11SubmittedDrawCount();
+		static void AddDX11SubmittedDrawCount(DWORD dwCount);
+		static DWORD GetDX11SubmittedDrawCount();
+
 		static CDynamicPool<CGraphicThingInstance>		ms_kPool;
+		static DWORD									ms_dwDX11SubmittedDrawCount;
 
 		bool	HaveBlendThing();
 };

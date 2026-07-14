@@ -34,6 +34,11 @@
 #include <string>
 #include <vector>
 
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+struct ID3D11Query;
+class CGraphicDeviceDX11;
+
 
 ///////////////////////////////////////////////////////////////////////  
 //	Constants
@@ -81,7 +86,7 @@ public:
 	CLensFlare();
 	virtual ~CLensFlare();
 	
-	void			Compute(const D3DXVECTOR3 & c_rv3LightDirection); // D3DTS_VIEW로 부터 카메라 방향을 얻어오므로, 카메라 설정 뒤에 해야 함.
+	void			Compute(const DirectX::SimpleMath::Vector3& c_rv3LightDirection); // view transform depends on camera, call after camera update
 
 	void			DrawBeforeFlare();
 	void			DrawAfterFlare();
@@ -100,7 +105,7 @@ public:
 	void            ReadControlPixels();
 	void            AdjustBrightness();
 	
-	void			CharacterizeFlare(bool bEnabled, bool bShowMainFlare, float fMaxBrightness, const D3DXCOLOR & c_rColor);
+	void			CharacterizeFlare(bool bEnabled, bool bShowMainFlare, float fMaxBrightness, const DirectX::SimpleMath::Color& c_rColor);
 	
 protected:
 	float			Interpolate(float fStart, float fEnd, float fPercent);
@@ -117,9 +122,20 @@ private:
 	bool			m_bShowMainFlare;
 	float			m_fMaxBrightness;
 	float			m_afColor[4];
-	
+
+	static const unsigned int c_uDX11OcclusionQueryCount = 4u;
+	ID3D11Query*		m_apDX11OcclusionQueries[c_uDX11OcclusionQueryCount];
+	bool			m_abDX11OcclusionPending[c_uDX11OcclusionQueryCount];
+	unsigned int		m_uDX11OcclusionWriteIndex;
+	unsigned int		m_uDX11OcclusionReadIndex;
+	float			m_fDX11OcclusionVisibility;
+	bool			m_bDX11OcclusionReady;
+
 	CGraphicImageInstance m_SunFlareImageInstance;
-	
+
+	bool			EnsureDX11OcclusionQueries(ID3D11Device* pDevice);
+	void			SubmitDX11OcclusionProbe(ID3D11DeviceContext* pContext, CGraphicDeviceDX11* pDX11Device);
+	void			ConsumeDX11OcclusionSample(ID3D11DeviceContext* pContext);
 	void            ReadDepthPixels(float * pPixels);
 	void			ClampBrightness();
 };

@@ -1,9 +1,11 @@
 #include "StdAfx.h"
+#include "EterBase/Stl.h"
 #include "GrpVertexShader.h"
-#include "GrpD3DXBuffer.h"
+#include "GrpDeviceDX11.h"
 #include "StateManager.h"
 
 #include <utf8.h>
+#include <d3dcompiler.h>
 
 CVertexShader::CVertexShader()
 {
@@ -17,61 +19,74 @@ CVertexShader::~CVertexShader()
 
 void CVertexShader::Initialize()
 {
-	m_handle=0;
+	m_handle = nullptr;
 }
 
 void CVertexShader::Destroy()
 {
-	if (m_handle)
-	{
-		m_handle->Release();
-		m_handle = nullptr;
-	}
+	safe_release(m_handle);
 }
 
 bool CVertexShader::CreateFromDiskFile(const char* c_szFileName, const DWORD* c_pdwVertexDecl)
 {
-    Destroy();
+	Destroy();
+	(void)c_pdwVertexDecl;
 
-    if (!c_szFileName || !*c_szFileName)
-        return false;
+	if (!c_szFileName || !*c_szFileName)
+		return false;
 
-    // UTF-8 → UTF-16 for D3DX
-    std::wstring wFileName = Utf8ToWide(c_szFileName);
+	std::wstring wFileName = Utf8ToWide(c_szFileName);
 
-    LPD3DXBUFFER lpd3dxShaderBuffer = nullptr;
-    LPD3DXBUFFER lpd3dxErrorBuffer = nullptr;
+	ID3DBlob* pShaderBlob = nullptr;
+	ID3DBlob* pErrorBlob = nullptr;
 
-    HRESULT hr = D3DXAssembleShaderFromFileW(
-        wFileName.c_str(),
-        nullptr,
-        nullptr,
-        0,
-        &lpd3dxShaderBuffer,
-        &lpd3dxErrorBuffer
-    );
+	HRESULT hr = D3DCompileFromFile(
+		wFileName.c_str(),
+		nullptr,
+		D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		"main",
+		"vs_4_0",
+		D3DCOMPILE_ENABLE_STRICTNESS,
+		0,
+		&pShaderBlob,
+		&pErrorBlob);
 
-    if (FAILED(hr))
-    {
-        if (lpd3dxErrorBuffer)
-        {
-            const char* err = (const char*)lpd3dxErrorBuffer->GetBufferPointer();
-            TraceError("Vertex shader compile error: %s", err);
-        }
-        return false;
-    }
+	if (FAILED(hr) || !pShaderBlob)
+	{
+		if (pErrorBlob)
+		{
+			const char* err = static_cast<const char*>(pErrorBlob->GetBufferPointer());
+			TraceError("Vertex shader compile error: %s", err);
+		}
+		safe_release(pErrorBlob);
+		safe_release(pShaderBlob);
+		return false;
+	}
 
-    if (FAILED(
-        ms_lpd3dDevice->CreateVertexShader(
-            (const DWORD*)lpd3dxShaderBuffer->GetBufferPointer(),
-            &m_handle
-        )))
-        return false;
+	CGraphicDeviceDX11* pDevice = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDevice || !pDevice->IsValid() || !pDevice->GetDevice())
+	{
+		safe_release(pErrorBlob);
+		safe_release(pShaderBlob);
+		return false;
+	}
 
-    return true;
+	hr = pDevice->GetDevice()->CreateVertexShader(
+		pShaderBlob->GetBufferPointer(),
+		pShaderBlob->GetBufferSize(),
+		nullptr,
+		&m_handle);
+
+	safe_release(pErrorBlob);
+	safe_release(pShaderBlob);
+
+	return SUCCEEDED(hr) && (m_handle != nullptr);
 }
 
 void CVertexShader::Set()
 {
+	if (!m_handle)
+		return;
+
 	STATEMANAGER.SetVertexShader(m_handle);
 }

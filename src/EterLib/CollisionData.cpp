@@ -214,13 +214,11 @@ const TSphereData & CSphereCollisionInstance::GetAttribute() const
 	return m_attribute;
 }
 
-void CSphereCollisionInstance::Render(D3D11_FILL_MODE fillMode)
+void CSphereCollisionInstance::Render(GrpFillModeType fillMode)
 {
-	// M2-ETERLIB-NATIVE-58: Remove DX9 render state, use DX11 rendering directly
-	// Convert D3D11_FILL_MODE to D3DFILLMODE
-	D3DFILLMODE d3d9FillMode = (fillMode == D3D11_FILL_WIREFRAME) ? D3DFILL_WIREFRAME : D3DFILL_SOLID;
+	const GrpFillModeType resolvedFillMode = (fillMode == GRP_FILL_WIREFRAME) ? GRP_FILL_WIREFRAME : GRP_FILL_SOLID;
 	static CScreen s;
-	s.RenderSphere(NULL, m_attribute.v3Position.x, m_attribute.v3Position.y, m_attribute.v3Position.z, m_attribute.fRadius, d3d9FillMode);
+	s.RenderSphere(NULL, m_attribute.v3Position.x, m_attribute.v3Position.y, m_attribute.v3Position.z, m_attribute.fRadius, resolvedFillMode);
 }
 
 void CSphereCollisionInstance::OnDestroy()
@@ -386,7 +384,7 @@ TPosition CPlaneCollisionInstance::OnGetCollisionMovementAdjust(const CDynamicSp
 	}
 }
 
-void CPlaneCollisionInstance::Render(D3D11_FILL_MODE /*D3D11_FILL_MODE*/)
+void CPlaneCollisionInstance::Render(GrpFillModeType /*fillMode*/)
 {
 	static CScreen s;
 	const TPosition* v = m_attribute.v3QuadPosition;
@@ -531,13 +529,11 @@ TPosition CCylinderCollisionInstance::OnGetCollisionMovementAdjust(const CDynami
 	}*/
 }
 
-void CCylinderCollisionInstance::Render(D3D11_FILL_MODE fillMode)
+void CCylinderCollisionInstance::Render(GrpFillModeType fillMode)
 {
-	// M2-ETERLIB-NATIVE-58: Remove DX9 render state check, use DX11 rendering directly
-	// Convert D3D11_FILL_MODE to D3DFILLMODE
-	D3DFILLMODE d3d9FillMode = (fillMode == D3D11_FILL_WIREFRAME) ? D3DFILL_WIREFRAME : D3DFILL_SOLID;
+	const GrpFillModeType resolvedFillMode = (fillMode == GRP_FILL_WIREFRAME) ? GRP_FILL_WIREFRAME : GRP_FILL_SOLID;
 	static CScreen s;
-	s.RenderCylinder(NULL, m_attribute.v3Position.x, m_attribute.v3Position.y, m_attribute.v3Position.z+m_attribute.fHeight/2, m_attribute.fRadius, m_attribute.fHeight, d3d9FillMode);
+	s.RenderCylinder(NULL, m_attribute.v3Position.x, m_attribute.v3Position.y, m_attribute.v3Position.z+m_attribute.fHeight/2, m_attribute.fRadius, m_attribute.fHeight, resolvedFillMode);
 }
 
 void CCylinderCollisionInstance::OnDestroy()
@@ -666,9 +662,9 @@ TPosition CAABBCollisionInstance::OnGetCollisionMovementAdjust(const CDynamicSph
 	
 }
 
-void CAABBCollisionInstance::Render(D3D11_FILL_MODE D3D11_FILL_MODE)
+void CAABBCollisionInstance::Render(GrpFillModeType fillMode)
 {
-	// M2-ETERLIB-NATIVE-58: Remove DX9 render state check, use DX11 rendering directly
+	(void)fillMode;
 	static CScreen s;
 	s.RenderCube(m_attribute.v3Min.x, m_attribute.v3Min.y, m_attribute.v3Min.z, m_attribute.v3Max.x, m_attribute.v3Max.y, m_attribute.v3Max.z);
 	return;
@@ -770,9 +766,9 @@ TPosition COBBCollisionInstance::OnGetCollisionMovementAdjust(const CDynamicSphe
 	
 }
 
-void COBBCollisionInstance::Render(D3D11_FILL_MODE D3D11_FILL_MODE)
+void COBBCollisionInstance::Render(GrpFillModeType fillMode)
 {
-	// M2-ETERLIB-NATIVE-58: Remove DX9 render state check, use DX11 rendering directly
+	(void)fillMode;
 	static CScreen s;
 	s.RenderCube(m_attribute.v3Min.x, m_attribute.v3Min.y, m_attribute.v3Min.z, m_attribute.v3Max.x, m_attribute.v3Max.y, m_attribute.v3Max.z, m_attribute.matRot);
 	return;

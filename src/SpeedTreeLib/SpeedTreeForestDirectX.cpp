@@ -363,7 +363,7 @@ inline float NormalizeAlphaRef(float legacyAlphaRef)
 	if (legacyAlphaRef <= 0.0f)
 		return 0.0f;
 
-	// SpeedTree legacy path uses D3DRS_ALPHAREF (0..255).
+	// SpeedTree legacy path uses GRP_RS_ALPHAREF (0..255).
 	if (legacyAlphaRef > 1.0f)
 		legacyAlphaRef /= 255.0f;
 
@@ -681,7 +681,7 @@ void CSpeedTreeForestDirectX::Render(unsigned long ulRenderBitVector)
 			auto ppInstances = pMainTree->GetInstances(uiCount);
 			for (const auto& pTreeInst : ppInstances)
 			{
-				if (!pTreeInst || !pTreeInst->isShow())
+				if (!pTreeInst || (!m_bDX11ShadowViewProjOverrideActive && !pTreeInst->isShow()))
 					continue;
 
 				bool bForceGeometryForInstance = bForceGeometryLODForVisible;
@@ -1012,7 +1012,7 @@ float4 main(PS_INPUT input) : SV_Target
 {
 	float4 vColor = g_txComposite.Sample(g_sampler, input.vTexCoord);
 
-	// Legacy parity: alpha reference is driven by per-part D3DRS_ALPHAREF equivalent.
+	// Legacy parity: alpha reference is driven by per-part GRP_RS_ALPHAREF equivalent.
 	if (vColor.a < g_fAlphaRef)
 		discard;
 
@@ -2672,7 +2672,7 @@ void CSpeedTreeForestDirectX::RenderBillboardsDX11(unsigned long ulRenderBitVect
 		auto ppInstances = pMainTree->GetInstances(uiCount);
 		for (const auto& pTreeInst : ppInstances)
 		{
-			if (!pTreeInst || !pTreeInst->isShow())
+			if (!pTreeInst || (!m_bDX11ShadowViewProjOverrideActive && !pTreeInst->isShow()))
 				continue;
 
 			if (m_setDX11ForceGeometryInstances.find(pTreeInst.get()) != m_setDX11ForceGeometryInstances.end())
@@ -3263,7 +3263,7 @@ void CSpeedTreeForestDirectX::RenderBranchesDX11(unsigned long ulRenderBitVector
 		auto ppInstances = pMainTree->GetInstances(uiCount);
 		for (const auto& pTreeInst : ppInstances)
 		{
-			if (!pTreeInst || !pTreeInst->isShow())
+			if (!pTreeInst || (!m_bDX11ShadowViewProjOverrideActive && !pTreeInst->isShow()))
 				continue;
 
 			const float* pTreePos = pTreeInst->GetPosition();
@@ -3634,7 +3634,7 @@ void CSpeedTreeForestDirectX::RenderFrondsDX11(unsigned long ulRenderBitVector)
 		auto ppInstances = pMainTree->GetInstances(uiCount);
 		for (const auto& pTreeInst : ppInstances)
 		{
-			if (!pTreeInst || !pTreeInst->isShow())
+			if (!pTreeInst || (!m_bDX11ShadowViewProjOverrideActive && !pTreeInst->isShow()))
 				continue;
 
 			const float* pTreePos = pTreeInst->GetPosition();
@@ -3969,7 +3969,7 @@ void CSpeedTreeForestDirectX::RenderLeavesDX11(unsigned long ulRenderBitVector)
 		auto ppInstances = pMainTree->GetInstances(uiCount);
 		for (const auto& pTreeInst : ppInstances)
 		{
-			if (!pTreeInst || !pTreeInst->isShow())
+			if (!pTreeInst || (!m_bDX11ShadowViewProjOverrideActive && !pTreeInst->isShow()))
 				continue;
 
 			const float* pTreePos = pTreeInst->GetPosition();

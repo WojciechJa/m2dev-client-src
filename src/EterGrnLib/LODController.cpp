@@ -1,14 +1,20 @@
 #include "StdAfx.h"
 #include "LODController.h"
+#include "UserInterface/config.h"
 
 static float LODHEIGHT_ACTOR		=	500.0f;
 static float LODDISTANCE_ACTOR		=	5000.0f;
 static float LODDISTANCE_BUILDING	=	25000.0f;
+static float LODDISTANCE_SOURCE_FARCLIP = 50000.0f;
 
 static const float c_fNearLodScale = 3.0f;
 static const float c_fFarLodScale = 25.0f;
 static const float LOD_APPLY_MAX = 2000.0f;
 static const float LOD_APPLY_MIN = 500.0f;
+
+// DX11 Migration: PNT vertex stride (Position + Normal + TexCoord)
+// sizeof(TPNTVertex) = 12 + 12 + 8 = 32 bytes
+static const DWORD PNT_VERTEX_STRIDE = 32;
 
 bool ms_isMinLODModeEnable=false;
 
@@ -57,11 +63,11 @@ static CGraphicVertexBuffer* __AllocDeformVertexBuffer(unsigned deformableVertex
 
 	CGraphicVertexBuffer* pkNewVB = new CGraphicVertexBuffer;
 
-	if (!pkNewVB->Create(
+	if (!pkNewVB->CreateWithStride(
 		capacity,
-		D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1,
-		D3DUSAGE_DYNAMIC,
-		D3DPOOL_DEFAULT))
+		PNT_VERTEX_STRIDE,
+		GRP_USAGE_DYNAMIC,
+		GRP_POOL_DEFAULT))
 	{
 		TraceError("NEW_ERROR %8d: %d(%d)", time(NULL) - base, capacity, deformableVertexCount);
 	}
@@ -100,11 +106,11 @@ void __ReserveSharedVertexBuffers(unsigned index, unsigned count)
 	for (unsigned i = 0; i != count; ++i)
 	{
 		CGraphicVertexBuffer* pkNewVB = new CGraphicVertexBuffer;
-		pkNewVB->Create(
+		pkNewVB->CreateWithStride(
 			capacity,
-			D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1,
-			D3DUSAGE_DYNAMIC,
-			D3DPOOL_DEFAULT);	
+			PNT_VERTEX_STRIDE,
+			GRP_USAGE_DYNAMIC,
+			GRP_POOL_DEFAULT);
 		gs_vbs[index].push_back(pkNewVB);
 	}
 	NANOEND
@@ -146,6 +152,42 @@ void GrannyDestroySharedDeformBuffer()
 void CGrannyLODController::SetMinLODMode(bool isEnable)
 {
 	ms_isMinLODModeEnable=isEnable;
+}
+
+void CGrannyLODController::SetGlobalLODDistanceFromFarClip(float fFarClip)
+{
+	const float fSafeFarClip = fMAX(DX11RuntimeConfig::kViewDistanceFarClipMin, fFarClip);
+	float fActorDistance = fMAX(
+		DX11RuntimeConfig::kGrannyLodActorMin,
+		fMIN(DX11RuntimeConfig::kGrannyLodActorMax, fSafeFarClip * DX11RuntimeConfig::kGrannyLodActorScale));
+	float fBuildingDistance = fMAX(
+		DX11RuntimeConfig::kGrannyLodBuildingMin,
+		fMIN(DX11RuntimeConfig::kGrannyLodBuildingMax, fSafeFarClip * DX11RuntimeConfig::kGrannyLodBuildingScale));
+
+	if (fActorDistance >= fBuildingDistance)
+		fActorDistance = fMAX(
+			DX11RuntimeConfig::kGrannyLodActorMin,
+			fBuildingDistance * DX11RuntimeConfig::kGrannyLodActorVsBuildingMaxRatio);
+
+	const bool bChanged =
+		(fabsf(LODDISTANCE_ACTOR - fActorDistance) > 1.0f) ||
+		(fabsf(LODDISTANCE_BUILDING - fBuildingDistance) > 1.0f) ||
+		(fabsf(LODDISTANCE_SOURCE_FARCLIP - fSafeFarClip) > 1.0f);
+
+	LODDISTANCE_ACTOR = fActorDistance;
+	LODDISTANCE_BUILDING = fBuildingDistance;
+	LODDISTANCE_SOURCE_FARCLIP = fSafeFarClip;
+
+	static DWORD s_dwLastLODConfigLogMS = 0u;
+	const DWORD dwNow = GetTickCount();
+	if (bChanged && (0u == s_dwLastLODConfigLogMS || (dwNow - s_dwLastLODConfigLogMS) >= 2000u))
+	{
+		s_dwLastLODConfigLogMS = dwNow;
+		TraceError("DX11_LOD_DISTANCE_CONFIG far_clip=%.1f actor=%.1f building=%.1f",
+			LODDISTANCE_SOURCE_FARCLIP,
+			LODDISTANCE_ACTOR,
+			LODDISTANCE_BUILDING);
+	}
 }
 
 void CGrannyLODController::SetMaterialImagePointer(const char* c_szImageName, CGraphicImage* pImage)
@@ -446,6 +488,21 @@ void CGrannyLODController::BlendRenderWithTwoTexture()
 	m_pCurrentModelInstance->BlendRenderWithTwoTexture();
 }
 
+// W4.1: DX11 world rendering
+void CGrannyLODController::RenderWithOneTextureDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+{
+	assert(m_pCurrentModelInstance != NULL);
+	if (pContext)
+		m_pCurrentModelInstance->RenderWithOneTextureDX11(pContext, matViewProj);
+}
+
+void CGrannyLODController::RenderWithTwoTextureDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+{
+	assert(m_pCurrentModelInstance != NULL);
+	if (pContext)
+		m_pCurrentModelInstance->RenderWithTwoTextureDX11(pContext, matViewProj);
+}
+
 void CGrannyLODController::Update(float fElapsedTime, float fDistanceFromCenter, float fDistanceFromCamera)
 {
 	UpdateLODLevel(fDistanceFromCenter, fDistanceFromCamera);
@@ -624,6 +681,13 @@ void CGrannyLODController::RenderToShadowMap()
 {
 	if (m_pCurrentModelInstance)
 		m_pCurrentModelInstance->RenderWithoutTexture();
+}
+
+// S1: DX11 shadow caster rendering
+void CGrannyLODController::RenderToShadowMapDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& c_rmatLightViewProj)
+{
+	if (m_pCurrentModelInstance)
+		m_pCurrentModelInstance->RenderToShadowMapDX11(pContext, c_rmatLightViewProj);
 }
 
 void CGrannyLODController::RenderShadow()

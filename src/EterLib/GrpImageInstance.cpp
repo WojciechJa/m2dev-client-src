@@ -1,13 +1,8 @@
 #include "StdAfx.h"
 #include "GrpImageInstance.h"
-#include "StateManager.h"
 #include "GrpDeviceDX11.h"
 
 #include "EterBase/CRC32.h"
-//STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_INVDESTCOLOR);
-//STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
-//STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-//STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
 
 // Shared UI widget counters used by image/expanded/mark instances.
 struct SUIWidgetCounters
@@ -23,7 +18,7 @@ struct SUIWidgetCounters
 
 SUIWidgetCounters s_kUIWidgetCounters;
 
-CDynamicPool<CGraphicImageInstance>		CGraphicImageInstance::ms_kPool;
+CDynamicPool<CGraphicImageInstance> CGraphicImageInstance::ms_kPool;
 
 void CGraphicImageInstance::CreateSystem(UINT uCapacity)
 {
@@ -53,84 +48,41 @@ void CGraphicImageInstance::Render()
 
 	assert(!IsEmpty());
 
-	CGraphicDeviceDX11* pDeviceDX11 = CGraphicDeviceDX11::GetActiveDevice();
-	if (pDeviceDX11 && pDeviceDX11->IsValid())
+	static bool s_bHadRenderFail = false;
+	if (!OnRenderDX11())
 	{
-		if (OnRenderDX11())
-			return;
+		static bool s_bLoggedRenderFail = false;
+		if (!s_bLoggedRenderFail)
+		{
+			s_bLoggedRenderFail = true;
+			TraceError("DX11_UI_IMAGE_FAIL reason=dx11_path_failed");
+		}
+		s_bHadRenderFail = true;
 	}
-
-	OnRender();
+	else if (s_bHadRenderFail)
+	{
+		s_bHadRenderFail = false;
+		TraceError("DX11_UI_IMAGE_RECOVER reason=dx11_path_restored");
+	}
 }
 
 void CGraphicImageInstance::OnRender()
 {
-	CGraphicImage * pImage = m_roImage.GetPointer();
-	CGraphicTexture * pTexture = pImage->GetTexturePointer();
-
-	float fimgWidth = pImage->GetWidth();
-	float fimgHeight = pImage->GetHeight();
-
-	const RECT& c_rRect = pImage->GetRectReference();
-	float texReverseWidth = 1.0f / float(pTexture->GetWidth());
-	float texReverseHeight = 1.0f / float(pTexture->GetHeight());
-	float su = c_rRect.left * texReverseWidth;
-	float sv = c_rRect.top * texReverseHeight;
-	float eu = (c_rRect.left + (c_rRect.right-c_rRect.left)) * texReverseWidth;
-	float ev = (c_rRect.top + (c_rRect.bottom-c_rRect.top)) * texReverseHeight;
-	
-	
-	TPDTVertex vertices[4];	
-	vertices[0].position.x	= m_v2Position.x-0.5f;
-	vertices[0].position.y	= m_v2Position.y-0.5f;
-	vertices[0].position.z	= 0.0f;
-	vertices[0].texCoord	= TTextureCoordinate(su, sv);
-	vertices[0].diffuse		= m_DiffuseColor;
-
-	vertices[1].position.x	= m_v2Position.x + fimgWidth-0.5f;
-	vertices[1].position.y	= m_v2Position.y-0.5f;
-	vertices[1].position.z	= 0.0f;
-	vertices[1].texCoord	= TTextureCoordinate(eu, sv);
-	vertices[1].diffuse		= m_DiffuseColor;
-
-	vertices[2].position.x	= m_v2Position.x-0.5f;
-	vertices[2].position.y	= m_v2Position.y + fimgHeight-0.5f;
-	vertices[2].position.z	= 0.0f;
-	vertices[2].texCoord	= TTextureCoordinate(su, ev);
-	vertices[2].diffuse		= m_DiffuseColor;
-
-	vertices[3].position.x	= m_v2Position.x + fimgWidth-0.5f;
-	vertices[3].position.y	= m_v2Position.y + fimgHeight-0.5f;
-	vertices[3].position.z	= 0.0f;
-	vertices[3].texCoord	= TTextureCoordinate(eu, ev);	
-	vertices[3].diffuse		= m_DiffuseColor;
-
-	// 2004.11.18.myevan.ctrl+alt+del 반복 사용시 튕기는 문제 
-	if (CGraphicBase::SetPDTStream(vertices, 4))
-	{
-		CGraphicBase::SetDefaultIndexBuffer(CGraphicBase::DEFAULT_IB_FILL_RECT);
-
-		STATEMANAGER.SetTexture(0, pTexture->GetD3DTexture());
-		STATEMANAGER.SetTexture(1, NULL);
-		STATEMANAGER.SetFVF(D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1);
-		STATEMANAGER.DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 4, 0, 2);	
-	}
-	//OLD: STATEMANAGER.DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, 4, 2, c_FillRectIndices, D3DFMT_INDEX16, vertices, sizeof(TPDTVertex));	
-	////////////////////////////////////////////////////////////	
+	OnRenderDX11();
 }
 
-const CGraphicTexture & CGraphicImageInstance::GetTextureReference() const
+const CGraphicTexture& CGraphicImageInstance::GetTextureReference() const
 {
 	return m_roImage->GetTextureReference();
 }
 
-CGraphicTexture * CGraphicImageInstance::GetTexturePointer()
+CGraphicTexture* CGraphicImageInstance::GetTexturePointer()
 {
 	CGraphicImage* pkImage = m_roImage.GetPointer();
 	return pkImage ? pkImage->GetTexturePointer() : NULL;
 }
 
-CGraphicImage * CGraphicImageInstance::GetGraphicImagePointer()
+CGraphicImage* CGraphicImageInstance::GetGraphicImagePointer()
 {
 	return m_roImage.GetPointer();
 }
@@ -139,7 +91,7 @@ int CGraphicImageInstance::GetWidth()
 {
 	if (IsEmpty())
 		return 0;
-	
+
 	return m_roImage->GetWidth();
 }
 
@@ -147,7 +99,7 @@ int CGraphicImageInstance::GetHeight()
 {
 	if (IsEmpty())
 		return 0;
-	
+
 	return m_roImage->GetHeight();
 }
 
@@ -158,20 +110,20 @@ void CGraphicImageInstance::SetDiffuseColor(float fr, float fg, float fb, float 
 	m_DiffuseColor.b = fb;
 	m_DiffuseColor.a = fa;
 }
+
 void CGraphicImageInstance::SetPosition(float fx, float fy)
 {
 	m_v2Position.x = fx;
 	m_v2Position.y = fy;
 }
 
-void CGraphicImageInstance::SetImagePointer(CGraphicImage * pImage)
+void CGraphicImageInstance::SetImagePointer(CGraphicImage* pImage)
 {
 	m_roImage.SetPointer(pImage);
-
 	OnSetImagePointer();
 }
 
-void CGraphicImageInstance::ReloadImagePointer(CGraphicImage * pImage)
+void CGraphicImageInstance::ReloadImagePointer(CGraphicImage* pImage)
 {
 	if (m_roImage.IsNull())
 	{
@@ -179,21 +131,17 @@ void CGraphicImageInstance::ReloadImagePointer(CGraphicImage * pImage)
 		return;
 	}
 
-	CGraphicImage * pkImage = m_roImage.GetPointer();
-
+	CGraphicImage* pkImage = m_roImage.GetPointer();
 	if (pkImage)
 		pkImage->Reload();
 }
 
 bool CGraphicImageInstance::IsEmpty() const
 {
-	if (!m_roImage.IsNull() && !m_roImage->IsEmpty())
-		return false;
-
-	return true;
+	return (m_roImage.IsNull() || m_roImage->IsEmpty());
 }
 
-bool CGraphicImageInstance::operator == (const CGraphicImageInstance & rhs) const
+bool CGraphicImageInstance::operator == (const CGraphicImageInstance& rhs) const
 {
 	return (m_roImage.GetPointer() == rhs.m_roImage.GetPointer());
 }
@@ -201,7 +149,7 @@ bool CGraphicImageInstance::operator == (const CGraphicImageInstance & rhs) cons
 DWORD CGraphicImageInstance::Type()
 {
 	static DWORD s_dwType = GetCRC32("CGraphicImageInstance", strlen("CGraphicImageInstance"));
-	return (s_dwType);
+	return s_dwType;
 }
 
 BOOL CGraphicImageInstance::IsType(DWORD dwType)
@@ -211,10 +159,7 @@ BOOL CGraphicImageInstance::IsType(DWORD dwType)
 
 BOOL CGraphicImageInstance::OnIsType(DWORD dwType)
 {
-	if (CGraphicImageInstance::Type() == dwType)
-		return TRUE;
-
-	return FALSE;
+	return (CGraphicImageInstance::Type() == dwType) ? TRUE : FALSE;
 }
 
 void CGraphicImageInstance::OnSetImagePointer()
@@ -229,7 +174,7 @@ void CGraphicImageInstance::Initialize()
 
 void CGraphicImageInstance::Destroy()
 {
-	m_roImage.SetPointer(NULL); // CRef 에서 레퍼런스 카운트가 떨어져야 함.
+	m_roImage.SetPointer(NULL);
 	Initialize();
 }
 
@@ -245,5 +190,128 @@ CGraphicImageInstance::~CGraphicImageInstance()
 
 bool CGraphicImageInstance::OnRenderDX11()
 {
-	return false;
+	struct SBootstrapVertex
+	{
+		float x, y, z;
+		float r, g, b, a;
+		float u, v;
+	};
+
+	CGraphicImage* pImage = m_roImage.GetPointer();
+	if (!pImage)
+		return false;
+
+	CGraphicTexture* pTexture = pImage->GetTexturePointer();
+	if (!pTexture)
+		return false;
+
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return false;
+
+	if (!pDX11Device->EnsureBootstrapPipelineReady() || !pDX11Device->EnsureBootstrapUISamplerReady())
+		return false;
+
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	ID3D11Buffer* pVertexBuffer = pDX11Device->GetBootstrapUIVertexBuffer();
+	ID3D11VertexShader* pVertexShader = pDX11Device->GetBootstrapUIVertexShader();
+	ID3D11PixelShader* pPixelShader = pDX11Device->GetBootstrapUITexturePixelShader();
+	ID3D11InputLayout* pInputLayout = pDX11Device->GetBootstrapUIInputLayout();
+	ID3D11SamplerState* pSamplerState = pDX11Device->GetBootstrapUISamplerState();
+	ID3D11BlendState* pAlphaBlendState = pDX11Device->GetBootstrapUIAlphaBlendState();
+	ID3D11DepthStencilState* pDepthDisableState = pDX11Device->GetBootstrapUIDepthDisableState();
+	if (!pContext || !pVertexBuffer || !pVertexShader || !pPixelShader || !pInputLayout || !pSamplerState || !pAlphaBlendState || !pDepthDisableState)
+		return false;
+
+	ID3D11ShaderResourceView* pTextureSRV = pTexture->GetD3D11TextureSRV();
+	if (!pTextureSRV)
+	{
+		s_kUIWidgetCounters.dwImageFail++;
+		return false;
+	}
+
+	UINT uBackBufferWidth = 0;
+	UINT uBackBufferHeight = 0;
+	CGraphicBase::GetBackBufferSize(&uBackBufferWidth, &uBackBufferHeight);
+	if (0u == uBackBufferWidth || 0u == uBackBufferHeight)
+	{
+		s_kUIWidgetCounters.dwImageFail++;
+		return false;
+	}
+
+	pDX11Device->BindMainRenderTargets();
+	pDX11Device->SetUI2DBaselineState();
+
+	const RECT& c_rRect = pImage->GetRectReference();
+	const float texReverseWidth = 1.0f / static_cast<float>(pTexture->GetWidth());
+	const float texReverseHeight = 1.0f / static_cast<float>(pTexture->GetHeight());
+	const float su = c_rRect.left * texReverseWidth;
+	const float sv = c_rRect.top * texReverseHeight;
+	const float eu = c_rRect.right * texReverseWidth;
+	const float ev = c_rRect.bottom * texReverseHeight;
+
+	const float x0 = m_v2Position.x - 0.5f;
+	const float y0 = m_v2Position.y - 0.5f;
+	const float x1 = m_v2Position.x + static_cast<float>(pImage->GetWidth()) - 0.5f;
+	const float y1 = m_v2Position.y + static_cast<float>(pImage->GetHeight()) - 0.5f;
+
+	auto PixelToNDCX = [uBackBufferWidth](float fX) -> float
+	{
+		return (2.0f * fX / static_cast<float>(uBackBufferWidth)) - 1.0f;
+	};
+	auto PixelToNDCY = [uBackBufferHeight](float fY) -> float
+	{
+		return 1.0f - (2.0f * fY / static_cast<float>(uBackBufferHeight));
+	};
+
+	SBootstrapVertex akVertices[6];
+	akVertices[0] = { PixelToNDCX(x0), PixelToNDCY(y0), 0.0f, m_DiffuseColor.r, m_DiffuseColor.g, m_DiffuseColor.b, m_DiffuseColor.a, su, sv };
+	akVertices[1] = { PixelToNDCX(x1), PixelToNDCY(y0), 0.0f, m_DiffuseColor.r, m_DiffuseColor.g, m_DiffuseColor.b, m_DiffuseColor.a, eu, sv };
+	akVertices[2] = { PixelToNDCX(x0), PixelToNDCY(y1), 0.0f, m_DiffuseColor.r, m_DiffuseColor.g, m_DiffuseColor.b, m_DiffuseColor.a, su, ev };
+	akVertices[3] = { PixelToNDCX(x1), PixelToNDCY(y0), 0.0f, m_DiffuseColor.r, m_DiffuseColor.g, m_DiffuseColor.b, m_DiffuseColor.a, eu, sv };
+	akVertices[4] = { PixelToNDCX(x1), PixelToNDCY(y1), 0.0f, m_DiffuseColor.r, m_DiffuseColor.g, m_DiffuseColor.b, m_DiffuseColor.a, eu, ev };
+	akVertices[5] = { PixelToNDCX(x0), PixelToNDCY(y1), 0.0f, m_DiffuseColor.r, m_DiffuseColor.g, m_DiffuseColor.b, m_DiffuseColor.a, su, ev };
+
+	D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
+	const HRESULT hr = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+	if (FAILED(hr))
+	{
+		s_kUIWidgetCounters.dwImageFail++;
+		return false;
+	}
+
+	memcpy(kMappedResource.pData, akVertices, sizeof(akVertices));
+	pContext->Unmap(pVertexBuffer, 0);
+
+	UINT uStride = sizeof(SBootstrapVertex);
+	UINT uOffset = 0;
+	pContext->IASetVertexBuffers(0, 1, &pVertexBuffer, &uStride, &uOffset);
+	pContext->IASetInputLayout(pInputLayout);
+	pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	pContext->VSSetShader(pVertexShader, nullptr, 0);
+	pContext->PSSetShader(pPixelShader, nullptr, 0);
+	pContext->PSSetShaderResources(0, 1, &pTextureSRV);
+	pContext->PSSetSamplers(0, 1, &pSamplerState);
+	pContext->OMSetBlendState(pAlphaBlendState, nullptr, 0xFFFFFFFF);
+	pContext->OMSetDepthStencilState(pDepthDisableState, 0);
+	if (pDX11Device->GetBootstrapRasterizerState())
+		pContext->RSSetState(pDX11Device->GetBootstrapRasterizerState());
+
+	pContext->Draw(6, 0);
+
+	ID3D11ShaderResourceView* apNullSRV[1] = { nullptr };
+	ID3D11SamplerState* apNullSampler[1] = { nullptr };
+	pContext->PSSetShaderResources(0, 1, apNullSRV);
+	pContext->PSSetSamplers(0, 1, apNullSampler);
+	pContext->VSSetShader(nullptr, nullptr, 0);
+	pContext->PSSetShader(nullptr, nullptr, 0);
+	pContext->IASetInputLayout(nullptr);
+	pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED);
+	pContext->RSSetState(nullptr);
+	const FLOAT afBlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	pContext->OMSetBlendState(nullptr, afBlendFactor, 0xFFFFFFFFu);
+	pContext->OMSetDepthStencilState(nullptr, 0u);
+
+	s_kUIWidgetCounters.dwImageSuccess++;
+	return true;
 }

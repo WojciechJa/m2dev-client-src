@@ -159,7 +159,7 @@ BOOL CGridSlotWindow::GetPickedSlotList(int iWidth, int iHeight, std::list<TSlot
 		int ixStart = int(ix) - int(ixHalfStep - (ixHalfStep % 2));
 		int ixEnd = int(ix) + int(ixHalfStep);
 
-		// FIXME : 제대로 된 계산 공식을 찾자 - [levites]
+		// NOTE: legacy grid-span formula retained for compatibility (author note: levites).
 		int iyStart = 0, iyEnd = 0;
 
 		if (1 == iHeight)

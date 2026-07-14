@@ -10,7 +10,7 @@ public:
 	virtual ~CGraphicIndexBuffer();
 
 	void Destroy();
-	bool Create(int idxCount, D3DFORMAT d3dFmt);
+	bool Create(int idxCount, GrpFormatType formatType);
 	bool Create(int faceCount, TFace* faces);
 
 	bool CreateDeviceObjects();
@@ -26,9 +26,7 @@ public:
 
 	void SetIndices(int startIndex = 0) const;
 
-	ID3D11Buffer* GetD3DIndexBuffer() const;
-	// M2-GRPBASE-TYPE-CUT-73: DX11-native API (replaces legacy GetD3DIndexBuffer)
-	inline ID3D11Buffer* GetD3D11Buffer() const { return m_lpd3dIdxBuf; }
+	inline ID3D11Buffer* GetIndexBuffer() const { return m_lpd3dIdxBuf; }
 
 	int GetIndexCount() const { return m_iidxCount; }
 
@@ -38,7 +36,7 @@ protected:
 protected:
 	ID3D11Buffer*	m_lpd3dIdxBuf;
 	DWORD					m_dwBufferSize;
-	D3DFORMAT				m_d3dFmt;
+	GrpFormatType			m_formatType;
 	int						m_iidxCount;
 	std::vector<BYTE>		m_cpuShadowIndices;
 	mutable bool			m_bCpuLockActive;

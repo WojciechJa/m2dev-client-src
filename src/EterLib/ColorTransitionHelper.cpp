@@ -88,7 +88,7 @@ bool CColorTransitionHelper::Update()
 	return true;
 }
 
-const D3DCOLOR & CColorTransitionHelper::GetCurColor()
+DWORD CColorTransitionHelper::GetCurColor() const
 {
 	return m_dwCurColor; 
 }

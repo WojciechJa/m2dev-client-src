@@ -1,8 +1,11 @@
 #pragma once
 
+#include <d3d11.h>
+
 #include "GrpCollisionObject.h"
 #include "SphereLib/frustum.h"
 
+class CGraphicTexture;
 
 class CScreen : public CGraphicCollisionObject
 {
@@ -25,24 +28,42 @@ public:
 	void RenderCircle2d(float fx, float fy, float fz, float fRadius, int iStep = 50);
 	void RenderCircle3d(float fx, float fy, float fz, float fRadius, int iStep = 50);
 
+	// DX11 2D primitive rendering methods
+	bool RenderLine2dDX11(float sx, float sy, float ex, float ey, float z);
+	bool RenderBox2dDX11(float sx, float sy, float ex, float ey, float z);
+	bool RenderBar2dDX11(float sx, float sy, float ex, float ey, float z);
+	bool RenderGradationBar2dDX11(float sx, float sy, float ex, float ey, DWORD dwStartColor, DWORD dwEndColor, float ez);
+	bool RenderCircle2dDX11(float fx, float fy, float fz, float fRadius, int iStep);
+
+	// DX11 3D primitive rendering methods
+	bool RenderLine3dDX11(float sx, float sy, float sz, float ex, float ey, float ez);
+	bool RenderBox3dDX11(float sx, float sy, float sz, float ex, float ey, float ez);
+	bool RenderBar3dDX11(float sx, float sy, float sz, float ex, float ey, float ez);
+	bool RenderBar3dDX11(const TPosition * c_pv3Positions);
+	bool RenderGradationBar3dDX11(float sx, float sy, float sz, float ex, float ey, float ez, DWORD dwStartColor, DWORD dwEndColor);
+	bool RenderCircle3dDX11(float fx, float fy, float fz, float fRadius, int iStep);
+
 	void RenderLine3d(float sx, float sy, float sz, float ex, float ey, float ez);
 	void RenderBox3d(float sx, float sy, float sz, float ex, float ey, float ez);
 	void RenderBar3d(float sx, float sy, float sz, float ex, float ey, float ez);
-	void RenderBar3d(const D3DXVECTOR3 * c_pv3Positions);
+	void RenderBar3d(const TPosition * c_pv3Positions);
 	void RenderGradationBar3d(float sx, float sy, float sz, float ex, float ey, float ez, DWORD dwStartColor, DWORD dwEndColor);
 
 	void RenderLineCube(float sx, float sy, float sz, float ex, float ey, float ez);
 	void RenderCube(float sx, float sy, float sz, float ex, float ey, float ez);
-	void RenderCube(float sx, float sy, float sz, float ex, float ey, float ez, D3DXMATRIX matRotation);
+	void RenderCube(float sx, float sy, float sz, float ex, float ey, float ez, DirectX::SimpleMath::Matrix matRotation);
 	void RenderTextureBox(float sx, float sy, float ex, float ey, float z=0.0f, float su=0.0f, float sv=0.0f, float eu=1.0f, float ev=1.0f);
+	void RenderTextureBox(float sx, float sy, float ex, float ey, const CGraphicTexture* pTexture, float z=0.0f, float su=0.0f, float sv=0.0f, float eu=1.0f, float ev=1.0f);
+	void RenderTextureBox(float sx, float sy, float ex, float ey, const CGraphicTexture* pTexture, DWORD dwLeftColor, DWORD dwRightColor, float z=0.0f, float su=0.0f, float sv=0.0f, float eu=1.0f, float ev=1.0f);
 	void RenderBillboard(D3DXVECTOR3 * Position, D3DXCOLOR & Color);
+	bool RenderBillboardDX11(D3DXVECTOR3 * Position, D3DXCOLOR & Color);
 
 	void DrawMinorGrid(float xMin, float yMin, float xMax, float yMax, float xminorStep, float yminorStep, float zPos=0);
 	void DrawGrid(float xMin, float yMin, float xMax, float yMax, float xmajorStep, float ymajorStep, float xminorStep, float yminorStep, float zPos=0);
 
-	void RenderD3DXMesh(LPD3DXMESH lpMesh, const D3DXMATRIX * c_pmatWorld, float fx, float fy, float fz, float fRadius, D3DFILLMODE d3dFillMode);
-	void RenderSphere(const D3DXMATRIX * c_pmatWorld, float fx, float fy, float fz, float fRadius, D3DFILLMODE d3dFillMode = D3DFILL_SOLID);
-	void RenderCylinder(const D3DXMATRIX * c_pmatWorld, float fx, float fy, float fz, float fRadius, float fLength, D3DFILLMODE d3dFillMode = D3DFILL_SOLID);
+	void RenderD3DXMesh(LPD3DXMESH lpMesh, const D3DXMATRIX * c_pmatWorld, float fx, float fy, float fz, float fRadius, GrpFillModeType fillMode);
+	void RenderSphere(const D3DXMATRIX * c_pmatWorld, float fx, float fy, float fz, float fRadius, GrpFillModeType fillMode = GRP_FILL_SOLID);
+	void RenderCylinder(const D3DXMATRIX * c_pmatWorld, float fx, float fy, float fz, float fRadius, float fLength, GrpFillModeType fillMode = GRP_FILL_SOLID);
 
 	void SetColorOperation();
 	void SetDiffuseOperation();

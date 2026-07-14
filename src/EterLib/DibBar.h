@@ -22,7 +22,7 @@ class CDibBar
 		CBlockTexture * __BuildTextureBlock(DWORD dwxPos, DWORD dwyPos, DWORD dwImageWidth, DWORD dwImageHeight, DWORD dwTextureWidth, DWORD dwTextureHeight);
 		void __BuildTextureBlockList(DWORD dwWidth, DWORD dwHeight, DWORD dwMax=256);
 
-		virtual void OnCreate(){}
+		virtual void OnCreate();
 
 	protected:
 		CGraphicDib m_dib;

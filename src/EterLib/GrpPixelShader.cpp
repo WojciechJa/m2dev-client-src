@@ -1,9 +1,11 @@
 #include "StdAfx.h"
+#include "EterBase/Stl.h"
 #include "GrpPixelShader.h"
-#include "GrpD3DXBuffer.h"
+#include "GrpDeviceDX11.h"
 #include "StateManager.h"
 
 #include <utf8.h>
+#include <d3dcompiler.h>
 
 CPixelShader::CPixelShader()
 {
@@ -17,63 +19,73 @@ CPixelShader::~CPixelShader()
 
 void CPixelShader::Initialize()
 {
-	m_handle=0;
+	m_handle = nullptr;
 }
 
 void CPixelShader::Destroy()
 {
-	if (m_handle)
-	{
-		m_handle->Release();
-		m_handle=nullptr;
-	}
+	safe_release(m_handle);
 }
 
 bool CPixelShader::CreateFromDiskFile(const char* c_szFileName)
 {
-    Destroy();
+	Destroy();
 
-    if (!c_szFileName || !*c_szFileName)
-        return false;
+	if (!c_szFileName || !*c_szFileName)
+		return false;
 
-    // UTF-8 -> UTF-16 for D3DX
-    std::wstring wFileName = Utf8ToWide(c_szFileName);
+	std::wstring wFileName = Utf8ToWide(c_szFileName);
 
-    LPD3DXBUFFER lpd3dxShaderBuffer = nullptr;
-    LPD3DXBUFFER lpd3dxErrorBuffer = nullptr;
+	ID3DBlob* pShaderBlob = nullptr;
+	ID3DBlob* pErrorBlob = nullptr;
 
-    HRESULT hr = D3DXAssembleShaderFromFileW(
-        wFileName.c_str(),
-        nullptr,
-        nullptr,
-        0,
-        &lpd3dxShaderBuffer,
-        &lpd3dxErrorBuffer
-    );
+	HRESULT hr = D3DCompileFromFile(
+		wFileName.c_str(),
+		nullptr,
+		D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		"main",
+		"ps_4_0",
+		D3DCOMPILE_ENABLE_STRICTNESS,
+		0,
+		&pShaderBlob,
+		&pErrorBlob);
 
-    if (FAILED(hr))
-    {
-        // Log compiler error text (it is ANSI/ASCII)
-        if (lpd3dxErrorBuffer)
-        {
-            const char* err = (const char*)lpd3dxErrorBuffer->GetBufferPointer();
-            TraceError("Shader compile error: %s", err);
-        }
-        return false;
-    }
+	if (FAILED(hr) || !pShaderBlob)
+	{
+		if (pErrorBlob)
+		{
+			const char* err = static_cast<const char*>(pErrorBlob->GetBufferPointer());
+			TraceError("Pixel shader compile error: %s", err);
+		}
+		safe_release(pErrorBlob);
+		safe_release(pShaderBlob);
+		return false;
+	}
 
-    CDirect3DXBuffer shaderBuffer(lpd3dxShaderBuffer);
-    CDirect3DXBuffer errorBuffer(lpd3dxErrorBuffer);
+	CGraphicDeviceDX11* pDevice = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDevice || !pDevice->IsValid() || !pDevice->GetDevice())
+	{
+		safe_release(pErrorBlob);
+		safe_release(pShaderBlob);
+		return false;
+	}
 
-    if (FAILED(ms_lpd3dDevice->CreatePixelShader(
-        (DWORD*)shaderBuffer.GetPointer(),
-        &m_handle)))
-        return false;
+	hr = pDevice->GetDevice()->CreatePixelShader(
+		pShaderBlob->GetBufferPointer(),
+		pShaderBlob->GetBufferSize(),
+		nullptr,
+		&m_handle);
 
-    return true;
+	safe_release(pErrorBlob);
+	safe_release(pShaderBlob);
+
+	return SUCCEEDED(hr) && (m_handle != nullptr);
 }
 
 void CPixelShader::Set()
 {
+	if (!m_handle)
+		return;
+
 	STATEMANAGER.SetPixelShader(m_handle);
 }

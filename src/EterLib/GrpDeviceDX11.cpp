@@ -10,9 +10,14 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#ifdef _DEBUG
+#include <d3d11sdklayers.h>
+#endif
 
+#if defined(BUILD_DEBUG_UI)
 #include "DebugUI/ImGuiManager.h"
 #include "DebugUI/ImGuiGraphicsMetrics.h"
+#endif
 // M2-D3DX-CORE-CUT-58 Phase 2: StateManager11 for DX11 state management
 #include "StateManager11.h"
 
@@ -75,6 +80,37 @@ namespace
 
 		TraceError("DX11_HRESULT_FAIL op=%s hr=0x%08x", c_szOperation, static_cast<unsigned int>(hResult));
 	}
+
+#ifdef _DEBUG
+	void __ConfigureDX11DebugInfoQueue(ID3D11Device* pDevice)
+	{
+		if (!pDevice)
+			return;
+
+		ID3D11InfoQueue* pInfoQueue = nullptr;
+		if (FAILED(pDevice->QueryInterface(__uuidof(ID3D11InfoQueue), reinterpret_cast<void**>(&pInfoQueue))) || !pInfoQueue)
+			return;
+
+		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, TRUE);
+
+		// Debug-only stability: silence high-volume warning emitted by depth-only passes.
+		static D3D11_MESSAGE_ID s_aeSuppressedMessageIds[] =
+		{
+			D3D11_MESSAGE_ID_DEVICE_DRAW_RENDERTARGETVIEW_NOT_SET,
+		};
+		D3D11_INFO_QUEUE_FILTER kFilter = {};
+		kFilter.DenyList.NumIDs = static_cast<UINT>(_countof(s_aeSuppressedMessageIds));
+		kFilter.DenyList.pIDList = s_aeSuppressedMessageIds;
+		pInfoQueue->AddStorageFilterEntries(&kFilter);
+
+		TraceError(
+			"DX11_DEBUG_INFOQUEUE_CONFIG filter=applied suppressed_rtv_not_set=%u",
+			static_cast<unsigned int>(_countof(s_aeSuppressedMessageIds)));
+
+		pInfoQueue->Release();
+	}
+#endif
 
 	std::string __FormatWorldMaskTokens(uint32_t dwMask)
 	{
@@ -371,6 +407,9 @@ bool CGraphicDeviceDX11::Create(HWND hWnd, UINT uWidth, UINT uHeight, bool isWin
 	UINT uCreateFlags = 0;
 #ifdef _DEBUG
 	uCreateFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#else
+	// Release build: no debug layer
+#endif
 	HRESULT hResult = D3D11CreateDeviceAndSwapChain(
 		NULL,
 		D3D_DRIVER_TYPE_HARDWARE,
@@ -423,6 +462,10 @@ bool CGraphicDeviceDX11::Create(HWND hWnd, UINT uWidth, UINT uHeight, bool isWin
 		__LogDX11HResultFailure("D3D11CreateDeviceAndSwapChain", hResult);
 		return false;
 	}
+
+#ifdef _DEBUG
+	__ConfigureDX11DebugInfoQueue(m_pDevice);
+#endif
 
 	if (!__CreateRenderTarget())
 		return false;
@@ -519,10 +562,14 @@ bool CGraphicDeviceDX11::BeginFrame(float fR, float fG, float fB, float fA)
 	// DX11 Model Sync: Reset frame draw call counter
 	m_uFrameDrawCalls = 0;
 	m_uFramePrimitiveCount = 0;
+	if (CStateManager11* pStateManager11 = CStateManager11::InstancePtr())
+		pStateManager11->ResetFrameDiagnostics();
 
-	// Reset ImGui subsystem stats at start of frame
+	#if defined(BUILD_DEBUG_UI)
+	// Reset optional diagnostics stats at start of frame.
 	extern void ResetImGuiSubsystemStats();
 	ResetImGuiSubsystemStats();
+	#endif
 
 	const float afClearColor[4] = { fR, fG, fB, fA };
 	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
@@ -1825,31 +1872,6 @@ bool CGraphicDeviceDX11::__RunNativeWorldTerrainPrototype(int iTerrainTiles, int
 	return true;
 }
 
-bool CGraphicDeviceDX11::__RunNativeWorldRuntimeStub(const char* c_szStage, int iTerrainTiles, int iActorCount, int iFXCount)
-{
-	if (!__ValidateNativeWorldRuntimePass())
-		return false;
-
-	static DWORD s_dwDX11NativeWorldRuntimeStubFrameCounter = 0;
-	const bool bLogNow =
-		(0 == s_dwDX11NativeWorldRuntimeStubFrameCounter) ||
-		(0 == (s_dwDX11NativeWorldRuntimeStubFrameCounter % 1800u));
-	if (bLogNow)
-	{
-		TraceError(
-			"DX11_WORLD_NATIVE_RUNTIME_STUB stage=%s terrain=%d actors=%d fx=%d reason=external_world_renderer_or_stub",
-			c_szStage ? c_szStage : "unknown",
-			iTerrainTiles,
-			iActorCount,
-			iFXCount);
-	}
-	if (s_dwDX11NativeWorldRuntimeStubFrameCounter < 0xffffffffu)
-		++s_dwDX11NativeWorldRuntimeStubFrameCounter;
-
-	// Intentionally no world draw calls here until native DX11 world renderer is implemented.
-	return true;
-}
-
 bool CGraphicDeviceDX11::PresentNativeWorld(bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY)
 {
 	m_bUsingNativeWorldPresentPath = true;
@@ -2329,19 +2351,6 @@ bool CGraphicDeviceDX11::PresentNativeWorldDryRun(bool bDrawNativeCursorOverlay,
 	return Present();
 }
 
-bool CGraphicDeviceDX11::CaptureDX9FrameToVisibleBridge(void* pDX9Device)
-{
-	static DWORD s_dwBridgeCaptureDisabledLogTick = 0u;
-	const DWORD dwNow = GetTickCount();
-	if (0u == s_dwBridgeCaptureDisabledLogTick || dwNow - s_dwBridgeCaptureDisabledLogTick >= 3000u)
-	{
-		s_dwBridgeCaptureDisabledLogTick = dwNow;
-		TraceError("DX11_BRIDGE_DISABLED path=capture_dx9_frame reason=full_dx11_cutover");
-	}
-	(void)pDX9Device;
-	return false;
-}
-
 bool CGraphicDeviceDX11::PresentVisibleBridgeTexture(bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY)
 {
 	m_bUsingNativeWorldPresentPath = false;
@@ -2448,22 +2457,6 @@ bool CGraphicDeviceDX11::PresentVisibleBridgeTexture(bool bDrawNativeCursorOverl
 	m_pDeviceContext->OMSetDepthStencilState(NULL, 0);
 
 	return Present();
-}
-
-bool CGraphicDeviceDX11::PresentNativeVisibleBridge(void* pDX9Device, bool bDrawNativeCursorOverlay, float fCursorX, float fCursorY)
-{
-	static DWORD s_dwBridgePresentDisabledLogTick = 0u;
-	const DWORD dwNow = GetTickCount();
-	if (0u == s_dwBridgePresentDisabledLogTick || dwNow - s_dwBridgePresentDisabledLogTick >= 30000u)
-	{
-		s_dwBridgePresentDisabledLogTick = dwNow;
-		TraceError("DX11_BRIDGE_DISABLED path=present_native_visible_bridge reason=full_dx11_cutover");
-	}
-	(void)pDX9Device;
-	(void)bDrawNativeCursorOverlay;
-	(void)fCursorX;
-	(void)fCursorY;
-	return false;
 }
 
 void CGraphicDeviceDX11::BindMainRenderTargets()
@@ -2619,7 +2612,8 @@ bool CGraphicDeviceDX11::Present()
 {
 	if (!m_pSwapChain)
 		return false;
-	// DX11 Model Sync: End frame graphics metrics collection
+	#if defined(BUILD_DEBUG_UI)
+	// Optional developer overlay and graphics metrics.
 	if (CImGuiGraphicsMetrics::Instance())
 	{
 		CImGuiGraphicsMetrics::Instance()->EndFrame();
@@ -2637,6 +2631,7 @@ bool CGraphicDeviceDX11::Present()
 	{
 		CImGuiGraphicsMetrics::Instance()->BeginFrame();
 	}
+	#endif
 	HRESULT hResult = m_pSwapChain->Present(m_isVSyncEnabled ? 1 : 0, 0);
 	if (FAILED(hResult))
 	{
@@ -3111,7 +3106,7 @@ bool CGraphicDeviceDX11::__CreateBootstrapPipeline()
 		{  0.92f,  0.90f, 0.0f, 0.14f, 0.60f, 1.00f, 1.0f, 1.0f, 0.0f },
 		{  0.92f,  0.78f, 0.0f, 0.08f, 0.23f, 0.52f, 1.0f, 1.0f, 1.0f },
 
-		// Native DX11 UI test cursor quad placeholder (indices 9..14)
+		// Native DX11 UI test cursor quad (indices 9..14)
 		{ -0.05f,  0.05f, 0.0f, 1.00f, 0.92f, 0.20f, 1.0f, 0.0f, 0.0f },
 		{  0.05f,  0.05f, 0.0f, 1.00f, 0.92f, 0.20f, 1.0f, 1.0f, 0.0f },
 		{ -0.05f, -0.05f, 0.0f, 0.80f, 0.65f, 0.10f, 1.0f, 0.0f, 1.0f },

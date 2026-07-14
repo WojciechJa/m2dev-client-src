@@ -5,6 +5,7 @@
 #include "Eterlib/ResourceManager.h"
 #include "Eterlib/StateManager.h"
 #include "Eterlib/GrpScreen.h"
+#include "Eterlib/GrpDeviceDX11.h"
 
 CGraphicImageInstance CGrannyMaterial::ms_akSphereMapInstance[SPHEREMAP_NUM];
 
@@ -12,6 +13,86 @@ D3DXVECTOR3	CGrannyMaterial::ms_v3SpecularTrans(0.0f, 0.0f, 0.0f);
 D3DXMATRIX	CGrannyMaterial::ms_matSpecular;
 
 D3DXCOLOR g_fSpecularColor = D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f);
+
+namespace
+{
+	ID3D11RasterizerState* g_pDX11MaterialPassDefaultRasterState = nullptr;
+
+	ID3D11RasterizerState* CreateTwoSidedRasterStateFromCurrent(ID3D11DeviceContext* pContext, ID3D11RasterizerState* pCurrentState)
+	{
+		if (!pContext)
+			return nullptr;
+
+		D3D11_RASTERIZER_DESC kDesc;
+		ZeroMemory(&kDesc, sizeof(kDesc));
+		if (pCurrentState)
+		{
+			pCurrentState->GetDesc(&kDesc);
+		}
+		else
+		{
+			kDesc.FillMode = D3D11_FILL_SOLID;
+			kDesc.CullMode = D3D11_CULL_BACK;
+			kDesc.FrontCounterClockwise = FALSE;
+			kDesc.DepthBias = 0;
+			kDesc.DepthBiasClamp = 0.0f;
+			kDesc.SlopeScaledDepthBias = 0.0f;
+			kDesc.DepthClipEnable = TRUE;
+			kDesc.ScissorEnable = FALSE;
+			kDesc.MultisampleEnable = FALSE;
+			kDesc.AntialiasedLineEnable = FALSE;
+		}
+
+		kDesc.CullMode = D3D11_CULL_NONE;
+
+		ID3D11Device* pDevice = nullptr;
+		pContext->GetDevice(&pDevice);
+		if (!pDevice)
+			return nullptr;
+
+		ID3D11RasterizerState* pTwoSidedState = nullptr;
+		const HRESULT hr = pDevice->CreateRasterizerState(&kDesc, &pTwoSidedState);
+		pDevice->Release();
+		if (FAILED(hr))
+			return nullptr;
+		return pTwoSidedState;
+	}
+
+	ID3D11RasterizerState* GetOrCreateDX11MaterialPassDefaultRasterState(ID3D11DeviceContext* pContext)
+	{
+		if (g_pDX11MaterialPassDefaultRasterState)
+			return g_pDX11MaterialPassDefaultRasterState;
+
+		if (!pContext)
+			return nullptr;
+
+		ID3D11Device* pDevice = nullptr;
+		pContext->GetDevice(&pDevice);
+		if (!pDevice)
+			return nullptr;
+
+		D3D11_RASTERIZER_DESC kDesc;
+		ZeroMemory(&kDesc, sizeof(kDesc));
+		kDesc.FillMode = D3D11_FILL_SOLID;
+		// Pass default parity for object/character rendering (GRP_CULL_CW -> front cull in DX11 with FrontCCW=FALSE).
+		kDesc.CullMode = D3D11_CULL_FRONT;
+		kDesc.FrontCounterClockwise = FALSE;
+		kDesc.DepthBias = 0;
+		kDesc.DepthBiasClamp = 0.0f;
+		kDesc.SlopeScaledDepthBias = 0.0f;
+		kDesc.DepthClipEnable = TRUE;
+		kDesc.ScissorEnable = FALSE;
+		kDesc.MultisampleEnable = FALSE;
+		kDesc.AntialiasedLineEnable = FALSE;
+
+		const HRESULT hr = pDevice->CreateRasterizerState(&kDesc, &g_pDX11MaterialPassDefaultRasterState);
+		pDevice->Release();
+		if (FAILED(hr))
+			return nullptr;
+
+		return g_pDX11MaterialPassDefaultRasterState;
+	}
+}
 
 void CGrannyMaterial::TranslateSpecularMatrix(float fAddX, float fAddY, float fAddZ)
 {
@@ -54,19 +135,28 @@ void CGrannyMaterial::Copy(CGrannyMaterial& rkMtrl)
 	m_pgrnMaterial = rkMtrl.m_pgrnMaterial;
 	m_roImage[0] =  rkMtrl.m_roImage[0];
 	m_roImage[1] =  rkMtrl.m_roImage[1];
-    m_eType = rkMtrl.m_eType;	
+    m_eType = rkMtrl.m_eType;
+	m_bTwoSideRender = rkMtrl.m_bTwoSideRender;
+	SetSpecularInfo(rkMtrl.m_bSpecularEnable, rkMtrl.m_fSpecularPower, rkMtrl.m_bSphereMapIndex);
 }
 
 CGrannyMaterial::CGrannyMaterial()
 {
 	m_bTwoSideRender = false;
-	m_dwLastCullRenderStateForTwoSideRendering = D3DCULL_CW;
+	m_dwLastCullRenderStateForTwoSideRendering = GRP_CULL_CW;
+	m_bDX11AppliedCullNone = false;
+	m_pDX11TwoSidedRasterState = nullptr;
 
 	Initialize();
 }
 
 CGrannyMaterial::~CGrannyMaterial()
 {
+	if (m_pDX11TwoSidedRasterState)
+	{
+		m_pDX11TwoSidedRasterState->Release();
+		m_pDX11TwoSidedRasterState = nullptr;
+	}
 }
 
 CGrannyMaterial::EType CGrannyMaterial::GetType() const
@@ -138,19 +228,6 @@ bool CGrannyMaterial::IsEqual(granny_material* pgrnMaterial) const
 	return false;
 }
 
-
-LPDIRECT3DTEXTURE9 CGrannyMaterial::GetD3DTexture(int iStage) const
-{
-	const CGraphicImage::TRef & ratImage = m_roImage[iStage];
-
-	if (ratImage.IsNull())
-		return NULL;
-
-	CGraphicImage * pImage = ratImage.GetPointer();
-	const CGraphicTexture * pTexture = pImage->GetTexturePointer();
-
-	return pTexture->GetD3DTexture();
-}
 
 CGraphicImage * CGrannyMaterial::GetImagePointer(int iStage) const
 {
@@ -241,7 +318,7 @@ bool CGrannyMaterial::CreateFromGrannyMaterialPointer(granny_material * pgrnMate
 			pgrnOpacityTexture = GrannyGetMaterialTextureByType(m_pgrnMaterial, GrannyOpacityTexture);
 		}
 
-		// Two-Side 렌더링이 필요한 지 검사
+		// Two-Side Ã«Â Å’Ã«Ââ€Ã«Â§ÂÃ¬ÂÂ´ Ã­â€¢â€žÃ¬Å¡â€Ã­â€¢Å“ Ã¬Â§â‚¬ ÃªÂ²â‚¬Ã¬â€šÂ¬
 		{			
 			granny_int32 twoSided = 0;
 			granny_data_type_definition TwoSidedFieldType[] =
@@ -265,7 +342,7 @@ bool CGrannyMaterial::CreateFromGrannyMaterialPointer(granny_material * pgrnMate
 	if (pgrnOpacityTexture)
 		m_roImage[1].SetPointer(__GetImagePointer(pgrnOpacityTexture->FromFileName));
 
-	// 오퍼시티가 있으면 블렌딩 메쉬
+	// Ã¬ËœÂ¤Ã­ÂÂ¼Ã¬â€¹Å“Ã­â€¹Â°ÃªÂ°â‚¬ Ã¬Å¾Ë†Ã¬Å“Â¼Ã«Â©Â´ Ã«Â¸â€Ã«Â Å’Ã«â€Â© Ã«Â©â€Ã¬â€°Â¬
 	if (!m_roImage[1].IsNull())
 		m_eType = TYPE_BLEND_PNT;
 	else
@@ -284,86 +361,110 @@ void CGrannyMaterial::Initialize()
 
 void CGrannyMaterial::__ApplyDiffuseRenderState()
 {
-	STATEMANAGER.SetTexture(0, GetD3DTexture(0));
-
 	if (m_bTwoSideRender)
 	{
-		// -_-렌더링 프로세스가 좀 구려서... Save & Restore 하면 순서때문에 좀 꼬인다. 귀찮으니 Save & Restore 대신 따로 저장해 둠.
-		m_dwLastCullRenderStateForTwoSideRendering = STATEMANAGER.GetRenderState(D3DRS_CULLMODE);
-		STATEMANAGER.SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+		CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+		ID3D11DeviceContext* pContext = pDX11Device ? pDX11Device->GetContext() : nullptr;
+		if (pContext)
+		{
+			ID3D11RasterizerState* pCurrentRasterState = nullptr;
+			pContext->RSGetState(&pCurrentRasterState);
+
+			if (!m_pDX11TwoSidedRasterState)
+				m_pDX11TwoSidedRasterState = CreateTwoSidedRasterStateFromCurrent(pContext, pCurrentRasterState);
+
+			if (pCurrentRasterState)
+				pCurrentRasterState->Release();
+
+			if (m_pDX11TwoSidedRasterState)
+			{
+				pContext->RSSetState(m_pDX11TwoSidedRasterState);
+				m_bDX11AppliedCullNone = true;
+			}
+			else
+			{
+				m_bDX11AppliedCullNone = false;
+			}
+		}
+		else
+		{
+			m_bDX11AppliedCullNone = false;
+		}
+	}
+	else
+	{
+		m_bDX11AppliedCullNone = false;
+	}
+
+	static DWORD s_dwLastTelemetryMS = 0;
+	static DWORD s_dwDiffuseCount = 0;
+	static DWORD s_dwTwoSidedCount = 0;
+	++s_dwDiffuseCount;
+	if (m_bTwoSideRender)
+		++s_dwTwoSidedCount;
+
+	const DWORD dwNow = GetTickCount();
+	if (0u == s_dwLastTelemetryMS || (dwNow - s_dwLastTelemetryMS) >= 30000u)
+	{
+		s_dwLastTelemetryMS = dwNow;
+		if (s_dwDiffuseCount > 0u)
+		{
+			TraceError("DX11_EGRN_MATERIAL_STRICT mode=dx11 active=diffuse total=%u two_sided=%u interval_ms=30000",
+				s_dwDiffuseCount, s_dwTwoSidedCount);
+			s_dwDiffuseCount = 0u;
+			s_dwTwoSidedCount = 0u;
+		}
 	}
 }
 
 void CGrannyMaterial::__RestoreDiffuseRenderState()
 {
-	if (m_bTwoSideRender)
+	if (m_bDX11AppliedCullNone)
 	{
-		STATEMANAGER.SetRenderState(D3DRS_CULLMODE, m_dwLastCullRenderStateForTwoSideRendering);
+		CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+		ID3D11DeviceContext* pContext = pDX11Device ? pDX11Device->GetContext() : nullptr;
+		if (pContext)
+		{
+			if (ID3D11RasterizerState* pPassDefaultRasterState = GetOrCreateDX11MaterialPassDefaultRasterState(pContext))
+				pContext->RSSetState(pPassDefaultRasterState);
+		}
 	}
+
+	m_bDX11AppliedCullNone = false;
 }
 
 void CGrannyMaterial::__ApplySpecularRenderState()
 {
-	if (TRUE == STATEMANAGER.GetRenderState(D3DRS_ALPHABLENDENABLE))
+	// Reuse diffuse state path (including two-sided handling).
+	// Specular contribution is applied in DX11 object shader via material parameters.
+	__ApplyDiffuseRenderState();
+
+	// Telemetry: throttled 30s heartbeat for specular material usage tracking
+	static DWORD s_dwLastSpecularTelemetryMS = 0;
+	static DWORD s_dwSpecularCount = 0;
+	static float s_fMaxSpecularPower = 0.0f;
+	++s_dwSpecularCount;
+	if (m_fSpecularPower > s_fMaxSpecularPower)
+		s_fMaxSpecularPower = m_fSpecularPower;
+
+	const DWORD dwNow = GetTickCount();
+	if (0u == s_dwLastSpecularTelemetryMS || (dwNow - s_dwLastSpecularTelemetryMS) >= 30000u)
 	{
-		__ApplyDiffuseRenderState();
-		return;
+		s_dwLastSpecularTelemetryMS = dwNow;
+		if (s_dwSpecularCount > 0u)
+		{
+			TraceError("DX11_EGRN_MATERIAL_STRICT mode=dx11 active=specular_shader total=%u max_power=%.2f sphere_idx=%d interval_ms=30000",
+				s_dwSpecularCount, s_fMaxSpecularPower, (int)m_bSphereMapIndex);
+			s_dwSpecularCount = 0u;
+			s_fMaxSpecularPower = 0.0f;
+		}
 	}
-
-	CGraphicTexture* pkTexture=ms_akSphereMapInstance[m_bSphereMapIndex].GetTexturePointer();
-
-	STATEMANAGER.SetTexture(0, GetD3DTexture(0));
-
-	if (pkTexture)
-		STATEMANAGER.SetTexture(1, pkTexture->GetD3DTexture());
-	else
-		STATEMANAGER.SetTexture(1, NULL);
-
-	// MR-12: Fix specular isolation issue
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, D3DXCOLOR(g_fSpecularColor.r, g_fSpecularColor.g, g_fSpecularColor.b, GetSpecularPower()));
-	// MR-12: -- END OF -- Fix specular isolation issue
-	STATEMANAGER.SaveTextureStageState(1, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_ALPHAARG2,	D3DTA_TFACTOR);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
-
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG1,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG2,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP,	D3DTOP_MODULATEALPHA_ADDCOLOR);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAARG1,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP,	D3DTOP_SELECTARG1);
-
-	STATEMANAGER.SetTransform(D3DTS_TEXTURE1, &ms_matSpecular);
-	STATEMANAGER.SaveTextureStageState(1, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
-	STATEMANAGER.SaveSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
-	STATEMANAGER.SaveSamplerState(1, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
 }
 
 void CGrannyMaterial::__RestoreSpecularRenderState()
 {
-	if (TRUE == STATEMANAGER.GetRenderState(D3DRS_ALPHABLENDENABLE))
-	{
-		__RestoreDiffuseRenderState();
-		return;
-	}
-
-	STATEMANAGER.RestoreTextureStageState(1, D3DTSS_TEXTURETRANSFORMFLAGS);
-	STATEMANAGER.RestoreSamplerState(1, D3DSAMP_ADDRESSU);
-	STATEMANAGER.RestoreSamplerState(1, D3DSAMP_ADDRESSV);
-
-	STATEMANAGER.RestoreTextureStageState(1, D3DTSS_TEXCOORDINDEX);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLORARG1);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLORARG2);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLOROP);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_ALPHAARG1);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_ALPHAARG2);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_ALPHAOP);
+	// M3-EGRN-40: Delegate to diffuse restore (clears state tracking)
+	__RestoreDiffuseRenderState();
 }
 
 void CGrannyMaterial::CreateSphereMap(UINT uMapIndex, const char* c_szSphereMapImageFileName)
@@ -512,4 +613,3 @@ DWORD CGrannyMaterialPalette::GetMaterialCount() const
 {
 	return m_mtrlVector.size();
 }
-

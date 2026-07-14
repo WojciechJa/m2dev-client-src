@@ -165,7 +165,7 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 		bool	__IsDeformableVertexBuffer();
 		void	__SetSharedDeformableVertexBuffer(CGraphicVertexBuffer* pkSharedDeformableVertexBuffer);
 		
-		ID3D11Buffer* __GetDeformableD3DVertexBufferPtr();
+		ID3D11Buffer* __GetDeformableVertexBufferPtr();
 		CGraphicVertexBuffer&	__GetDeformableVertexBufferRef();
 		
 		granny_world_pose* __GetWorldPosePtr() const;
@@ -250,4 +250,3 @@ class CGrannyModelInstance : public CGraphicCollisionObject
 	public:
 		bool							HaveBlendThing() { return m_pModel->HaveBlendThing(); }
 };
-

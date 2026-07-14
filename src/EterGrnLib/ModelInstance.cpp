@@ -2,6 +2,7 @@
 #include "ModelInstance.h"
 #include "Model.h"
 #include "EterLib/ResourceManager.h"
+#include "EterLib/GrpDeviceDX11.h"  // S1.2: For DX11 device access
 
 
 CGrannyModel* CGrannyModelInstance::GetModel()
@@ -72,14 +73,20 @@ bool CGrannyModelInstance::IsEmpty()
 }
 
 bool CGrannyModelInstance::CreateDeviceObjects()
-{	
+{
 	__CreateDynamicVertexBuffer();
+
+	// S1.2: Create DX11 vertex buffers for shadow rendering
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (pDX11Device && pDX11Device->IsValid())
+		CreateDX11VertexBuffers(pDX11Device->GetDevice());
 
 	return true;
 }
 
 void CGrannyModelInstance::DestroyDeviceObjects()
 {
+	DestroyDX11VertexBuffers();  // S1.2: Clean up DX11 VBs
 	__DestroyDynamicVertexBuffer();
 }
 
@@ -113,6 +120,13 @@ void CGrannyModelInstance::__Initialize()
 	material_data_ = {};
 	m_dwOldUpdateFrame = 0;
 	// MR-12: -- END OF -- Fix specular isolation issue
+
+	// S1.2: DX11 vertex buffers initialization
+	m_pDX11DeformableVertexBuffer = nullptr;
+	m_pDX11RigidVertexBuffer = nullptr;
+	m_pDX11IndexBuffer = nullptr;
+	m_bDX11VertexBuffersReady = false;
+	// S1.2: END
 }
 
 CGrannyModelInstance::CGrannyModelInstance()

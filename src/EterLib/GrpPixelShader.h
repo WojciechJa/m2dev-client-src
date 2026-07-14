@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GrpBase.h"
+#include <d3d11.h>
 
 class CPixelShader : public CGraphicBase
 {
@@ -17,5 +18,5 @@ class CPixelShader : public CGraphicBase
 		void Initialize();
 
 	protected:
-		LPDIRECT3DPIXELSHADER9 m_handle;
+		ID3D11PixelShader* m_handle;
 };

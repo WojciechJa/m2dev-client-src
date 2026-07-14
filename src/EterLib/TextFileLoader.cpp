@@ -535,7 +535,7 @@ BOOL CTextFileLoader::GetTokenFloat(const std::string & c_rstrKey, float * pData
 	return TRUE;
 }
 
-BOOL CTextFileLoader::GetTokenVector2(const std::string & c_rstrKey, D3DXVECTOR2 * pVector2)
+BOOL CTextFileLoader::GetTokenVector2(const std::string & c_rstrKey, DirectX::SimpleMath::Vector2 * pVector2)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -553,7 +553,7 @@ BOOL CTextFileLoader::GetTokenVector2(const std::string & c_rstrKey, D3DXVECTOR2
 	return TRUE;
 }
 
-BOOL CTextFileLoader::GetTokenVector3(const std::string & c_rstrKey, D3DXVECTOR3 * pVector3)
+BOOL CTextFileLoader::GetTokenVector3(const std::string & c_rstrKey, DirectX::SimpleMath::Vector3 * pVector3)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -572,7 +572,7 @@ BOOL CTextFileLoader::GetTokenVector3(const std::string & c_rstrKey, D3DXVECTOR3
 	return TRUE;
 }
 
-BOOL CTextFileLoader::GetTokenVector4(const std::string & c_rstrKey, D3DXVECTOR4 * pVector4)
+BOOL CTextFileLoader::GetTokenVector4(const std::string & c_rstrKey, DirectX::SimpleMath::Vector4 * pVector4)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -593,12 +593,12 @@ BOOL CTextFileLoader::GetTokenVector4(const std::string & c_rstrKey, D3DXVECTOR4
 }
 
 
-BOOL CTextFileLoader::GetTokenPosition(const std::string & c_rstrKey, D3DXVECTOR3 * pVector)
+BOOL CTextFileLoader::GetTokenPosition(const std::string & c_rstrKey, DirectX::SimpleMath::Vector3 * pVector)
 {
 	return GetTokenVector3(c_rstrKey, pVector);
 }
 
-BOOL CTextFileLoader::GetTokenQuaternion(const std::string & c_rstrKey, D3DXQUATERNION * pQ)
+BOOL CTextFileLoader::GetTokenQuaternion(const std::string & c_rstrKey, DirectX::SimpleMath::Quaternion * pQ)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -618,7 +618,7 @@ BOOL CTextFileLoader::GetTokenQuaternion(const std::string & c_rstrKey, D3DXQUAT
 	return TRUE;
 }
 
-BOOL CTextFileLoader::GetTokenDirection(const std::string & c_rstrKey, D3DVECTOR * pVector)
+BOOL CTextFileLoader::GetTokenDirection(const std::string & c_rstrKey, DirectX::SimpleMath::Vector3 * pVector)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -637,7 +637,7 @@ BOOL CTextFileLoader::GetTokenDirection(const std::string & c_rstrKey, D3DVECTOR
 	return TRUE;
 }
 
-BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, D3DXCOLOR * pColor)
+BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, DirectX::SimpleMath::Color * pColor)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -649,15 +649,15 @@ BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, D3DXCOLOR * p
 		return FALSE;
 	}
 
-	pColor->r = atof(pTokenVector->at(0).c_str());
-	pColor->g = atof(pTokenVector->at(1).c_str());
-	pColor->b = atof(pTokenVector->at(2).c_str());
-	pColor->a = atof(pTokenVector->at(3).c_str());
+	pColor->x = atof(pTokenVector->at(0).c_str());
+	pColor->y = atof(pTokenVector->at(1).c_str());
+	pColor->z = atof(pTokenVector->at(2).c_str());
+	pColor->w = atof(pTokenVector->at(3).c_str());
 
 	return TRUE;
 }
 
-BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, D3DCOLORVALUE * pColor)
+BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, DirectX::SimpleMath::Vector4 * pColor)
 {
 	CTokenVector * pTokenVector;
 	if (!GetTokenVector(c_rstrKey, &pTokenVector))
@@ -669,11 +669,27 @@ BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, D3DCOLORVALUE
 		return FALSE;
 	}
 
-	pColor->r = atof(pTokenVector->at(0).c_str());
-	pColor->g = atof(pTokenVector->at(1).c_str());
-	pColor->b = atof(pTokenVector->at(2).c_str());
-	pColor->a = atof(pTokenVector->at(3).c_str());
+	pColor->x = atof(pTokenVector->at(0).c_str());
+	pColor->y = atof(pTokenVector->at(1).c_str());
+	pColor->z = atof(pTokenVector->at(2).c_str());
+	pColor->w = atof(pTokenVector->at(3).c_str());
 
+	return TRUE;
+}
+
+BOOL CTextFileLoader::GetTokenColor(const std::string & c_rstrKey, D3DXCOLOR * pColor)
+{
+	if (!pColor)
+		return FALSE;
+
+	DirectX::SimpleMath::Vector4 vColor;
+	if (!GetTokenColor(c_rstrKey, &vColor))
+		return FALSE;
+
+	pColor->r = vColor.x;
+	pColor->g = vColor.y;
+	pColor->b = vColor.z;
+	pColor->a = vColor.w;
 	return TRUE;
 }
 
