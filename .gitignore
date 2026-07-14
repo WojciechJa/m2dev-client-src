@@ -61,3 +61,23 @@
 *.*.bAk
 *.*.baK
 *.*.bak
+
+# =======================================================
+# LOCAL ANALYSIS, BACKUP AND BUILD ARTIFACTS
+# =======================================================
+
+/.claude/settings.local.json
+/src_BAK_DO_NOT_TOUCH/
+/tools/WorldEditor-Renewal-main/
+/tools/WorldEditor-Renewal-main.zip
+/nul
+/extern/nul
+*.log
+*.backup
+*.pdb
+*.tlog
+__pycache__/
+*.py[cod]
+/src/WorldEditor/Release/
+/src/EterLib/__codex_write_test.tmp
+/src/EterLib/gr_async_append.txt

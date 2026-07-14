@@ -4,6 +4,19 @@ on:
   push:
     branches:
       - main
+      - dx11-world-render
+  pull_request:
+    branches:
+      - main
+      - dx11-world-render
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   win:
@@ -11,25 +24,35 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-        
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run first-party checks
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+
+      - name: Configure project
+        shell: pwsh
+        run: cmake -S . -B build -DDX11_STRICT_ONLY=ON
+
       - name: Build project
         id: build_project
         shell: pwsh
-        working-directory: ${{ github.workspace }}
-        run: |
-          mkdir build
-          cd build
-          cmake ..
-          cmake --build . --config RelWithDebInfo
+        run: cmake --build build --config RelWithDebInfo
 
       - name: Collect outputs
+        shell: pwsh
         run: |
-          mkdir _output
-          cp build/bin/* _output
+          New-Item -ItemType Directory -Force -Path _output | Out-Null
+          Get-ChildItem -Path build/bin -File | Copy-Item -Destination _output
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: output_win
           path: _output
+          if-no-files-found: error
