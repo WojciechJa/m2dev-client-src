@@ -57,6 +57,13 @@ jobs:
           SpeedTreeLib
           UserInterface
 
+      - name: Build data tools
+        shell: pwsh
+        run: >-
+          cmake --build build --config RelWithDebInfo --target
+          DumpProto
+          PackMaker
+
       - name: Configure optional DebugUI
         shell: pwsh
         run: >-
