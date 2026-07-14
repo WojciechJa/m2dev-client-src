@@ -5,7 +5,7 @@ const float c_fSnowDistance = 70000.0f;
 
 std::vector<CSnowParticle*> CSnowParticle::ms_kVct_SnowParticlePool;
 
-void CSnowParticle::SetCameraVertex(const D3DXVECTOR3 & rv3Up, const D3DXVECTOR3 & rv3Cross)
+void CSnowParticle::SetCameraVertex(const DirectX::SimpleMath::Vector3 & rv3Up, const DirectX::SimpleMath::Vector3 & rv3Cross)
 {
 	m_v3Up = rv3Up*m_fHalfWidth;
 	m_v3Cross = rv3Cross*m_fHalfHeight;
@@ -16,7 +16,7 @@ bool CSnowParticle::IsActivate()
 	return m_bActivate;
 }
 
-void CSnowParticle::Update(float fElapsedTime, const D3DXVECTOR3 & c_rv3Pos)
+void CSnowParticle::Update(float fElapsedTime, const DirectX::SimpleMath::Vector3 & c_rv3Pos)
 {
 	m_v3Position += m_v3Velocity * fElapsedTime;
 
@@ -52,7 +52,10 @@ void CSnowParticle::GetVerticies(SParticleVertex & rv3Vertex1, SParticleVertex &
 	rv3Vertex4.v = 1.0f;
 }
 
-void CSnowParticle::Init(const D3DXVECTOR3 & c_rv3Pos)
+void CSnowParticle::Init(const DirectX::SimpleMath::Vector3 & c_rv3Pos,
+						  float fFallSpeedMin,
+						  float fFallSpeedMax,
+						  float fParticleSize)
 {
 	float fRot = frandom(0.0f, 36000.0f) / 100.0f;
 	float fDistance = frandom(0.0f, c_fSnowDistance) / 10.0f;
@@ -62,8 +65,8 @@ void CSnowParticle::Init(const D3DXVECTOR3 & c_rv3Pos)
 	m_v3Position.z = c_rv3Pos.z + frandom(1500.0f, 2000.0f);
 	m_v3Velocity.x = 0.0f;
 	m_v3Velocity.y = 0.0f;
-	m_v3Velocity.z = frandom(-50.0f, -200.0f);
-	m_fHalfWidth = frandom(2.0f, 7.0f);
+	m_v3Velocity.z = frandom(-fFallSpeedMin, -fFallSpeedMax);
+	m_fHalfWidth = frandom(2.0f, fParticleSize);
 	m_fHalfHeight = m_fHalfWidth;
 	m_bActivate = true;
 	m_bChangedSize = false;

@@ -16,6 +16,7 @@ class CPropertyManager : public CSingleton<CPropertyManager>
 
 		bool			Initialize(const char * c_pszPackFileName = NULL);
 		bool			Register(const char * c_pszFileName, CProperty ** ppProperty = NULL);
+		bool			Erase(const char * c_pszFileName);
 
 		bool			Get(DWORD dwCRC, CProperty ** ppProperty);
 		bool			Get(const char * c_pszFileName, CProperty ** ppProperty);

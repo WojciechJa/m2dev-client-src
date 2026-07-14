@@ -1,9 +1,9 @@
 #include "StdAfx.h"
 #include "SnowEnvironment.h"
 
-#include "EterLib/StateManager.h"
 #include "EterLib/Camera.h"
 #include "EterLib/ResourceManager.h"
+#include "EterLib/GrpDeviceDX11.h"
 #include "SnowParticle.h"
 
 void CSnowEnvironment::Enable()
@@ -21,7 +21,7 @@ void CSnowEnvironment::Disable()
 	m_bSnowEnable = FALSE;
 }
 
-void CSnowEnvironment::Update(const D3DXVECTOR3 & c_rv3Pos)
+void CSnowEnvironment::Update(const DirectX::SimpleMath::Vector3 & c_rv3Pos)
 {
 	if (!m_bSnowEnable)
 	{
@@ -40,8 +40,8 @@ void CSnowEnvironment::Deform()
 			return;
 	}
 
-	const D3DXVECTOR3 & c_rv3Pos=m_v3Center;
-	
+	const DirectX::SimpleMath::Vector3 & c_rv3Pos=m_v3Center;
+
 	static long s_lLastTime = CTimer::Instance().GetCurrentMillisecond();
 	long lcurTime = CTimer::Instance().GetCurrentMillisecond();
 	float fElapsedTime = float(lcurTime - s_lLastTime) / 1000.0f;
@@ -51,9 +51,9 @@ void CSnowEnvironment::Deform()
 	if (!pCamera)
 		return;
 
-	const D3DXVECTOR3 & c_rv3View = pCamera->GetView();
+	const DirectX::SimpleMath::Vector3 & c_rv3View = pCamera->GetView();
 
-	D3DXVECTOR3 v3ChangedPos = c_rv3View * 3500.0f + c_rv3Pos;
+	DirectX::SimpleMath::Vector3 v3ChangedPos = c_rv3View * 3500.0f + c_rv3Pos;
 	v3ChangedPos.z = c_rv3Pos.z;
 
 	std::vector<CSnowParticle*>::iterator itor = m_kVct_pkParticleSnow.begin();
@@ -79,7 +79,7 @@ void CSnowEnvironment::Deform()
 		for (int p = 0; p < std::min(10ull, m_dwParticleMaxNum - m_kVct_pkParticleSnow.size()); ++p)
 		{
 			CSnowParticle * pSnowParticle = CSnowParticle::New();
-			pSnowParticle->Init(v3ChangedPos);
+			pSnowParticle->Init(v3ChangedPos, m_fFallSpeedMin, m_fFallSpeedMax, m_fParticleSize);
 			m_kVct_pkParticleSnow.push_back(pSnowParticle);
 		}
 	}
@@ -87,86 +87,12 @@ void CSnowEnvironment::Deform()
 
 void CSnowEnvironment::__BeginBlur()
 {
-	if (!m_bBlurEnable)
-		return;
-
-	ms_lpd3dDevice->GetRenderTarget(0, &m_lpOldSurface);
-	ms_lpd3dDevice->GetDepthStencilSurface(&m_lpOldDepthStencilSurface);
-	ms_lpd3dDevice->SetDepthStencilSurface(m_lpSnowDepthSurface);
-	ms_lpd3dDevice->SetRenderTarget(0, m_lpSnowRenderTargetSurface);
-	ms_lpd3dDevice->Clear(0L, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0x00000000, 1.0f, 0L);
-
-	STATEMANAGER.SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	STATEMANAGER.SetRenderState(D3DRS_DESTBLEND, D3DBLEND_DESTALPHA);
+	// Blur accumulation is disabled in native DX11 path.
 }
 
 void CSnowEnvironment::__ApplyBlur()
 {
-	if (!m_bBlurEnable)
-		return;
-
-//			{
-//				STATEMANAGER.SetRenderState( D3DRS_ALPHABLENDENABLE,   TRUE );
-//				STATEMANAGER.SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA );
-//				STATEMANAGER.SetRenderState( D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA );
-//				STATEMANAGER.SetRenderState( D3DRS_COLORVERTEX ,TRUE);
-//				STATEMANAGER.SetRenderState( D3DRS_DIFFUSEMATERIALSOURCE , D3DMCS_COLOR1 );
-//				STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-//				STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-//				STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-//				STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-//				STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-//				STATEMANAGER.SetTextureStageState(0,  D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
-//				DWORD	alphaColor = 0xFFFFFF | ((DWORD)(0.6f*255.0f) << 24);
-//
-//				BlurVertex V[4] = { BlurVertex(D3DXVECTOR3(0.0f,0.0f,0.0f),1.0f,		alphaColor, 0,0) ,
-//									BlurVertex(D3DXVECTOR3(wTextureSize,0.0f,0.0f),1.0f,		alphaColor, 1,0) , 
-//									BlurVertex(D3DXVECTOR3(0.0f,wTextureSize,0.0f),1.0f,		alphaColor, 0,1) , 
-//									BlurVertex(D3DXVECTOR3(wTextureSize,wTextureSize,0.0f),1.0f,	alphaColor, 1,1) };
-//				//누적 블러 텍스쳐를 찍는다.
-//				STATEMANAGER.SetTexture(0,m_lpAccumTexture);
-//				STATEMANAGER.SetFVF( D3DFVF_XYZRHW | D3DFVF_DIFFUSE|D3DFVF_TEX1 );
-//				STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,V,sizeof(BlurVertex));
-//			}
-//
-//			{
-//				STATEMANAGER.SetRenderTarget(m_lpAccumRenderTargetSurface, m_lpAccumDepthSurface);
-//
-//				BlurVertex V[4] = { BlurVertex(D3DXVECTOR3(0.0f,0.0f,0.0f),1.0f,		0xFFFFFF, 0,0) ,
-//									BlurVertex(D3DXVECTOR3(wTextureSize,0.0f,0.0f),1.0f,		0xFFFFFF, 1,0) , 
-//									BlurVertex(D3DXVECTOR3(0.0f,wTextureSize,0.0f),1.0f,		0xFFFFFF, 0,1) , 
-//									BlurVertex(D3DXVECTOR3(wTextureSize,wTextureSize,0.0f),1.0f,	0xFFFFFF, 1,1) };
-//
-//				STATEMANAGER.SetTexture(0,m_lpSnowTexture);
-//				STATEMANAGER.SetRenderState( D3DRS_ALPHABLENDENABLE,   FALSE);
-//				STATEMANAGER.SetFVF( D3DFVF_XYZRHW | D3DFVF_DIFFUSE|D3DFVF_TEX1 );
-//				STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,V,sizeof(BlurVertex));
-//			}
-
-	///////////////
-	{
-		ms_lpd3dDevice->SetDepthStencilSurface(m_lpOldDepthStencilSurface);
-		ms_lpd3dDevice->SetRenderTarget(0, m_lpOldSurface);
-
-		STATEMANAGER.SetTexture(0,m_lpSnowTexture);
-		STATEMANAGER.SetRenderState( D3DRS_ALPHABLENDENABLE,   TRUE);
-
-		D3DSURFACE_DESC	desc;
-		m_lpOldSurface->GetDesc(&desc);
-		float sx = (float)desc.Width ;
-		float sy = (float)desc.Height;
-		SAFE_RELEASE( m_lpOldSurface );
-		SAFE_RELEASE( m_lpOldDepthStencilSurface );
-
-		BlurVertex V[4] = {	BlurVertex(D3DXVECTOR3(0.0f,0.0f,0.0f),1.0f	,0xFFFFFF, 0,0) ,
-							BlurVertex(D3DXVECTOR3(sx,0.0f,0.0f),1.0f	,0xFFFFFF, 1,0) , 
-							BlurVertex(D3DXVECTOR3(0.0f,sy,0.0f),1.0f	,0xFFFFFF, 0,1) , 
-							BlurVertex(D3DXVECTOR3(sx,sy,0.0f),1.0f		,0xFFFFFF, 1,1) };
-
-		STATEMANAGER.SetFVF( D3DFVF_XYZRHW | D3DFVF_DIFFUSE|D3DFVF_TEX1 );
-		STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,V,sizeof(BlurVertex));
-	}
+	// Blur accumulation is disabled in native DX11 path.
 }
 
 void CSnowEnvironment::Render()
@@ -177,112 +103,228 @@ void CSnowEnvironment::Render()
 			return;
 	}
 
-	__BeginBlur();
-
 	DWORD dwParticleCount = std::min((size_t)m_dwParticleMaxNum, m_kVct_pkParticleSnow.size());
+	if (0 == dwParticleCount)
+		return;
 
 	CCamera * pCamera = CCameraManager::Instance().GetCurrentCamera();
 	if (!pCamera)
 		return;
 
-	const D3DXVECTOR3 & c_rv3Up = pCamera->GetUp();
-	const D3DXVECTOR3 & c_rv3Cross = pCamera->GetCross();
+	const DirectX::SimpleMath::Vector3 & c_rv3Up = pCamera->GetUp();
+	const DirectX::SimpleMath::Vector3 & c_rv3Cross = pCamera->GetCross();
 
-	SParticleVertex * pv3Verticies;
-	if (SUCCEEDED(m_pVB->Lock(0, sizeof(SParticleVertex)*dwParticleCount*4, (void **) &pv3Verticies, D3DLOCK_DISCARD)))
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	const bool bDX11RuntimeActive = (pDX11Device && pDX11Device->IsValid());
+	if (bDX11RuntimeActive && pDX11Device->EnsureBootstrapPipelineReady() && pDX11Device->EnsureBootstrapUISamplerReady())
 	{
-		int i = 0;
-		std::vector<CSnowParticle*>::iterator itor = m_kVct_pkParticleSnow.begin();
-		for (; i < dwParticleCount && itor != m_kVct_pkParticleSnow.end(); ++i, ++itor)
+		ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+		if (pContext && m_pImageInstance && m_pImageInstance->GetGraphicImagePointer())
 		{
-			CSnowParticle * pSnow = *itor;
-			pSnow->SetCameraVertex(c_rv3Up, c_rv3Cross);
-			pSnow->GetVerticies(pv3Verticies[i*4+0],
-								pv3Verticies[i*4+1],
-								pv3Verticies[i*4+2],
-								pv3Verticies[i*4+3]);
+			const CGraphicTexture& rkSnowTexture = m_pImageInstance->GetGraphicImagePointer()->GetTextureReference();
+			ID3D11ShaderResourceView* pSnowSRV = rkSnowTexture.GetD3D11TextureSRV();
+			if (pSnowSRV)
+			{
+				struct SBootstrapVertex
+				{
+					float x, y, z;
+					float r, g, b, a;
+					float u, v;
+				};
+
+				ID3D11BlendState* pOldBlendState = nullptr;
+				FLOAT afOldBlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				UINT uOldSampleMask = 0u;
+				pContext->OMGetBlendState(&pOldBlendState, afOldBlendFactor, &uOldSampleMask);
+
+				ID3D11DepthStencilState* pOldDepthState = nullptr;
+				UINT uOldStencilRef = 0u;
+				pContext->OMGetDepthStencilState(&pOldDepthState, &uOldStencilRef);
+
+				ID3D11RasterizerState* pOldRasterState = nullptr;
+				pContext->RSGetState(&pOldRasterState);
+
+				ID3D11InputLayout* pOldInputLayout = nullptr;
+				pContext->IAGetInputLayout(&pOldInputLayout);
+
+				ID3D11Buffer* pOldVertexBuffer = nullptr;
+				UINT uOldStride = 0u;
+				UINT uOldOffset = 0u;
+				pContext->IAGetVertexBuffers(0, 1, &pOldVertexBuffer, &uOldStride, &uOldOffset);
+
+				D3D11_PRIMITIVE_TOPOLOGY eOldTopology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+				pContext->IAGetPrimitiveTopology(&eOldTopology);
+
+				ID3D11VertexShader* pOldVertexShader = nullptr;
+				pContext->VSGetShader(&pOldVertexShader, nullptr, nullptr);
+
+				ID3D11PixelShader* pOldPixelShader = nullptr;
+				pContext->PSGetShader(&pOldPixelShader, nullptr, nullptr);
+
+				ID3D11ShaderResourceView* pOldSRV0 = nullptr;
+				pContext->PSGetShaderResources(0, 1, &pOldSRV0);
+
+				ID3D11SamplerState* pOldSampler0 = nullptr;
+				pContext->PSGetSamplers(0, 1, &pOldSampler0);
+
+				ID3D11Buffer* pBootstrapVB = pDX11Device->GetBootstrapUIVertexBuffer();
+				ID3D11InputLayout* pBootstrapIL = pDX11Device->GetBootstrapUIInputLayout();
+				ID3D11VertexShader* pBootstrapVS = pDX11Device->GetBootstrapUIVertexShader();
+				ID3D11PixelShader* pBootstrapTexturePS = pDX11Device->GetBootstrapUITexturePixelShader();
+				ID3D11BlendState* pBootstrapAlphaBlendState = pDX11Device->GetBootstrapUIAlphaBlendState();
+				ID3D11DepthStencilState* pBootstrapDepthDisableState = pDX11Device->GetBootstrapUIDepthDisableState();
+				ID3D11SamplerState* pBootstrapSampler = pDX11Device->GetBootstrapUISamplerState();
+
+				if (pBootstrapVB && pBootstrapIL && pBootstrapVS && pBootstrapTexturePS && pBootstrapAlphaBlendState && pBootstrapDepthDisableState && pBootstrapSampler)
+				{
+					const UINT kVerticesPerParticle = 6u;
+					const UINT kBootstrapVertexCapacity = 4096u;
+					const UINT kMaxParticlesPerDraw = std::max<UINT>(1u, kBootstrapVertexCapacity / kVerticesPerParticle);
+					const WORD c_awQuadIndices[kVerticesPerParticle] = { 0, 2, 1, 2, 3, 1 };
+					const D3DXMATRIX kMatViewProj = ms_matView * ms_matProj;
+					const FLOAT afBlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+					UINT uStride = sizeof(SBootstrapVertex);
+					UINT uOffset = 0u;
+					pContext->IASetInputLayout(pBootstrapIL);
+					pContext->IASetVertexBuffers(0, 1, &pBootstrapVB, &uStride, &uOffset);
+					pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+					pContext->VSSetShader(pBootstrapVS, nullptr, 0);
+					pContext->PSSetShader(pBootstrapTexturePS, nullptr, 0);
+					pContext->PSSetSamplers(0, 1, &pBootstrapSampler);
+					pContext->PSSetShaderResources(0, 1, &pSnowSRV);
+					pContext->OMSetBlendState(pBootstrapAlphaBlendState, afBlendFactor, 0xffffffffu);
+					pContext->OMSetDepthStencilState(pBootstrapDepthDisableState, 0);
+					pContext->RSSetState(nullptr);
+
+					UINT uParticleCursor = 0u;
+					while (uParticleCursor < dwParticleCount)
+					{
+						const UINT uBatchParticleCount = std::min<UINT>(kMaxParticlesPerDraw, dwParticleCount - uParticleCursor);
+						std::vector<SBootstrapVertex> kVertices;
+						kVertices.resize(uBatchParticleCount * kVerticesPerParticle);
+
+						for (UINT i = 0; i < uBatchParticleCount; ++i)
+						{
+							CSnowParticle* pSnow = m_kVct_pkParticleSnow[uParticleCursor + i];
+							if (!pSnow)
+								continue;
+
+							SParticleVertex aQuadVertices[4];
+							pSnow->SetCameraVertex(c_rv3Up, c_rv3Cross);
+							pSnow->GetVerticies(aQuadVertices[0], aQuadVertices[1], aQuadVertices[2], aQuadVertices[3]);
+
+							for (UINT j = 0; j < kVerticesPerParticle; ++j)
+							{
+								const SParticleVertex& rkSourceVertex = aQuadVertices[c_awQuadIndices[j]];
+								D3DXVECTOR4 v4World(rkSourceVertex.v3Pos.x, rkSourceVertex.v3Pos.y, rkSourceVertex.v3Pos.z, 1.0f);
+								D3DXVECTOR4 v4Clip;
+								D3DXVec4Transform(&v4Clip, &v4World, &kMatViewProj);
+
+								float fNdcX = 0.0f;
+								float fNdcY = 0.0f;
+								float fNdcZ = 0.0f;
+								if (fabsf(v4Clip.w) > 1.0e-6f)
+								{
+									const float fInvW = 1.0f / v4Clip.w;
+									fNdcX = v4Clip.x * fInvW;
+									fNdcY = v4Clip.y * fInvW;
+									fNdcZ = v4Clip.z * fInvW;
+								}
+
+								SBootstrapVertex& rkDestVertex = kVertices[i * kVerticesPerParticle + j];
+								rkDestVertex.x = fNdcX;
+								rkDestVertex.y = fNdcY;
+								rkDestVertex.z = fNdcZ;
+								rkDestVertex.r = 1.0f;
+								rkDestVertex.g = 1.0f;
+								rkDestVertex.b = 1.0f;
+								rkDestVertex.a = 1.0f;
+								rkDestVertex.u = rkSourceVertex.u;
+								rkDestVertex.v = rkSourceVertex.v;
+							}
+						}
+
+						D3D11_MAPPED_SUBRESOURCE kMappedResource;
+						ZeroMemory(&kMappedResource, sizeof(kMappedResource));
+						const HRESULT hMapResult = pContext->Map(pBootstrapVB, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+						if (FAILED(hMapResult) || !kMappedResource.pData)
+						{
+							TraceError("DX11_SNOW_MAP_FAIL hr=0x%08x", static_cast<unsigned int>(hMapResult));
+							break;
+						}
+
+						memcpy(kMappedResource.pData, &kVertices[0], sizeof(SBootstrapVertex) * kVertices.size());
+						pContext->Unmap(pBootstrapVB, 0);
+						pContext->Draw(static_cast<UINT>(kVertices.size()), 0);
+
+						uParticleCursor += uBatchParticleCount;
+					}
+
+					ID3D11ShaderResourceView* pNullSRV = nullptr;
+					pContext->PSSetShaderResources(0, 1, &pNullSRV);
+
+					static bool s_bLoggedDX11SnowNativePath = false;
+					if (!s_bLoggedDX11SnowNativePath)
+					{
+						s_bLoggedDX11SnowNativePath = true;
+						TraceError("DX11_SNOW_PATH mode=dx11_native_draw status=active");
+					}
+				}
+				else
+				{
+					static bool s_bLoggedDX11SnowBootstrapMissing = false;
+					if (!s_bLoggedDX11SnowBootstrapMissing)
+					{
+						s_bLoggedDX11SnowBootstrapMissing = true;
+						TraceError("DX11_SNOW_PATH mode=dx11_native_draw status=deferred reason=bootstrap_resources_missing");
+					}
+				}
+
+				pContext->RSSetState(pOldRasterState);
+				pContext->OMSetDepthStencilState(pOldDepthState, uOldStencilRef);
+				pContext->OMSetBlendState(pOldBlendState, afOldBlendFactor, uOldSampleMask);
+				pContext->IASetInputLayout(pOldInputLayout);
+				pContext->IASetVertexBuffers(0, 1, &pOldVertexBuffer, &uOldStride, &uOldOffset);
+				pContext->IASetPrimitiveTopology(eOldTopology);
+				pContext->VSSetShader(pOldVertexShader, nullptr, 0);
+				pContext->PSSetShader(pOldPixelShader, nullptr, 0);
+				pContext->PSSetShaderResources(0, 1, &pOldSRV0);
+				pContext->PSSetSamplers(0, 1, &pOldSampler0);
+
+				SAFE_RELEASE(pOldSampler0);
+				SAFE_RELEASE(pOldSRV0);
+				SAFE_RELEASE(pOldPixelShader);
+				SAFE_RELEASE(pOldVertexShader);
+				SAFE_RELEASE(pOldVertexBuffer);
+				SAFE_RELEASE(pOldInputLayout);
+				SAFE_RELEASE(pOldRasterState);
+				SAFE_RELEASE(pOldDepthState);
+				SAFE_RELEASE(pOldBlendState);
+
+				return;
+			}
 		}
-		m_pVB->Unlock();
 	}
 
-	STATEMANAGER.SaveRenderState(D3DRS_ZWRITEENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-	STATEMANAGER.SetRenderState(D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA);
-	STATEMANAGER.SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTexture(1, NULL);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-	m_pImageInstance->GetGraphicImagePointer()->GetTextureReference().SetTextureStage(0);
-	STATEMANAGER.SetIndices(m_pIB, 0);
-	STATEMANAGER.SetStreamSource(0, m_pVB, sizeof(SParticleVertex));
-	STATEMANAGER.SetFVF(D3DFVF_XYZ | D3DFVF_TEX1);
-	STATEMANAGER.DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, dwParticleCount*4, 0, dwParticleCount*2);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZWRITEENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
-
-	__ApplyBlur();
+	static bool s_bLoggedDX11SnowNoFallback = false;
+	if (!s_bLoggedDX11SnowNoFallback)
+	{
+		s_bLoggedDX11SnowNoFallback = true;
+		TraceError("DX11_SNOW_PATH mode=dx11_native_draw status=deferred reason=native_resources_unavailable no_legacy_fallback=1");
+	}
 }
 
 bool CSnowEnvironment::__CreateBlurTexture()
 {
-	if (!m_bBlurEnable)
-		return true;
-
-	if (FAILED(ms_lpd3dDevice->CreateTexture(m_wBlurTextureSize, m_wBlurTextureSize, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &m_lpSnowTexture, nullptr)))
-		return false;
-	if (FAILED(m_lpSnowTexture->GetSurfaceLevel(0, &m_lpSnowRenderTargetSurface)))
-		return false;
-	if (FAILED(ms_lpd3dDevice->CreateDepthStencilSurface(m_wBlurTextureSize, m_wBlurTextureSize, D3DFMT_D16, D3DMULTISAMPLE_NONE, 0, TRUE, &m_lpSnowDepthSurface, nullptr)))
-		return false;
-
-	if (FAILED(ms_lpd3dDevice->CreateTexture(m_wBlurTextureSize, m_wBlurTextureSize, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &m_lpAccumTexture, nullptr)))
-		return false;
-	if (FAILED(m_lpAccumTexture->GetSurfaceLevel(0, &m_lpAccumRenderTargetSurface)))
-		return false;
-	if (FAILED(ms_lpd3dDevice->CreateDepthStencilSurface(m_wBlurTextureSize, m_wBlurTextureSize, D3DFMT_D16, D3DMULTISAMPLE_NONE, 0, TRUE, &m_lpAccumDepthSurface, nullptr)))
-		return false;
-
-	return true;
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	return (pDX11Device && pDX11Device->IsValid());
 }
 
 bool CSnowEnvironment::__CreateGeometry()
 {
-	if (FAILED(ms_lpd3dDevice->CreateVertexBuffer(sizeof(SParticleVertex) * m_dwParticleMaxNum * 4,
-		D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
-		D3DFVF_XYZ | D3DFVF_TEX1,
-		D3DPOOL_DEFAULT,
-		&m_pVB, nullptr)))
-		return false;
-
-	if (FAILED(ms_lpd3dDevice->CreateIndexBuffer(sizeof(WORD) * m_dwParticleMaxNum * 6,
-		D3DUSAGE_DYNAMIC,
-		D3DFMT_INDEX16,
-		D3DPOOL_DEFAULT,
-		&m_pIB, nullptr)))
-		return false;
-
-	WORD* dstIndices;
-	if (FAILED(m_pIB->Lock(0, sizeof(WORD) * m_dwParticleMaxNum * 6, (void**)&dstIndices, 0)))
-		return false;
-
-	const WORD c_awFillRectIndices[6] = { 0, 2, 1, 2, 3, 1, };
-	for (int i = 0; i < m_dwParticleMaxNum; ++i)
-	{
-		for (int j = 0; j < 6; ++j)
-		{
-			dstIndices[i*6 + j] = i*4 + c_awFillRectIndices[j];
-		}
-	}
-
-	m_pIB->Unlock();
-	return true;
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	return (pDX11Device && pDX11Device->IsValid());
 }
 
 bool CSnowEnvironment::Create()
@@ -304,6 +346,8 @@ bool CSnowEnvironment::Create()
 
 void CSnowEnvironment::Destroy()
 {
+	SAFE_RELEASE(m_lpOldSurface);
+	SAFE_RELEASE(m_lpOldDepthStencilSurface);
 	SAFE_RELEASE(m_lpSnowTexture);
 	SAFE_RELEASE(m_lpSnowRenderTargetSurface);
 	SAFE_RELEASE(m_lpSnowDepthSurface);
@@ -328,6 +372,8 @@ void CSnowEnvironment::Destroy()
 void CSnowEnvironment::__Initialize()
 {
 	m_bSnowEnable = FALSE;
+	m_lpOldSurface = NULL;
+	m_lpOldDepthStencilSurface = NULL;
 	m_lpSnowTexture = NULL;
 	m_lpSnowRenderTargetSurface = NULL;
 	m_lpSnowDepthSurface = NULL;
@@ -344,11 +390,41 @@ void CSnowEnvironment::__Initialize()
 CSnowEnvironment::CSnowEnvironment()
 {
 	m_bBlurEnable = FALSE;
+
+	// Default configuration (now configurable!)
 	m_dwParticleMaxNum = 3000;
+	m_fFallSpeedMin = 50.0f;      // Default: 50 units/sec
+	m_fFallSpeedMax = 200.0f;     // Default: 200 units/sec
+	m_fParticleSize = 7.0f;       // Default: 7 units (half-width, same as old default)
 	m_wBlurTextureSize = 512;
 
 	__Initialize();
 }
+
+// Set particle count
+void CSnowEnvironment::SetParticleCount(DWORD dwCount)
+{
+	m_dwParticleMaxNum = dwCount;
+	m_kVct_pkParticleSnow.reserve(m_dwParticleMaxNum);
+}
+
+// Set fall speed range
+void CSnowEnvironment::SetFallSpeedMin(float fSpeed)
+{
+	m_fFallSpeedMin = fSpeed;
+}
+
+void CSnowEnvironment::SetFallSpeedMax(float fSpeed)
+{
+	m_fFallSpeedMax = fSpeed;
+}
+
+// Set particle size
+void CSnowEnvironment::SetParticleSize(float fSize)
+{
+	m_fParticleSize = fSize;
+}
+
 CSnowEnvironment::~CSnowEnvironment()
 {
 	Destroy();

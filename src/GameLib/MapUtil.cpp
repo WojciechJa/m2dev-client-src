@@ -1,12 +1,17 @@
 #include "StdAfx.h"
 #include "MapUtil.h"
 
+namespace
+{
+constexpr BYTE kBlendOne = 2u; // GRP_BLEND_ONE semantic value
+}
+
 void Environment_Init(SEnvironmentData& envData)
 {
 	for (int i = 0; i < ENV_DIRLIGHT_NUM; ++i)
 	{
 		envData.bDirLightsEnable[i] = false;
-		envData.DirLights[i].Type = D3DLIGHT_DIRECTIONAL;
+		envData.DirLights[i].Type = LIGHT_DESC_TYPE_DIRECTIONAL;
 		envData.DirLights[i].Direction = D3DXVECTOR3(0.5f, 0.5f, -0.5f);
 		envData.DirLights[i].Position = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
 		envData.DirLights[i].Specular = D3DXCOLOR(1.0f, 1.0f, 1.0f, 1.0f);
@@ -38,15 +43,17 @@ void Environment_Init(SEnvironmentData& envData)
 
 	envData.bFilteringEnable = FALSE;
 	envData.FilteringColor = D3DXCOLOR(0.3f, 0.1f, 0.1f, 0.0f);
-	envData.byFilteringAlphaSrc = D3DBLEND_ONE;
-	envData.byFilteringAlphaDest = D3DBLEND_ONE;
+	envData.byFilteringAlphaSrc = kBlendOne;
+	envData.byFilteringAlphaDest = kBlendOne;
 
 	envData.fWindStrength = 0.2f;
 	envData.fWindRandom = 0.0f;
 
 	envData.v3SkyBoxScale = D3DXVECTOR3(3500.0f, 3500.0f, 3500.0f);
-	envData.bySkyBoxGradientLevelUpper = 0;
-	envData.bySkyBoxGradientLevelLower = 0;
+	// FIX: Set safe defaults to prevent black sky (zeros cause invalid rendering)
+	// These will be validated to min 2 (upper) and min 4 (lower) in SetGradientLevel()
+	envData.bySkyBoxGradientLevelUpper = 16;
+	envData.bySkyBoxGradientLevelLower = 16;
 	envData.bSkyBoxTextureRenderMode = FALSE;
 
 	envData.v2CloudScale = D3DXVECTOR2(200000.0f, 200000.0f);
@@ -83,7 +90,7 @@ bool Environment_Load(SEnvironmentData& envData, const char* envFileName)
 
 	if (textLoader.SetChildNode("directionallight"))
 	{
-		D3DVECTOR v3Dir;
+		GrpVector v3Dir;
 		textLoader.GetTokenDirection("direction", &v3Dir);
 
 		if (textLoader.SetChildNode("background"))
@@ -173,10 +180,18 @@ bool Environment_Load(SEnvironmentData& envData, const char* envFileName)
 			envData.CloudGradientColor.m_FirstColor.b = atof(pTokenVectorCloudColor->at(2).c_str());
 			envData.CloudGradientColor.m_FirstColor.a = atof(pTokenVectorCloudColor->at(3).c_str());
 
+			// M3-SKY-BLEND-FIX-74: Fix zero alpha in cloud gradient colors
+			if (envData.CloudGradientColor.m_FirstColor.a == 0.0f)
+				envData.CloudGradientColor.m_FirstColor.a = 1.0f;
+
 			envData.CloudGradientColor.m_SecondColor.r = atof(pTokenVectorCloudColor->at(4).c_str());
 			envData.CloudGradientColor.m_SecondColor.g = atof(pTokenVectorCloudColor->at(5).c_str());
 			envData.CloudGradientColor.m_SecondColor.b = atof(pTokenVectorCloudColor->at(6).c_str());
 			envData.CloudGradientColor.m_SecondColor.a = atof(pTokenVectorCloudColor->at(7).c_str());
+
+			// M3-SKY-BLEND-FIX-74: Fix zero alpha in cloud gradient colors
+			if (envData.CloudGradientColor.m_SecondColor.a == 0.0f)
+				envData.CloudGradientColor.m_SecondColor.a = 1.0f;
 		}
 
 		BYTE byGradientCount = envData.bySkyBoxGradientLevelUpper+envData.bySkyBoxGradientLevelLower;
@@ -194,10 +209,19 @@ bool Environment_Load(SEnvironmentData& envData, const char* envFileName)
 				envData.SkyBoxGradientColorVector[i].m_FirstColor.b = atof(pTokenVector->at(i*8+2).c_str());
 				envData.SkyBoxGradientColorVector[i].m_FirstColor.a = atof(pTokenVector->at(i*8+3).c_str());
 
+				// M3-SKY-BLEND-FIX-74: Fix zero alpha in gradient colors (fully transparent = invisible)
+				// Legacy .msenv files have alpha=0.0 but expect fully opaque colors for diffuse mode
+				if (envData.SkyBoxGradientColorVector[i].m_FirstColor.a == 0.0f)
+					envData.SkyBoxGradientColorVector[i].m_FirstColor.a = 1.0f;
+
 				envData.SkyBoxGradientColorVector[i].m_SecondColor.r = atof(pTokenVector->at(i*8+4).c_str());
 				envData.SkyBoxGradientColorVector[i].m_SecondColor.g = atof(pTokenVector->at(i*8+5).c_str());
 				envData.SkyBoxGradientColorVector[i].m_SecondColor.b = atof(pTokenVector->at(i*8+6).c_str());
 				envData.SkyBoxGradientColorVector[i].m_SecondColor.a = atof(pTokenVector->at(i*8+7).c_str());
+
+				// M3-SKY-BLEND-FIX-74: Fix zero alpha in gradient colors
+				if (envData.SkyBoxGradientColorVector[i].m_SecondColor.a == 0.0f)
+					envData.SkyBoxGradientColorVector[i].m_SecondColor.a = 1.0f;
 			}
 		}
 

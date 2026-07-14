@@ -80,8 +80,8 @@ public:
 
 	DWORD			GetMonsterCount() { return m_dwMonsterCount; }
 	EMonsterDir		GetMonsterDir() { return m_eMonsterDir; }
-	D3DXVECTOR2		GetMonsterDirVector() { return m_v2Monsterdirection; }
-	D3DXVECTOR2		GetTempMonsterPos(DWORD dwIndex);
+	DirectX::SimpleMath::Vector2		GetMonsterDirVector() { return m_v2Monsterdirection; } // M2-GAMELIB-DX11-NATIVE-01
+	DirectX::SimpleMath::Vector2		GetTempMonsterPos(DWORD dwIndex); // M2-GAMELIB-DX11-NATIVE-01
 
 protected:
 	void			SetLRTB();
@@ -102,7 +102,7 @@ protected:
 	// 공통 정보
 	DWORD			m_dwMonsterCount;
 	EMonsterDir		m_eMonsterDir;
-	D3DXVECTOR2		m_v2Monsterdirection;
+	DirectX::SimpleMath::Vector2		m_v2Monsterdirection; // M2-GAMELIB-DX11-NATIVE-01
 
 	DWORD			m_dwID;
 
@@ -111,12 +111,12 @@ protected:
 	long			m_lSizeX;
 	long			m_lSizeY;
 
-	long			m_lLeft;			
+	long			m_lLeft;
 	long			m_lRight;
 	long			m_lTop;
 	long			m_lBottom;
 
-	std::vector<D3DXVECTOR2> m_TempMonsterPosVector;
+	std::vector<DirectX::SimpleMath::Vector2> m_TempMonsterPosVector; // M2-GAMELIB-DX11-NATIVE-01
 };
 
 typedef std::vector<CMonsterAreaInfo *>					TMonsterAreaInfoPtrVector;

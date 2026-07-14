@@ -51,13 +51,25 @@ jobs:
           EffectLib
           EterGrnLib
           EterPythonLib
+          GameLib
+          PRTerrainLib
+          SphereLib
           SpeedTreeLib
 
       - name: Collect outputs
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path _output | Out-Null
-          $targets = @('EterLib', 'EffectLib', 'EterGrnLib', 'EterPythonLib', 'SpeedTreeLib')
+          $targets = @(
+            'EterLib',
+            'EffectLib',
+            'EterGrnLib',
+            'EterPythonLib',
+            'GameLib',
+            'PRTerrainLib',
+            'SphereLib',
+            'SpeedTreeLib'
+          )
           foreach ($target in $targets) {
             $artifact = Get-ChildItem -Path "build/src/$target/RelWithDebInfo" -Filter "$target.lib" -File
             if (-not $artifact) { throw "Missing build artifact: $target.lib" }

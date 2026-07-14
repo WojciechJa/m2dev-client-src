@@ -193,6 +193,46 @@ bool CProperty::ReadFromMemory(const void * c_pvData, int iLen, const char * c_p
 	return true;
 }
 
+bool CProperty::Save(const char * c_pszFileName)
+{
+	if (!c_pszFileName || !*c_pszFileName)
+		return false;
+
+	FILE* pFile = nullptr;
+	if (0 != fopen_s(&pFile, c_pszFileName, "wb") || !pFile)
+		return false;
+
+	const DWORD dwFourCC = MAKEFOURCC('Y', 'P', 'R', 'T');
+	fwrite(&dwFourCC, sizeof(dwFourCC), 1, pFile);
+	fwrite("\r\n", 1, 2, pFile);
+
+	if (0 == m_dwCRC)
+		m_dwCRC = CPropertyManager::Instance().GetUniqueCRC(c_pszFileName);
+
+	fprintf(pFile, "%u\r\n", m_dwCRC);
+
+	for (CTokenVectorMap::const_iterator it = m_stTokenMap.begin(); it != m_stTokenMap.end(); ++it)
+	{
+		fprintf(pFile, "%s", it->first.c_str());
+
+		const CTokenVector& rTokenVector = it->second;
+		for (CTokenVector::const_iterator tokenIt = rTokenVector.begin(); tokenIt != rTokenVector.end(); ++tokenIt)
+		{
+			const std::string& rToken = *tokenIt;
+			const bool bNeedsQuotes = (std::string::npos != rToken.find_first_of(" \t"));
+			if (bNeedsQuotes)
+				fprintf(pFile, "\t\"%s\"", rToken.c_str());
+			else
+				fprintf(pFile, "\t%s", rToken.c_str());
+		}
+
+		fprintf(pFile, "\r\n");
+	}
+
+	fclose(pFile);
+	return true;
+}
+
 void CProperty::Clear()
 {
 	m_stTokenMap.clear();

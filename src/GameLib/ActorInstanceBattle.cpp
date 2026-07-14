@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "EffectLib/EffectManager.h"
 #include "AudioLib/SoundEngine.h"
+#include "EterLib/DirectXMathHelpers.h" // M2-GAMELIB-DX11-NATIVE-01: M2 helps M1 - D3DXVec2 migration
 
 #include "ActorInstance.h"
 #include "RaceData.h"
@@ -797,13 +798,13 @@ void CActorInstance::__HitGood(CActorInstance& rVictim)
 			float fRotRad = D3DXToRadian(GetRotation());
 			float fVictimRotRad = D3DXToRadian(rVictim.GetRotation());
 
-			D3DXVECTOR2 v2Normal(sin(fRotRad), cos(fRotRad));
-			D3DXVECTOR2 v2VictimNormal(sin(fVictimRotRad), cos(fVictimRotRad));
+			DirectX::SimpleMath::Vector2 v2Normal(sin(fRotRad), cos(fRotRad)); // M2-GAMELIB-DX11-NATIVE-01
+			DirectX::SimpleMath::Vector2 v2VictimNormal(sin(fVictimRotRad), cos(fVictimRotRad)); // M2-GAMELIB-DX11-NATIVE-01
 
-			D3DXVec2Normalize(&v2Normal, &v2Normal);
-			D3DXVec2Normalize(&v2VictimNormal, &v2VictimNormal);
+			v2Normal = DirectX::XMVector2Normalize(v2Normal); // M2-GAMELIB-DX11-NATIVE-01
+			v2VictimNormal = DirectX::XMVector2Normalize(v2VictimNormal); // M2-GAMELIB-DX11-NATIVE-01
 
-			float fScalar = D3DXVec2Dot(&v2Normal, &v2VictimNormal);
+			float fScalar = v2Normal.Dot(v2VictimNormal); // M2-GAMELIB-DX11-NATIVE-01
 
 			if (fScalar < 0.0f)
 			{
@@ -833,13 +834,13 @@ void CActorInstance::__HitGreate(CActorInstance& rVictim)
 	float fRotRad = D3DXToRadian(GetRotation());
 	float fVictimRotRad = D3DXToRadian(rVictim.GetRotation());
 
-	D3DXVECTOR2 v2Normal(sin(fRotRad), cos(fRotRad));
-	D3DXVECTOR2 v2VictimNormal(sin(fVictimRotRad), cos(fVictimRotRad));
+	DirectX::SimpleMath::Vector2 v2Normal(sin(fRotRad), cos(fRotRad)); // M2-GAMELIB-DX11-NATIVE-01
+	DirectX::SimpleMath::Vector2 v2VictimNormal(sin(fVictimRotRad), cos(fVictimRotRad)); // M2-GAMELIB-DX11-NATIVE-01
 
-	D3DXVec2Normalize(&v2Normal, &v2Normal);
-	D3DXVec2Normalize(&v2VictimNormal, &v2VictimNormal);
+	v2Normal = DirectX::XMVector2Normalize(v2Normal); // M2-GAMELIB-DX11-NATIVE-01
+	v2VictimNormal = DirectX::XMVector2Normalize(v2VictimNormal); // M2-GAMELIB-DX11-NATIVE-01
 
-	float fScalar = D3DXVec2Dot(&v2Normal, &v2VictimNormal);
+	float fScalar = v2Normal.Dot(v2VictimNormal); // M2-GAMELIB-DX11-NATIVE-01
 
 	rVictim.__Shake(100);
 

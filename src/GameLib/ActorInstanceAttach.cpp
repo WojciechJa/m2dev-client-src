@@ -397,7 +397,7 @@ void CActorInstance::RefreshActorInstance()
 				break;
 
 			default:
-				assert(false/*NOT_IMPLEMENTED*/);
+				TraceError("ACTOR_ATTACH_UNSUPPORTED type=%u source=race_data index=%u", c_pAttachingData->dwType, i);
 				break;
 		}
 	}
@@ -424,7 +424,7 @@ void CActorInstance::RefreshActorInstance()
 					{
 						const NRaceData::TCollisionData * c_pCollisionData = c_pAttachingData->pCollisionData;
 						
-						// FIXME : 첫번째 인자는 Part의 번호다.
+						// NOTE! : 첫번째 인자는 Part의 번호다.
 						//         Base는 무조건 0인가? - [levites]
 						TCollisionPointInstance PointInstance;
 						if (NRaceData::COLLISION_TYPE_ATTACKING == c_pCollisionData->iCollisionType)
@@ -480,7 +480,7 @@ void CActorInstance::RefreshActorInstance()
 					break;
 
 				default:
-					assert(false/*NOT_IMPLEMENTED*/);
+					TraceError("ACTOR_ATTACH_UNSUPPORTED type=%u source=item_data part=%u index=%u", c_pAttachingData->dwType, j, k);
 					break;
 			}
 		}

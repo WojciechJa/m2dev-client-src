@@ -22,6 +22,22 @@ CRaceMotionData* CRaceMotionData::New()
 
 void CRaceMotionData::Delete(CRaceMotionData* pkData)
 {
+	if (!pkData)
+		return;
+
+	// Defensive guard for shutdown/re-entrant teardown paths.
+	if (!ms_kPool.Contains(pkData))
+	{
+		TraceError("CRaceMotionData::Delete - skip pointer not owned by pool ptr=%p", pkData);
+		return;
+	}
+
+	if (!ms_kPool.IsAllocated(pkData))
+	{
+		TraceError("CRaceMotionData::Delete - skip already-freed pointer ptr=%p", pkData);
+		return;
+	}
+
 	pkData->Destroy();
 
 	ms_kPool.Free(pkData);

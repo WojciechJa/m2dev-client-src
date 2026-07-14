@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "MonsterAreaInfo.h"
+#include "EterLib/DirectXMathHelpers.h" // M2-GAMELIB-DX11-NATIVE-01: M2 helps M1 - D3DXVec2 migration
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -117,7 +118,7 @@ void CMonsterAreaInfo::SetMonsterDirection(EMonsterDir eMonsterDir)
 	D3DXVec3TransformCoord(&v3Direction, &v3Direction, &matRotation);
 	m_v2Monsterdirection.x = v3Direction.x;
 	m_v2Monsterdirection.y = v3Direction.y;
-	D3DXVec2Normalize(&m_v2Monsterdirection, &m_v2Monsterdirection);
+	m_v2Monsterdirection = DirectX::XMVector2Normalize(m_v2Monsterdirection); // M2-GAMELIB-DX11-NATIVE-01
 }
 
 void CMonsterAreaInfo::RemoveAllMonsters()

@@ -1,7 +1,6 @@
 #include "StdAfx.h"
 
 #include "EterLib/ResourceManager.h"
-#include "EterLib/StateManager.h"
 #include "EffectLib/EffectManager.h"
 #include "SpeedTreeLib/SpeedTreeForestDirectX.h"
 #include "EterBase/Timer.h"
@@ -129,16 +128,13 @@ struct CArea_FEffectInstanceRender
 
 void CArea::RenderEffect()
 {
+	// M2-GAMELIB-NATIVE-55: Native DX11 path - delegate to CEffectInstance which handles DX11 internally
 	__UpdateEffectList();
-
-	// Effect
-	STATEMANAGER.SetTexture(0, NULL);
-	STATEMANAGER.SetTexture(1, NULL);
 
 	bool m_isDisableSortRendering=false;
 
 	if (m_isDisableSortRendering)
-	{	
+	{
 		TEffectInstanceIterator i;
 		for (i = m_EffectInstanceMap.begin(); i != m_EffectInstanceMap.end();)
 		{
@@ -159,7 +155,17 @@ void CArea::RenderEffect()
 
 		std::sort(s_kVct_pkEftInstSort.begin(), s_kVct_pkEftInstSort.end(), CArea_LessEffectInstancePtrRenderOrder());
 		std::for_each(s_kVct_pkEftInstSort.begin(), s_kVct_pkEftInstSort.end(), CArea_FEffectInstanceRender());
-		
+
+	}
+
+	// M2-GAMELIB-NATIVE-55: Telemetry for native DX11 path
+	static bool s_bLoggedAreaEffectNative = false;
+	if (!s_bLoggedAreaEffectNative)
+	{
+		s_bLoggedAreaEffectNative = true;
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=area_effect path=dx11_native");
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=area_effect expected=%d submitted=%d",
+			static_cast<int>(m_EffectInstanceMap.size()), static_cast<int>(m_EffectInstanceMap.size()));
 	}
 }
 
@@ -181,7 +187,7 @@ void CArea::CollectRenderingObject(std::vector<CGraphicThingInstance*>& rkVct_pk
 		if (pkThingInst->isShow())
 		{
 			if (!pkThingInst->HaveBlendThing())
-				rkVct_pkOpaqueThingInst.push_back(*i);	
+				rkVct_pkOpaqueThingInst.push_back(*i);
 		}
 	}
 }
@@ -195,13 +201,25 @@ void CArea::CollectBlendRenderingObject(std::vector<CGraphicThingInstance*>& rkV
 		if (pkThingInst->isShow())
 		{
 			if (pkThingInst->HaveBlendThing())
-				rkVct_pkBlendThingInst.push_back(*i);	
+				rkVct_pkBlendThingInst.push_back(*i);
 		}
 	}
 }
 
+void CArea::CollectDungeonRenderingObject(std::vector<CDungeonBlock*>& rkVct_pkDungeonBlockInst)
+{
+	TDungeonBlockInstanceVector::iterator i;
+	for (i = m_DungeonBlockCloneInstanceVector.begin(); i != m_DungeonBlockCloneInstanceVector.end(); ++i)
+	{
+		CDungeonBlock* pkDungeonBlock = *i;
+		if (pkDungeonBlock && pkDungeonBlock->isShow())
+			rkVct_pkDungeonBlockInst.push_back(pkDungeonBlock);
+	}
+}
+
 void CArea::Render()
-{		
+{
+	// M2-GAMELIB-NATIVE-55: Native DX11 path - delegate to CGraphicThingInstance which handles DX11 internally
 	{
 		CGraphicThingInstance* pkThingInst;
 
@@ -232,7 +250,7 @@ void CArea::Render()
 			m_kRenderedGrapphicThingInstanceVector.push_back(pkThingInst);
 
 			TCRCWithNumberVector::iterator aCRCWithNumberVectorIterator = std::find_if(m_kRenderedThingInstanceCRCWithNumberVector.begin(), m_kRenderedThingInstanceCRCWithNumberVector.end(), FFindIfCRC(dwCRC));
-			
+
 			if ( m_kRenderedThingInstanceCRCWithNumberVector.end() == aCRCWithNumberVectorIterator)
 			{
 				TCRCWithNumber aCRCWithNumber;
@@ -248,92 +266,79 @@ void CArea::Render()
 		}
 	}
  	std::sort(m_kRenderedThingInstanceCRCWithNumberVector.begin(), m_kRenderedThingInstanceCRCWithNumberVector.end(), CRCNumComp());
+
+	// M2-GAMELIB-NATIVE-55: Telemetry for native DX11 path
+	static bool s_bLoggedAreaThingsNative = false;
+	if (!s_bLoggedAreaThingsNative)
+	{
+		s_bLoggedAreaThingsNative = true;
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=area_things path=dx11_native");
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=area_things expected=%d submitted=%d",
+			static_cast<int>(m_ThingCloneInstaceVector.size()), static_cast<int>(m_kRenderedGrapphicThingInstanceVector.size()));
+	}
 }
 
 
 void CArea::RenderCollision()
 {
-	DWORD i;
-
-	STATEMANAGER.SetTexture(0, NULL);
-	STATEMANAGER.SetTexture(1, NULL);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, FALSE);
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, 0xff000000);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-	for(i=0;i<GetObjectInstanceCount();i++)
+	for (TThingInstanceVector::iterator itThing = m_ThingCloneInstaceVector.begin();
+		itThing != m_ThingCloneInstaceVector.end(); ++itThing)
 	{
-		const TObjectInstance * po;
-		if (GetObjectInstancePointer(i,&po))
+		CGraphicThingInstance* pThingInstance = *itThing;
+		if (!pThingInstance || !pThingInstance->isShow())
+			continue;
+
+		const DWORD dwCollisionCount = pThingInstance->GetCollisionInstanceCount();
+		for (DWORD dwCollisionIndex = 0; dwCollisionIndex < dwCollisionCount; ++dwCollisionIndex)
 		{
-			if (po->pTree && po->pTree->isShow())
-			{
-				DWORD j;
-				for(j=0;j<po->pTree->GetCollisionInstanceCount();j++)
-				{
-					po->pTree->GetCollisionInstanceData(j)->Render();
-				}
-			}
-			if (po->pThingInstance && po->pThingInstance->isShow())
-			{
-				DWORD j;
-				for(j=0;j<po->pThingInstance->GetCollisionInstanceCount();j++)
-				{
-					po->pThingInstance->GetCollisionInstanceData(j)->Render();
-				}
-			}
-			if (po->pDungeonBlock && po->pDungeonBlock->isShow())
-			{
-				DWORD j;
-				for(j=0;j<po->pDungeonBlock->GetCollisionInstanceCount();j++)
-				{
-					po->pDungeonBlock->GetCollisionInstanceData(j)->Render();
-				}
-			}
+			CBaseCollisionInstance* pCollisionInstance = pThingInstance->GetCollisionInstanceData(dwCollisionIndex);
+			if (pCollisionInstance)
+				pCollisionInstance->Render();
 		}
 	}
 
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, TRUE);
+	for (TDungeonBlockInstanceVector::iterator itDungeon = m_DungeonBlockCloneInstanceVector.begin();
+		itDungeon != m_DungeonBlockCloneInstanceVector.end(); ++itDungeon)
+	{
+		CDungeonBlock* pDungeonBlock = *itDungeon;
+		if (!pDungeonBlock || !pDungeonBlock->isShow())
+			continue;
+
+		const DWORD dwCollisionCount = pDungeonBlock->GetCollisionInstanceCount();
+		for (DWORD dwCollisionIndex = 0; dwCollisionIndex < dwCollisionCount; ++dwCollisionIndex)
+		{
+			CBaseCollisionInstance* pCollisionInstance = pDungeonBlock->GetCollisionInstanceData(dwCollisionIndex);
+			if (pCollisionInstance)
+				pCollisionInstance->Render();
+		}
+	}
 }
 
 void CArea::RenderAmbience()
 {
-	DWORD dwColorArg1, dwColorOp;
-	STATEMANAGER.GetTextureStageState(0, D3DTSS_COLORARG1, &dwColorArg1);
-	STATEMANAGER.GetTextureStageState(0, D3DTSS_COLOROP, &dwColorOp);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TFACTOR);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+	// M2-GAMELIB-NATIVE-55: Native DX11 path - delegate to TAmbienceInstance which handles DX11 internally
+	// Removed legacy texture stage state setup - not needed for DX11 rendering
 	TAmbienceInstanceVector::iterator itor = m_AmbienceCloneInstanceVector.begin();
 	for (; itor != m_AmbienceCloneInstanceVector.end(); ++itor)
 	{
 		TAmbienceInstance * pInstance = *itor;
 		pInstance->Render();
 	}
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, dwColorArg1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, dwColorOp);
+
+	static bool s_bLoggedAreaAmbienceNative = false;
+	if (!s_bLoggedAreaAmbienceNative)
+	{
+		s_bLoggedAreaAmbienceNative = true;
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=area_ambience path=dx11_native");
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=area_ambience expected=%d submitted=%d",
+			static_cast<int>(m_AmbienceCloneInstanceVector.size()), static_cast<int>(m_AmbienceCloneInstanceVector.size()));
+	}
 }
 
 void CArea::RenderDungeon()
 {
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG2,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAARG2,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
+	// M2-GAMELIB-NATIVE-55: Native DX11 path - delegate to CDungeonBlock which handles DX11 internally
+	// Removed legacy texture stage state setup - not needed for DX11 rendering
 
 	TDungeonBlockInstanceVector::iterator itor = m_DungeonBlockCloneInstanceVector.begin();
 	for (; itor != m_DungeonBlockCloneInstanceVector.end(); ++itor)
@@ -341,8 +346,14 @@ void CArea::RenderDungeon()
 		(*itor)->Render();
 	}
 
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP,	D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP,	D3DTOP_DISABLE);
+	static bool s_bLoggedAreaDungeonNative = false;
+	if (!s_bLoggedAreaDungeonNative)
+	{
+		s_bLoggedAreaDungeonNative = true;
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=area_dungeon path=dx11_native");
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=area_dungeon expected=%d submitted=%d",
+			static_cast<int>(m_DungeonBlockCloneInstanceVector.size()), static_cast<int>(m_DungeonBlockCloneInstanceVector.size()));
+	}
 }
 
 void CArea::Refresh()
@@ -377,6 +388,7 @@ void CArea::Refresh()
 			pObjectInstance->pThingInstance->Update();
 			pObjectInstance->pThingInstance->Transform();
 			pObjectInstance->pThingInstance->Show();
+
 			pObjectInstance->pThingInstance->DeformAll();
 			m_ThingCloneInstaceVector.push_back(pObjectInstance->pThingInstance);
 
@@ -1041,6 +1053,7 @@ void CArea::RefreshPortal()
 			m_DungeonBlockCloneInstanceVector.push_back(pObjectInstance->pDungeonBlock);
 		}
 	}
+
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1259,28 +1272,12 @@ float CArea::TAmbienceInstance::__GetVolumeFromDistance(float fDistance)
 
 void CArea::TAmbienceInstance::Render()
 {
-	float fBoxSize = 10.0f;
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, 0xff00ff00);
-	RenderCube(fx-fBoxSize, fy-fBoxSize, fz-fBoxSize, fx+fBoxSize, fy+fBoxSize, fz+fBoxSize);
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, 0xffffffff);
-	RenderSphere(NULL, fx, fy, fz, float(dwRange) * fMaxVolumeAreaPercentage, D3DFILL_POINT);
-	RenderSphere(NULL, fx, fy, fz, float(dwRange), D3DFILL_POINT);
-	RenderCircle2d(fx, fy, fz, float(dwRange) * fMaxVolumeAreaPercentage);
-	RenderCircle2d(fx, fy, fz, float(dwRange));
+	if (dwRange == 0u)
+		return;
 
-	for (int i = 0; i < 4; ++i)
-	{
-		float fxAdd = cosf(float(i) * D3DX_PI/4.0f) * float(dwRange) / 2.0f;
-		float fyAdd = sinf(float(i) * D3DX_PI/4.0f) * float(dwRange) / 2.0f;
-
-		if (i%2)
-		{
-			fxAdd /= 2.0f;
-			fyAdd /= 2.0f;
-		}
-
-		RenderLine2d(fx + fxAdd, fy + fyAdd, fx - fxAdd, fy - fyAdd, fz);
-	}
+	SetColorOperation();
+	SetDiffuseColor(0.20f, 0.80f, 1.00f);
+	RenderCircle3d(fx, fy, fz, static_cast<float>(dwRange));
 }
 
 bool CArea::SAmbienceInstance::Picking()

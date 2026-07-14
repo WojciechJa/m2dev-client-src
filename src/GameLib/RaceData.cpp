@@ -5,9 +5,12 @@
 #include "RaceData.h"
 #include "RaceMotionData.h"
 #include "EterBase/Filename.h"
+#include <unordered_set>
 
-CDynamicPool<CRaceData> CRaceData::ms_kPool;
+// Keep motion-mode pool defined before race-data pool so that on static shutdown
+// CRaceData instances are destroyed before motion-mode pool teardown.
 CDynamicPool<CRaceData::TMotionModeData> CRaceData::ms_MotionModeDataPool;
+CDynamicPool<CRaceData> CRaceData::ms_kPool;
 
 const std::string& CRaceData::GetSmokeBone()
 {
@@ -555,9 +558,21 @@ void CRaceData::Destroy()
 	m_ComboAttackDataMap.clear();
 
 	TMotionModeDataMap::iterator itorMode = m_pMotionModeDataMap.begin();
+	std::unordered_set<CRaceMotionData*> deletedMotionDataSet;
 	for (; itorMode != m_pMotionModeDataMap.end(); ++itorMode)
 	{
 		TMotionModeData * pMotionModeData = itorMode->second;
+		if (!pMotionModeData)
+			continue;
+
+		// Defensive shutdown guard:
+		// - skip stale pointers not owned by pool,
+		// - skip entries already freed (destructor already ran).
+		if (!ms_MotionModeDataPool.Contains(pMotionModeData) || !ms_MotionModeDataPool.IsAllocated(pMotionModeData))
+		{
+			TraceError("CRaceData::Destroy - skip invalid motion-mode pointer race=%u mode=%u ptr=%p", m_dwRaceIndex, itorMode->first, pMotionModeData);
+			continue;
+		}
 
 		TMotionVectorMap::iterator itorMotion = pMotionModeData->MotionVectorMap.begin();
 		for (; itorMotion != pMotionModeData->MotionVectorMap.end(); ++itorMotion)
@@ -565,7 +580,11 @@ void CRaceData::Destroy()
 			TMotionVector & rMotionVector = itorMotion->second;
 			for (DWORD i = 0; i < rMotionVector.size(); ++i)
 			{
-				CRaceMotionData::Delete(rMotionVector[i].pMotionData);
+				CRaceMotionData * pMotionData = rMotionVector[i].pMotionData;
+				if (!pMotionData)
+					continue;
+				if (deletedMotionDataSet.insert(pMotionData).second)
+					CRaceMotionData::Delete(pMotionData);
 			}
 		}
 

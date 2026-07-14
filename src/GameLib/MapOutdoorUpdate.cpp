@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "EterLib/Camera.h"
+#include "EterLib/DirectXMathHelpers.h" // M2-GAMELIB-DX11-NATIVE-01: M2 helps M1 - D3DXVec2 migration
 #include "PRTerrainLib/StdAfx.h"
 
 #include "MapOutdoor.h"
@@ -522,10 +523,10 @@ struct PCBlocker_SInstanceList
 		float fRadius;
 		pInstance->GetBoundingSphere(v3Center, fRadius);
 
-		D3DXVECTOR2 v2TargetToCenter;
+		DirectX::SimpleMath::Vector2 v2TargetToCenter; // M2-GAMELIB-DX11-NATIVE-01
 		v2TargetToCenter.x = v3Center.x - m_v2Target.x;
 		v2TargetToCenter.y = v3Center.y - m_v2Target.y;
-		if (D3DXVec2Dot(&m_v2View, &v2TargetToCenter) <= 0)
+		if (m_v2View.Dot(v2TargetToCenter) <= 0) // M2-GAMELIB-DX11-NATIVE-01
 		{
 			__AppendPCBlocker(pInstance);
 			return;
@@ -629,7 +630,7 @@ void CMapOutdoor::__CollectCollisionPCBlocker(D3DXVECTOR3& v3Eye, D3DXVECTOR3& v
 			if (!pObjInstEach)
 				continue;
 
-			if (TREE_OBJECT == pObjInstEach->GetType() && !m_bTransparentTree)
+			if (TREE_OBJECT == pObjInstEach->GetType())
 				continue;
 
 			if (!__IsInShadowReceiverList(pObjInstEach))

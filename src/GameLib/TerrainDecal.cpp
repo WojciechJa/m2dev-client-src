@@ -3,7 +3,6 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
-#include "EterLib/StateManager.h"
 #include "PRTerrainLib/StdAfx.h"
 
 #include "TerrainDecal.h"
@@ -91,29 +90,7 @@ void CTerrainDecal::Update()
 
 void CTerrainDecal::Render()
 {
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-	STATEMANAGER.SaveTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-	STATEMANAGER.SaveSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-	STATEMANAGER.SaveSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-	
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
- 	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_SELECTARG1);
-
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
 	CDecal::Render();
-	
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_TEXCOORDINDEX);
-	STATEMANAGER.RestoreTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS);
-	STATEMANAGER.RestoreSamplerState(0, D3DSAMP_ADDRESSU);
-	STATEMANAGER.RestoreSamplerState(0, D3DSAMP_ADDRESSV);
-
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
 }
 
 void CTerrainDecal::SearchAffectedTerrainMesh(float fMinX,

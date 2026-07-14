@@ -32,8 +32,13 @@ bool CMapOutdoor::Load(float x, float y, float z)
 
 	m_lOldReadX = -1;
 
-	// TODO: SetRenderingDevice에서 Environment로 부터 라이트 속성을 넘겨줘야 스태틱 라이트가 제대로 작동한다.
-	CSpeedTreeForestDirectX::Instance().SetRenderingDevice(ms_lpd3dDevice);
+	CSpeedTreeForestDirectX::Instance().SetRenderingDevice();
+	CSpeedTreeForestDirectX::Instance().SetGrassMapOutdoor(this);
+	if (mc_pEnvironmentData)
+	{
+		const SLightDesc& c_rkLight = mc_pEnvironmentData->DirLights[ENV_DIRLIGHT_CHARACTER];
+		CSpeedTreeForestDirectX::Instance().SetLight(c_rkLight);
+	}
 
 	Update(x, y, z);
 

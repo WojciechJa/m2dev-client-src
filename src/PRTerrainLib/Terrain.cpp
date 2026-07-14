@@ -43,31 +43,51 @@ void CTerrainImpl::Initialize()
 
 	m_byNumWater = 0;
 	memset(&m_awShadowMap, 0xFFFF, sizeof(m_awShadowMap));
-	memset(&m_lpAlphaTexture, NULL, sizeof(m_lpAlphaTexture));
-	
+	memset(m_pAlphaTextureSRV, 0, sizeof(m_pAlphaTextureSRV)); // M2-PRTERRAIN-DX11-NATIVE-01: Initialize DX11 SRV array
+
+	// M3-WORLD-MATERIAL-59: Zero splat patch to prevent stale data from pooled objects
+	memset(&m_TerrainSplatPatch, 0, sizeof(m_TerrainSplatPatch));
+
+	// M3-WORLD-MATERIAL-59: Zero tile map to prevent garbage tile values
+	memset(m_abyTileMap, 0, sizeof(m_abyTileMap));
+
 	m_lViewRadius = 0;
 
 	m_wTileMapVersion = 8976;
 
 	m_fHeightScale = 0.0f;
-	
-	m_lpShadowTexture = NULL;
+
+	m_pShadowTextureSRV = nullptr; // M2-PRTERRAIN-DX11-NATIVE-01: Initialize DX11 SRV
+	m_pShadowTexture = nullptr; // M2-PRTERRAIN-DX11-NATIVE-01: Initialize DX11 texture
 
 	m_lSplatTilesX = 0;
-	m_lSplatTilesY = 0;	
+	m_lSplatTilesY = 0;
 }
 
 void CTerrainImpl::Clear()
 {
+	// M2-PRTERRAIN-DX11-NATIVE-01: Release DX11 SRVs and textures
 	for (DWORD i = 0; i < GetTextureSet()->GetTextureCount(); ++i)
 	{
-		if (m_lpAlphaTexture[i])
+		if (m_pAlphaTextureSRV[i])
 		{
-			m_lpAlphaTexture[i]->Release();
-			m_lpAlphaTexture[i] = NULL;
+			m_pAlphaTextureSRV[i]->Release();
+			m_pAlphaTextureSRV[i] = nullptr;
 		}
 	}
-	
+
+	if (m_pShadowTextureSRV)
+	{
+		m_pShadowTextureSRV->Release();
+		m_pShadowTextureSRV = nullptr;
+	}
+
+	if (m_pShadowTexture)
+	{
+		m_pShadowTexture->Release();
+		m_pShadowTexture = nullptr;
+	}
+
 	Initialize();
 }
 

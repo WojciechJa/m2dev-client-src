@@ -1,5 +1,6 @@
 #include "StdAfx.h"
-#include "EterLib/StateManager.h"
+#include "EterLib/StateManager11.h"
+#include "EterLib/GrpDeviceDX11.h"
 #include "PackLib/PackManager.h"
 
 #include "MapManager.h"
@@ -18,7 +19,67 @@
 #endif
 
 #include "UserInterface/PythonSystem.h"
+#include "UserInterface/config.h"
 // MR-14: -- END OF -- Fog update by Alaric
+
+namespace
+{
+inline CStateManager11* GetDX11StateManager()
+{
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return nullptr;
+	return CStateManager11::InstancePtr();
+}
+
+inline DWORD MakeEnvironmentVersionKey(const TEnvironmentData* pEnvironmentData)
+{
+	return static_cast<DWORD>(reinterpret_cast<uintptr_t>(pEnvironmentData) & 0xFFFFFFFFu);
+}
+
+inline int ClampFogLevel(int iFogLevel)
+{
+	if (iFogLevel < 0)
+		return 0;
+	if (iFogLevel > 2)
+		return 2;
+	return iFogLevel;
+}
+
+inline float GetLinearFogScaleByLevel(int iFogLevel)
+{
+	static constexpr float kFogScaleByLevel[3] =
+	{
+		DX11RuntimeConfig::kFogLinearScaleLight,
+		DX11RuntimeConfig::kFogLinearScaleMiddle,
+		DX11RuntimeConfig::kFogLinearScaleDense
+	};
+	return kFogScaleByLevel[ClampFogLevel(iFogLevel)];
+}
+
+inline float GetDensityFogBaseByLevel(int iFogLevel)
+{
+	static constexpr float kFogDensityByLevel[3] =
+	{
+		DX11RuntimeConfig::kFogDensityLight,
+		DX11RuntimeConfig::kFogDensityMiddle,
+		DX11RuntimeConfig::kFogDensityDense
+	};
+	return kFogDensityByLevel[ClampFogLevel(iFogLevel)];
+}
+
+inline float ClampFogNearDistance(float fFogNear)
+{
+	return fMAX(DX11RuntimeConfig::kFogNearMinDistance, fFogNear);
+}
+
+inline float ClampFogFarDistance(float fFogFar)
+{
+	return fMAX(
+		DX11RuntimeConfig::kFogFarMinDistance,
+		fMIN(DX11RuntimeConfig::kFogFarMaxDistance, fFogFar));
+}
+}
 
 //////////////////////////////////////////////////////////////////////////
 // 기본 함수
@@ -42,7 +103,6 @@ CMapOutdoor& CMapManager::GetMapOutdoorRef()
 CMapManager::CMapManager() : mc_pcurEnvironmentData(NULL)
 {
 	m_pkMap = NULL;
-	m_isSoftwareTilingEnableReserved=false;
 
 //	Initialize();
 }
@@ -51,17 +111,6 @@ CMapManager::~CMapManager()
 {
 	Destroy();
 }
-
-bool CMapManager::IsSoftwareTilingEnable()
-{
-	return CTerrainPatch::SOFTWARE_TRANSFORM_PATCH_ENABLE;
-}
-
-void CMapManager::ReserveSoftwareTilingEnable(bool isEnable)
-{
-	m_isSoftwareTilingEnableReserved=isEnable;
-}
-
 
 void CMapManager::Initialize()
 {
@@ -77,8 +126,6 @@ void CMapManager::Create()
 		Clear();
 		return;
 	}
-
-	CTerrainPatch::SOFTWARE_TRANSFORM_PATCH_ENABLE=m_isSoftwareTilingEnableReserved;
 
 	m_pkMap = (CMapOutdoor*)AllocMap();
 
@@ -240,61 +287,74 @@ void CMapManager::BeginEnvironment()
 
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 
-	// Light always on
- 	STATEMANAGER.SaveRenderState(D3DRS_LIGHTING, TRUE);
-
-	// Fog
- 	STATEMANAGER.SaveRenderState(D3DRS_FOGENABLE, mc_pcurEnvironmentData->bFogEnable);
-
-	// Material
-	STATEMANAGER.SetMaterial(&mc_pcurEnvironmentData->Material);
-
-	// Directional Light
-	if (mc_pcurEnvironmentData->bDirLightsEnable[ENV_DIRLIGHT_BACKGROUND])
+	// Native DX11 runtime path: mirror environment state through CStateManager11.
+	if (CStateManager11* pStateManager11 = GetDX11StateManager())
 	{
-		ms_lpd3dDevice->LightEnable(0, TRUE);
+		// Light always on
+		pStateManager11->SaveLightingEnabled(TRUE);
 
-		rkMap.ApplyLight((DWORD)mc_pcurEnvironmentData, mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND]);		
-	}
-	else
-		ms_lpd3dDevice->LightEnable(0, FALSE);
+		// Fog
+		pStateManager11->SaveFogEnabled(mc_pcurEnvironmentData->bFogEnable ? TRUE : FALSE);
 
-	if (mc_pcurEnvironmentData->bFogEnable)
-	{
-		const DWORD dwFogColor = mc_pcurEnvironmentData->FogColor;
-		STATEMANAGER.SetRenderState(D3DRS_FOGCOLOR, dwFogColor);
+		// Material
+		pStateManager11->SetMaterial(&mc_pcurEnvironmentData->Material);
 
-		const int iFogLevel = CPythonSystem::Instance().GetFogLevel(); // 2=Dense,1=Middle,0=Light
-
-		if (mc_pcurEnvironmentData->bDensityFog && (mc_pcurEnvironmentData->bFogLevel != 0))
+		// Directional Light
+		if (mc_pcurEnvironmentData->bDirLightsEnable[ENV_DIRLIGHT_BACKGROUND])
 		{
-			const float fFogDensityLevel[3] = { 0.000006f, 0.000004f, 0.000002f };
-			float fDensity = mc_pcurEnvironmentData->bFogLevel * fFogDensityLevel[iFogLevel];
+			pStateManager11->SetLightEnable(0, TRUE);
 
-			STATEMANAGER.SetRenderState(D3DRS_FOGVERTEXMODE, D3DFOG_EXP);			// pixel fog
-			STATEMANAGER.SetRenderState(D3DRS_FOGDENSITY, *((DWORD *) &fDensity));	// vertex fog
-
-			float fApproxFogFar = 2.3f / fDensity;
-			CSpeedTreeForestDirectX& rkForest = CSpeedTreeForestDirectX::Instance();
-			rkForest.SetFog(0.0f, fApproxFogFar);
+			rkMap.ApplyLight(MakeEnvironmentVersionKey(mc_pcurEnvironmentData), mc_pcurEnvironmentData->DirLights[ENV_DIRLIGHT_BACKGROUND]);		
 		}
 		else
+			pStateManager11->SetLightEnable(0, FALSE);
+
+		if (mc_pcurEnvironmentData->bFogEnable)
 		{
-			const float fFogScaleLevel[3] = { 0.75f, 1.0f, 1.25f };
+			const DWORD dwFogColor = mc_pcurEnvironmentData->FogColor;
+			pStateManager11->SetFogColorValue(dwFogColor);
 
-			float fFogNear = mc_pcurEnvironmentData->GetFogNearDistance();
-			float fFogFar = mc_pcurEnvironmentData->GetFogFarDistance();
+			const int iFogLevel = ClampFogLevel(CPythonSystem::Instance().GetFogLevel()); // 0=Light,1=Middle,2=Dense
 
-			fFogNear *= fFogScaleLevel[iFogLevel];
-			fFogFar  *= fFogScaleLevel[iFogLevel];
+			if (mc_pcurEnvironmentData->bDensityFog && (mc_pcurEnvironmentData->bFogLevel != 0))
+			{
+				float fDensity = mc_pcurEnvironmentData->bFogLevel * GetDensityFogBaseByLevel(iFogLevel);
 
-			CSpeedTreeForestDirectX& rkForest=CSpeedTreeForestDirectX::Instance();
-			rkForest.SetFog(fFogNear, fFogFar);
+				pStateManager11->SetFogModeExp();
+				pStateManager11->SetFogExpDensity(fDensity);
 
-			STATEMANAGER.SetRenderState(D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);		// vertex fox
-			STATEMANAGER.SetRenderState(D3DRS_RANGEFOGENABLE, TRUE);				// vertex fox
-			STATEMANAGER.SetRenderState(D3DRS_FOGSTART, *((DWORD *) &fFogNear));	// USED BY D3DFOG_LINEAR
-			STATEMANAGER.SetRenderState(D3DRS_FOGEND, *((DWORD *) &fFogFar));		// USED BY D3DFOG_LINEAR
+				float fApproxFogFar = DX11RuntimeConfig::kFogDensityFarApproxFactor / fMAX(0.0000001f, fDensity);
+				fApproxFogFar = ClampFogFarDistance(fApproxFogFar);
+				CSpeedTreeForestDirectX& rkForest = CSpeedTreeForestDirectX::Instance();
+				rkForest.SetFog(0.0f, fApproxFogFar);
+			}
+			else
+			{
+				float fFogNear = mc_pcurEnvironmentData->GetFogNearDistance();
+				float fFogFar = mc_pcurEnvironmentData->GetFogFarDistance();
+				const float fFogScale = GetLinearFogScaleByLevel(iFogLevel);
+
+				fFogNear = ClampFogNearDistance(fFogNear * fFogScale);
+				fFogFar = ClampFogFarDistance(fFogFar * fFogScale);
+				if (fFogFar <= fFogNear)
+					fFogFar = ClampFogFarDistance(fFogNear + 1000.0f);
+
+				CSpeedTreeForestDirectX& rkForest=CSpeedTreeForestDirectX::Instance();
+				rkForest.SetFog(fFogNear, fFogFar);
+
+				pStateManager11->SetFogModeLinear();
+				pStateManager11->SetFogRangeEnabled(TRUE);
+				pStateManager11->SetFogLinearRange(fFogNear, fFogFar);
+			}
+		}
+	}
+	else
+	{
+		static bool s_bLoggedDX11EnvStateMissing = false;
+		if (!s_bLoggedDX11EnvStateMissing)
+		{
+			s_bLoggedDX11EnvStateMissing = true;
+			TraceError("DX11_ENV_BIND_FAIL stage=begin reason=state_manager11_unavailable");
 		}
 	}
 
@@ -306,8 +366,19 @@ void CMapManager::EndEnvironment()
 	if (!mc_pcurEnvironmentData)
 		return;
 
-	STATEMANAGER.RestoreRenderState(D3DRS_LIGHTING);
-	STATEMANAGER.RestoreRenderState(D3DRS_FOGENABLE);
+	if (CStateManager11* pStateManager11 = GetDX11StateManager())
+	{
+		pStateManager11->RestoreLightingEnabled();
+		pStateManager11->RestoreFogEnabled();
+		return;
+	}
+
+	static bool s_bLoggedDX11EnvStateEndMissing = false;
+	if (!s_bLoggedDX11EnvStateEndMissing)
+	{
+		s_bLoggedDX11EnvStateEndMissing = true;
+		TraceError("DX11_ENV_BIND_FAIL stage=end reason=state_manager11_unavailable");
+	}
 }
 
 void CMapManager::SetEnvironmentData(int nEnvDataIndex)
@@ -563,32 +634,6 @@ bool CMapManager::GetAttr(int iX, int iY, BYTE * pbyAttr)
 	return rkMap.GetAttr(iX, iY, pbyAttr);
 }
 
-// 2004.10.14.myevan.TEMP_CAreaLoaderThread
-/*
-bool CMapManager::BGLoadingEnable()
-{
-	if (!IsMapReady())
-		return false;
-	return ((CMapOutdoor*)m_pMap)->BGLoadingEnable();
-}
-
-void CMapManager::BGLoadingEnable(bool bBGLoadingEnable)
-{
-	if (!IsMapReady())
-		return;
-	((CMapOutdoor*)m_pMap)->BGLoadingEnable(bBGLoadingEnable);
-}
-*/
-
-void CMapManager::SetTerrainRenderSort(CMapOutdoor::ETerrainRenderSort eTerrainRenderSort)
-{
-	if (!IsMapReady())
-		return;
-
-	CMapOutdoor& rkMap=GetMapOutdoorRef();
-	rkMap.SetTerrainRenderSort(eTerrainRenderSort);
-}
-
 void CMapManager::SetTransparentTree(bool bTransparenTree)
 {
 	if (!IsMapReady())
@@ -596,15 +641,6 @@ void CMapManager::SetTransparentTree(bool bTransparenTree)
 
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 	rkMap.SetTransparentTree(bTransparenTree);
-}
-
-CMapOutdoor::ETerrainRenderSort CMapManager::GetTerrainRenderSort()
-{
-	if (!IsMapReady())
-		return CMapOutdoor::DISTANCE_SORT;
-
-	CMapOutdoor& rkMap=GetMapOutdoorRef();
-	return rkMap.GetTerrainRenderSort();
 }
 
 void CMapManager::GetBaseXY(DWORD * pdwBaseX, DWORD * pdwBaseY)

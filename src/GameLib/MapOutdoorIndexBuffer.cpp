@@ -15,7 +15,7 @@ void CMapOutdoor::SetIndexBuffer()
 		memset(m_pwaIndices[uci], 0, sizeof(WORD) * dwIndexNum);
 		count[uci] = 0;
 		count2[uci] = 0;
-		if ( !m_IndexBuffer[uci].Create(dwIndexNum, D3DFMT_INDEX16) )
+		if ( !m_IndexBuffer[uci].Create(dwIndexNum, GRP_FMT_INDEX16) )
 			TraceError("CMapOutdoor::SetIndexBuffer() IndexBuffer Create Error");
 	}
 

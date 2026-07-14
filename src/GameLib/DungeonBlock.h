@@ -6,6 +6,7 @@
 #include "EterGrnLib/Thing.h"
 
 class CDungeonModelInstance;
+struct ID3D11DeviceContext;
 
 class CDungeonBlock : public CGraphicObjectInstance
 {
@@ -31,17 +32,18 @@ class CDungeonBlock : public CGraphicObjectInstance
 
 		void Update();
 		void Render();
+		void RenderDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj);
 
 		bool GetBoundingSphere(D3DXVECTOR3 & v3Center, float & fRadius);
 		void OnUpdateCollisionData(const CStaticCollisionDataVector * pscdVector);
 		void OnUpdateHeighInstance(CAttributeInstance * pAttributeInstance);
 		bool OnGetObjectHeight(float fX, float fY, float * pfHeight);
 
-		void OnRender() {}
-		void OnBlendRender() {}
-		void OnRenderToShadowMap() {}
+		void OnRender();
+		void OnBlendRender();
+		void OnRenderToShadowMap();
 		void OnRenderShadow();
-		void OnRenderPCBlocker() {}
+		void OnRenderPCBlocker();
 
 	protected:
 		void __Initialize();

@@ -3,8 +3,10 @@
 //#define SPHERELIB_STRICT
 //#include <crtdbg.h>
 
-#include <d3d9.h>
-#include <d3dx9.h>
+//TODO : Change to dx11
+//ENDOFTODO
+
+#include "EterLib/DirectXMathHelpers.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,3 +15,4 @@
 #include <math.h>
 
 #include "EterBase/StdAfx.h"
+

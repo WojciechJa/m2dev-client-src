@@ -18,9 +18,6 @@ class CMapManager : public CScreen, public IPhysicsWorld
 		bool IsMapOutdoor();
 		CMapOutdoor& GetMapOutdoorRef();
 
-		bool	IsSoftwareTilingEnable();
-		void	ReserveSoftwareTilingEnable(bool isEnable);
-
 		//////////////////////////////////////////////////////////////////////////
 		// Contructor / Destructor
 		//////////////////////////////////////////////////////////////////////////
@@ -109,13 +106,7 @@ class CMapManager : public CScreen, public IPhysicsWorld
 		CMapOutdoor *				m_pkMap;
 		CSpeedTreeForestDirectX	m_Forest;
 
-	public:
-		// 2004.10.14.myevan.TEMP_CAreaLoaderThread
-		//bool	BGLoadingEnable();
-		//void	BGLoadingEnable(bool bBGLoadingEnable);
-		void	SetTerrainRenderSort(CMapOutdoor::ETerrainRenderSort eTerrainRenderSort);
-		CMapOutdoor::ETerrainRenderSort	GetTerrainRenderSort();
-		
+	public:	
 		void	GetBaseXY(DWORD * pdwBaseX, DWORD * pdwBaseY);
 		
 	public:
@@ -137,8 +128,6 @@ class CMapManager : public CScreen, public IPhysicsWorld
 
 	protected:
 		TMapInfoVector			m_kVct_kMapInfo;
-
-		bool m_isSoftwareTilingEnableReserved;
 
 	protected:
 		void	__LoadMapInfoVector();

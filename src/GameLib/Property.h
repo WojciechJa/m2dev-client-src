@@ -10,6 +10,7 @@ class CProperty
 
 		void			Clear();
 		bool			ReadFromMemory(const void * c_pvData, int iLen, const char * c_pszFileName);
+		bool			Save(const char * c_pszFileName);
 
 		const char *	GetFileName();
 

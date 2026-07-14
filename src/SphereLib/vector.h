@@ -20,7 +20,7 @@
 /**               Written by John W. Ratcliff jratcliff@att.net        */
 /***********************************************************************/
 
-class Vector3d : public D3DXVECTOR3
+class Vector3d : public DirectX::SimpleMath::Vector3
 {
 public:
 	Vector3d(void) { };  // null constructor, does not inialize point.

@@ -1,55 +1,54 @@
 #include "StdAfx.h"
 #include "DungeonBlock.h"
 
-#include "EterLib/StateManager.h"
+#include "EterLib/GrpBase.h"
+#include "EterLib/GrpDeviceDX11.h"
+
+namespace
+{
+inline void LogDungeonBlockDeferredOnce(const char* c_szPass, const char* c_szReason)
+{
+	static std::set<std::string> s_logged;
+	if (!c_szPass)
+		c_szPass = "unknown";
+
+	if (s_logged.insert(c_szPass).second)
+	{
+		TraceError("DX11_DUNGEON_BLOCK_PATH pass=%s status=deferred reason=%s",
+			c_szPass,
+			c_szReason ? c_szReason : "unknown");
+	}
+}
+}
 
 class CDungeonModelInstance : public CGrannyModelInstance
 {
 	public:
-		CDungeonModelInstance() {}
-		virtual ~CDungeonModelInstance() {}
+		CDungeonModelInstance() = default;
+		virtual ~CDungeonModelInstance() = default;
 
 		void RenderDungeonBlock()
 		{
 			if (IsEmpty())
 				return;
 
-			STATEMANAGER.SetVertexDeclaration(ms_pnt2VS);
-			LPDIRECT3DVERTEXBUFFER9 lpd3dRigidPNTVtxBuf = m_pModel->GetPNTD3DVertexBuffer();
-			if (lpd3dRigidPNTVtxBuf)
-			{
-				STATEMANAGER.SetStreamSource(0, lpd3dRigidPNTVtxBuf, sizeof(TPNT2Vertex));
-				RenderMeshNodeListWithTwoTexture(CGrannyMesh::TYPE_RIGID, CGrannyMaterial::TYPE_BLEND_PNT);
-			}
+			CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+			if (!pDX11Device || !pDX11Device->IsValid())
+				return;
+
+			ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+			if (!pContext)
+				return;
+
+			const D3DXMATRIX matViewProj = CGraphicBase::GetViewMatrix() * CGraphicBase::GetProjMatrix();
+			RenderWithTwoTextureDX11(pContext, matViewProj);
 		}
 
 		void RenderDungeonBlockShadow()
 		{
-			if (IsEmpty())
-				return;
-
-			STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, 0xffffffff);
-			STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TFACTOR);
-			STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
-			STATEMANAGER.SaveTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
-			STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-			STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_ZERO);
-			STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR);
-
-			STATEMANAGER.SetVertexDeclaration(ms_pnt2VS);
-			LPDIRECT3DVERTEXBUFFER9 lpd3dRigidPNTVtxBuf = m_pModel->GetPNTD3DVertexBuffer();
-			if (lpd3dRigidPNTVtxBuf)
-			{
-				STATEMANAGER.SetStreamSource(0, lpd3dRigidPNTVtxBuf, sizeof(TPNT2Vertex));
-				RenderMeshNodeListWithoutTexture(CGrannyMesh::TYPE_RIGID, CGrannyMaterial::TYPE_BLEND_PNT);
-			}
-
-			STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLORARG1);
-			STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLOROP);
-			STATEMANAGER.RestoreTextureStageState(0, D3DTSS_ALPHAOP);
-			STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-			STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-			STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
+			// Keep shadow submission functional in DX11 by reusing runtime model draw path.
+			// Shadow-specific shader selection is handled by outer pass state.
+			RenderDungeonBlock();
 		}
 };
 
@@ -76,11 +75,23 @@ void CDungeonBlock::Update()
 	for_each(m_ModelInstanceContainer.begin(), m_ModelInstanceContainer.end(), Update);
 }
 
-struct FRender
+struct FRenderDX11
 {
-	void operator() (CDungeonModelInstance * pInstance)
+	ID3D11DeviceContext* pContext;
+	const D3DXMATRIX& rmatViewProj;
+
+	FRenderDX11(ID3D11DeviceContext* pCtx, const D3DXMATRIX& matViewProj)
+		: pContext(pCtx)
+		, rmatViewProj(matViewProj)
 	{
-		pInstance->RenderDungeonBlock();
+	}
+
+	void operator() (CDungeonModelInstance* pInstance)
+	{
+		if (!pInstance || !pContext)
+			return;
+
+		pInstance->RenderWithTwoTextureDX11(pContext, rmatViewProj);
 	}
 };
 
@@ -88,8 +99,50 @@ void CDungeonBlock::Render()
 {
 //	if (!isShow())
 //		return;
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+	{
+		LogDungeonBlockDeferredOnce("dungeon_block_render", "dx11_device_unavailable");
+		return;
+	}
 
-	for_each(m_ModelInstanceContainer.begin(), m_ModelInstanceContainer.end(), FRender());
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	if (!pContext)
+	{
+		LogDungeonBlockDeferredOnce("dungeon_block_render", "dx11_context_unavailable");
+		return;
+	}
+
+	const D3DXMATRIX matViewProj = CGraphicBase::GetViewMatrix() * CGraphicBase::GetProjMatrix();
+	for_each(m_ModelInstanceContainer.begin(), m_ModelInstanceContainer.end(), FRenderDX11(pContext, matViewProj));
+}
+
+void CDungeonBlock::RenderDX11(ID3D11DeviceContext* pContext, const D3DXMATRIX& matViewProj)
+{
+	if (!pContext)
+		return;
+
+	for_each(m_ModelInstanceContainer.begin(), m_ModelInstanceContainer.end(), FRenderDX11(pContext, matViewProj));
+}
+
+void CDungeonBlock::OnRender()
+{
+	Render();
+}
+
+void CDungeonBlock::OnBlendRender()
+{
+	Render();
+}
+
+void CDungeonBlock::OnRenderToShadowMap()
+{
+	OnRenderShadow();
+}
+
+void CDungeonBlock::OnRenderPCBlocker()
+{
+	Render();
 }
 
 struct FRenderShadow
@@ -104,22 +157,6 @@ void CDungeonBlock::OnRenderShadow()
 {
 	for_each(m_ModelInstanceContainer.begin(), m_ModelInstanceContainer.end(), FRenderShadow());
 }
-
-struct FBoundBox
-{
-	D3DXVECTOR3 * m_pv3Min;
-	D3DXVECTOR3 * m_pv3Max;
-
-	FBoundBox(D3DXVECTOR3 * pv3Min, D3DXVECTOR3 * pv3Max)
-	{
-		m_pv3Min = pv3Min;
-		m_pv3Max = pv3Max;
-	}
-	void operator() (CGrannyModelInstance * pInstance)
-	{
-		pInstance->GetBoundBox(m_pv3Min, m_pv3Max);
-	}
-};
 
 bool CDungeonBlock::GetBoundingSphere(D3DXVECTOR3 & v3Center, float & fRadius)
 {
@@ -154,12 +191,19 @@ bool CDungeonBlock::OnGetObjectHeight(float fX, float fY, float * pfHeight)
 
 void CDungeonBlock::BuildBoundingSphere()
 {
-	D3DXVECTOR3 v3Min, v3Max;
-	for_each(m_ModelInstanceContainer.begin(), m_ModelInstanceContainer.end(), FBoundBox(&v3Min, &v3Max));
+	if (m_ModelInstanceContainer.empty())
+	{
+		m_v3Center = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+		m_fRadius = 0.0f;
+		return;
+	}
 
-	m_v3Center = (v3Min+v3Max) * 0.5f;
+	D3DXVECTOR3 v3Min, v3Max;
+	GetBoundBox(&v3Min, &v3Max);
+
+	m_v3Center = (v3Min + v3Max) * 0.5f;
 	const auto vv = (v3Max - v3Min);
-	m_fRadius = D3DXVec3Length(&vv)*0.5f + 150.0f; // extra length for attached objects
+	m_fRadius = D3DXVec3Length(&vv) * 0.5f + 150.0f; // extra length for attached objects
 }
 
 bool CDungeonBlock::Intersect(float * pfu, float * pfv, float * pft)
@@ -194,11 +238,11 @@ void CDungeonBlock::GetBoundBox(D3DXVECTOR3 * pv3Min, D3DXVECTOR3 * pv3Max)
 		pInstance->GetBoundBox(&v3Min, &v3Max);
 
 		pv3Min->x = std::min(v3Min.x, pv3Min->x);
-		pv3Min->y = std::min(v3Min.x, pv3Min->y);
-		pv3Min->z = std::min(v3Min.x, pv3Min->z);
+		pv3Min->y = std::min(v3Min.y, pv3Min->y);
+		pv3Min->z = std::min(v3Min.z, pv3Min->z);
 		pv3Max->x = std::max(v3Max.x, pv3Max->x);
-		pv3Max->y = std::max(v3Max.x, pv3Max->y);
-		pv3Max->z = std::max(v3Max.x, pv3Max->z);
+		pv3Max->y = std::max(v3Max.y, pv3Max->y);
+		pv3Max->z = std::max(v3Max.z, pv3Max->z);
 	}
 }
 
@@ -225,9 +269,9 @@ bool CDungeonBlock::Load(const char * c_szFileName)
 		m_kDeformableVertexBuffer.Destroy();
 		m_kDeformableVertexBuffer.Create(
 			dwVertexCount,
-			D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1,
-			D3DUSAGE_DYNAMIC,
-			D3DPOOL_DEFAULT);	
+			FVF_XYZ|FVF_NORMAL|FVF_TEX1,
+			GRP_USAGE_DYNAMIC,
+			GRP_POOL_DEFAULT);	
 		m_ModelInstanceContainer.push_back(pModelInstance);
 	}
 

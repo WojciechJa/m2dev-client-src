@@ -1,11 +1,211 @@
 #include "stdafx.h"
-#include "EterLib/StateManager.h"
 #include "EterLib/Camera.h"
+#include "EterLib/GrpDeviceDX11.h"
+#include "EterLib/GrpTextureDX11.h"
 
 #include "FlyingData.h"
 #include "FlyTrace.h"
 
 CDynamicPool<CFlyTrace>		CFlyTrace::ms_kPool;		
+
+struct TFlyVertex
+{
+	D3DXVECTOR3 p;
+	DWORD c;
+	D3DXVECTOR2 t;
+	TFlyVertex(){};
+	TFlyVertex(const D3DXVECTOR3& p, DWORD c, const D3DXVECTOR2 & t):p(p),c(c),t(t){}
+};
+
+struct TFlyVertexSet
+{
+	TFlyVertex v[6];
+	TFlyVertexSet(TFlyVertex * pv)
+	{
+		memcpy(v,pv,sizeof(v));
+	}
+	bool operator < (const TFlyVertexSet& ) const
+	{
+		return false;
+	}
+	TFlyVertexSet & operator = ( const TFlyVertexSet& rhs )
+	{
+		memcpy(v,rhs.v,sizeof(v));
+		return *this;
+	}
+};
+
+typedef std::vector<std::pair<float, TFlyVertexSet> > TFlyVertexSetVector;
+
+namespace
+{
+struct SDX11TraceVertex
+{
+	float x, y, z;
+	float r, g, b, a;
+	float u, v;
+};
+
+inline void UnpackColorARGB(DWORD dwColor, float& fR, float& fG, float& fB, float& fA)
+{
+	fA = ((dwColor >> 24) & 0xFF) / 255.0f;
+	fR = ((dwColor >> 16) & 0xFF) / 255.0f;
+	fG = ((dwColor >> 8) & 0xFF) / 255.0f;
+	fB = (dwColor & 0xFF) / 255.0f;
+}
+
+inline bool RenderTraceStripsDX11(CGraphicDeviceDX11* pDX11Device, const TFlyVertexSetVector& rkStrips)
+{
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return false;
+
+	if (!pDX11Device->EnsureBootstrapPipelineReady() || !pDX11Device->EnsureBootstrapUISamplerReady())
+		return false;
+
+	ID3D11Device* pDevice = pDX11Device->GetDevice();
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	if (!pDevice || !pContext)
+		return false;
+
+	ID3D11InputLayout* pInputLayout = pDX11Device->GetBootstrapUIInputLayout();
+	ID3D11VertexShader* pVertexShader = pDX11Device->GetBootstrapUIVertexShader();
+	ID3D11PixelShader* pPixelShader = pDX11Device->GetBootstrapUITexturePixelShader();
+	ID3D11Buffer* pVertexBuffer = pDX11Device->GetBootstrapUIVertexBuffer();
+	ID3D11BlendState* pBlendState = pDX11Device->GetBootstrapUIAlphaBlendState();
+	ID3D11DepthStencilState* pDepthDisableState = pDX11Device->GetBootstrapUIDepthDisableState();
+	ID3D11SamplerState* pSamplerState = pDX11Device->GetBootstrapUISamplerState();
+	ID3D11ShaderResourceView* pWhiteSRV = CGraphicTextureDX11::GetWhiteFallbackTexture(pDevice);
+	if (!pInputLayout || !pVertexShader || !pPixelShader || !pVertexBuffer || !pBlendState || !pDepthDisableState || !pSamplerState || !pWhiteSRV)
+		return false;
+
+	ID3D11BlendState* pOldBlendState = nullptr;
+	FLOAT afOldBlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
+	UINT uOldSampleMask = 0u;
+	pContext->OMGetBlendState(&pOldBlendState, afOldBlendFactor, &uOldSampleMask);
+
+	ID3D11DepthStencilState* pOldDepthState = nullptr;
+	UINT uOldStencilRef = 0u;
+	pContext->OMGetDepthStencilState(&pOldDepthState, &uOldStencilRef);
+
+	ID3D11RasterizerState* pOldRasterState = nullptr;
+	pContext->RSGetState(&pOldRasterState);
+
+	ID3D11InputLayout* pOldInputLayout = nullptr;
+	pContext->IAGetInputLayout(&pOldInputLayout);
+
+	ID3D11Buffer* pOldVertexBuffer = nullptr;
+	UINT uOldStride = 0u;
+	UINT uOldOffset = 0u;
+	pContext->IAGetVertexBuffers(0, 1, &pOldVertexBuffer, &uOldStride, &uOldOffset);
+
+	D3D11_PRIMITIVE_TOPOLOGY eOldTopology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	pContext->IAGetPrimitiveTopology(&eOldTopology);
+
+	ID3D11VertexShader* pOldVertexShader = nullptr;
+	pContext->VSGetShader(&pOldVertexShader, nullptr, nullptr);
+
+	ID3D11PixelShader* pOldPixelShader = nullptr;
+	pContext->PSGetShader(&pOldPixelShader, nullptr, nullptr);
+
+	ID3D11ShaderResourceView* pOldSRV0 = nullptr;
+	pContext->PSGetShaderResources(0, 1, &pOldSRV0);
+
+	ID3D11SamplerState* pOldSampler0 = nullptr;
+	pContext->PSGetSamplers(0, 1, &pOldSampler0);
+
+	const D3DXMATRIX kMatViewProj = CGraphicBase::GetViewMatrix() * CGraphicBase::GetProjMatrix();
+	const FLOAT afBlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
+	UINT uStride = sizeof(SDX11TraceVertex);
+	UINT uOffset = 0u;
+	pContext->IASetInputLayout(pInputLayout);
+	pContext->IASetVertexBuffers(0, 1, &pVertexBuffer, &uStride, &uOffset);
+	pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	pContext->VSSetShader(pVertexShader, nullptr, 0);
+	pContext->PSSetShader(pPixelShader, nullptr, 0);
+	pContext->PSSetSamplers(0, 1, &pSamplerState);
+	pContext->PSSetShaderResources(0, 1, &pWhiteSRV);
+	pContext->OMSetBlendState(pBlendState, afBlendFactor, 0xffffffffu);
+	pContext->OMSetDepthStencilState(pDepthDisableState, 0);
+	pContext->RSSetState(nullptr);
+
+	UINT uSubmitted = 0u;
+	for (TFlyVertexSetVector::const_iterator it = rkStrips.begin(); it != rkStrips.end(); ++it)
+	{
+		const TFlyVertexSet& rkSet = it->second;
+		SDX11TraceVertex akVertices[6];
+		bool bValidStrip = true;
+		for (UINT i = 0; i < 6; ++i)
+		{
+			const TFlyVertex& rkSrc = rkSet.v[i];
+			D3DXVECTOR4 v4World(rkSrc.p.x, rkSrc.p.y, rkSrc.p.z, 1.0f);
+			D3DXVECTOR4 v4Clip;
+			D3DXVec4Transform(&v4Clip, &v4World, &kMatViewProj);
+			if (fabsf(v4Clip.w) <= 1.0e-6f)
+			{
+				bValidStrip = false;
+				break;
+			}
+
+			const float fInvW = 1.0f / v4Clip.w;
+			SDX11TraceVertex& rkDst = akVertices[i];
+			rkDst.x = v4Clip.x * fInvW;
+			rkDst.y = v4Clip.y * fInvW;
+			rkDst.z = v4Clip.z * fInvW;
+			UnpackColorARGB(rkSrc.c, rkDst.r, rkDst.g, rkDst.b, rkDst.a);
+			rkDst.u = rkSrc.t.x;
+			rkDst.v = rkSrc.t.y;
+		}
+
+		if (!bValidStrip)
+			continue;
+
+		D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
+		const HRESULT hMapResult = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+		if (FAILED(hMapResult) || !kMappedResource.pData)
+			break;
+
+		memcpy(kMappedResource.pData, akVertices, sizeof(akVertices));
+		pContext->Unmap(pVertexBuffer, 0);
+		pContext->Draw(6u, 0u);
+		++uSubmitted;
+	}
+
+	ID3D11ShaderResourceView* pNullSRV = nullptr;
+	pContext->PSSetShaderResources(0, 1, &pNullSRV);
+
+	pContext->RSSetState(pOldRasterState);
+	pContext->OMSetDepthStencilState(pOldDepthState, uOldStencilRef);
+	pContext->OMSetBlendState(pOldBlendState, afOldBlendFactor, uOldSampleMask);
+	pContext->IASetInputLayout(pOldInputLayout);
+	pContext->IASetVertexBuffers(0, 1, &pOldVertexBuffer, &uOldStride, &uOldOffset);
+	pContext->IASetPrimitiveTopology(eOldTopology);
+	pContext->VSSetShader(pOldVertexShader, nullptr, 0);
+	pContext->PSSetShader(pOldPixelShader, nullptr, 0);
+	pContext->PSSetShaderResources(0, 1, &pOldSRV0);
+	pContext->PSSetSamplers(0, 1, &pOldSampler0);
+
+	SAFE_RELEASE(pOldSampler0);
+	SAFE_RELEASE(pOldSRV0);
+	SAFE_RELEASE(pOldPixelShader);
+	SAFE_RELEASE(pOldVertexShader);
+	SAFE_RELEASE(pOldVertexBuffer);
+	SAFE_RELEASE(pOldInputLayout);
+	SAFE_RELEASE(pOldRasterState);
+	SAFE_RELEASE(pOldDepthState);
+	SAFE_RELEASE(pOldBlendState);
+
+	static DWORD s_dwLastParityLog = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (dwNow - s_dwLastParityLog >= 5000u)
+	{
+		s_dwLastParityLog = dwNow;
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=flytrace path=dx11_native");
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=flytrace expected=%u submitted=%u", static_cast<unsigned int>(rkStrips.size()), static_cast<unsigned int>(uSubmitted));
+	}
+
+	return (uSubmitted > 0u);
+}
+}
 
 void CFlyTrace::DestroySystem()
 {
@@ -87,78 +287,14 @@ void CFlyTrace::Update()
 //2. 텍스쳐를 쓰려면 알파 없다-_-
 
 
-struct TFlyVertex
-{
-	D3DXVECTOR3 p;
-	DWORD c;
-	D3DXVECTOR2 t;
-	TFlyVertex(){};
-	TFlyVertex(const D3DXVECTOR3& p, DWORD c, const D3DXVECTOR2 & t):p(p),c(c),t(t){}
-};
-
-struct TFlyVertexSet
-{
-	TFlyVertex v[6];
-	TFlyVertexSet(TFlyVertex * pv)
-	{
-		memcpy(v,pv,sizeof(v));
-	}
-	bool operator < (const TFlyVertexSet& ) const
-	{
-		return false;
-	}
-	TFlyVertexSet & operator = ( const TFlyVertexSet& rhs )
-	{
-		memcpy(v,rhs.v,sizeof(v));
-		return *this;
-	}
-};
-
-typedef std::vector<std::pair<float, TFlyVertexSet> > TFlyVertexSetVector;
-
 void CFlyTrace::Render()
 {
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	const bool bDX11RuntimeActive = (pDX11Device && pDX11Device->IsValid());
+
 	if (m_TimePositionDeque.size()<=1)
 		return;
 	TFlyVertexSetVector VSVector;
-
-	//STATEMANAGER.SaveRenderState(D3DRS_ZFUNC,D3DCMP_LESS);
-	STATEMANAGER.SaveRenderState(D3DRS_ZFUNC,D3DCMP_LESS);
-	//STATEMANAGER.SaveRenderState(D3DRS_ZWRITEENABLE,FALSE);
-
-	D3DXMATRIX matWorld;
-	D3DXMatrixIdentity(&matWorld);
-	
-	STATEMANAGER.SaveTransform(D3DTS_WORLD, &matWorld);
-	STATEMANAGER.SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-	
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHATESTENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATER);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHAREF, 0x00000000);
-
-	STATEMANAGER.SaveRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD );
-	//STATEMANAGER.SaveRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD );
-	
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TEXTURE);
-	//STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, /*(m_bUseTexture)?D3DTOP_SELECTARG2:*/D3DTOP_SELECTARG2);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
-	//STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, /*(m_bUseTexture)?D3DTOP_SELECTARG2:*/D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, FALSE);
-	STATEMANAGER.SetTexture(0, NULL);
-	STATEMANAGER.SetTexture(1, NULL);
-	
 	
 	D3DXMATRIX m;
 	CScreen s;s.UpdateViewMatrix();
@@ -264,27 +400,31 @@ void CFlyTrace::Render()
 		//	Tracenf("#%d:%f %f %f", i, v[i].p.x,v[i].p.y,v[i].p.z);
 		
 		VSVector.push_back(std::make_pair(-D3DXVec3Dot(&E,&pCurrentCamera->GetView()),TFlyVertexSet(v)));
-		//OLD: STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 4, v, sizeof(TVertex));
-		//OLD: STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v+1, sizeof(TVertex));		
+//OLD: STATEMANAGER.DrawPrimitiveUP(GRP_PT_TRIANGLESTRIP, 4, v, sizeof(TVertex));
+//OLD: STATEMANAGER.DrawPrimitiveUP(GRP_PT_TRIANGLESTRIP, 2, v+1, sizeof(TVertex));
 	}
 
 	std::sort(VSVector.begin(),VSVector.end());
 
-	for(TFlyVertexSetVector::iterator it = VSVector.begin();it!=VSVector.end();++it)
+	if (!bDX11RuntimeActive)
 	{
-		STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 4, it->second.v, sizeof(TVertex));
+		static bool s_bLoggedDX11FlyTraceDeviceUnavailable = false;
+		if (!s_bLoggedDX11FlyTraceDeviceUnavailable)
+		{
+			s_bLoggedDX11FlyTraceDeviceUnavailable = true;
+			TraceError("DX11_FLYTRACE_PATH mode=dx11_native_draw status=skipped reason=dx11_device_unavailable");
+		}
+		return;
 	}
-	STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
-	STATEMANAGER.RestoreTransform(D3DTS_WORLD);
-	//STATEMANAGER.RestoreRenderState(D3DRS_ZWRITEENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZFUNC);
-	STATEMANAGER.RestoreRenderState(D3DRS_BLENDOP);
 
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHATESTENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHAFUNC);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHAREF);
+	if (RenderTraceStripsDX11(pDX11Device, VSVector))
+		return;
 
+	static bool s_bLoggedDX11FlyTraceNativeFail = false;
+	if (!s_bLoggedDX11FlyTraceNativeFail)
+	{
+		s_bLoggedDX11FlyTraceNativeFail = true;
+		TraceError("DX11_FLYTRACE_PATH mode=dx11_native_draw status=deferred reason=bootstrap_or_submit_failed");
+	}
+	return;
 }

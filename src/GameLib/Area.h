@@ -198,6 +198,7 @@ class CArea
 
 		void			CollectRenderingObject(std::vector<CGraphicThingInstance*>& rkVct_pkOpaqueThingInst);
 		void			CollectBlendRenderingObject(std::vector<CGraphicThingInstance*>& rkVct_pkBlendThingInst);
+		void			CollectDungeonRenderingObject(std::vector<CDungeonBlock*>& rkVct_pkDungeonBlockInst);
 
 		void			SetMapOutDoor(CMapOutdoor * pOwnerOutdoorMap);
 		void			Clear();

@@ -178,7 +178,7 @@ BOOL NRaceData::LoadEffectData(CTextFileLoader & rTextFileLoader, TAttachingEffe
 	}
 
 	/*if (!*/
-	// TODO DELETEME FIXME
+	// Legacy registration retained for compatibility with existing effect script data.
 	CEffectManager::Instance().RegisterEffect(pEffectData->strFileName.c_str());
 	/*) return false;*/ 
 

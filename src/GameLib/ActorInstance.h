@@ -713,7 +713,7 @@ class CActorInstance : public IActorInstance, public IFlyTargetableObject
 		// For Collision Detection
 		TCollisionPointInstanceList		m_BodyPointInstanceList;
 		TCollisionPointInstanceList		m_DefendingPointInstanceList;
-		SSplashArea						m_kSplashArea; // TODO : 복수에 대한 고려를 해야한다 - [levites]
+		SSplashArea						m_kSplashArea; // NOTE : 복수에 대한 고려를 해야한다 - [levites]
 		CAttributeInstance *			m_pAttributeInstance;
 		/////////////////////////////////////////////////////////////////////////////////////
 
@@ -744,7 +744,7 @@ class CActorInstance : public IActorInstance, public IFlyTargetableObject
 		float						m_fInvisibleTime;
 		BOOL						m_isHiding;
 
-		// TODO : State로 통합 시킬 수 있는지 고려해 볼것
+		// NOTE : State로 통합 시킬 수 있는지 고려해 볼것
 		BOOL						m_isResistFallen;
 		BOOL						m_isSleep;
 		BOOL						m_isFaint;

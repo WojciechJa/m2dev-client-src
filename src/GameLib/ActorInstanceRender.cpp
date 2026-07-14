@@ -1,8 +1,55 @@
 #include "StdAfx.h"
-#include "EterLib/StateManager.h"
+#include "EterLib/GrpDeviceDX11.h"
+#include "EterLib/Camera.h"
 
 #include "ActorInstance.h"
 
+namespace
+{
+inline void AccumulateDX11ActorSubmitTelemetry(DWORD dwActorInstances, DWORD dwSubmittedDraws)
+{
+	static DWORD s_dwActorInstances = 0;
+	static DWORD s_dwSubmittedDraws = 0;
+	static DWORD s_dwLastLogTime = 0;
+
+	s_dwActorInstances += dwActorInstances;
+	s_dwSubmittedDraws += dwSubmittedDraws;
+
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (dwNow - s_dwLastLogTime < 5000)
+		return;
+
+	const float fDrawsPerActor = (s_dwActorInstances > 0)
+		? (static_cast<float>(s_dwSubmittedDraws) / static_cast<float>(s_dwActorInstances))
+		: 0.0f;
+	TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=actor_strict actors=%u submitted=%u draws_per_actor=%.2f",
+		s_dwActorInstances,
+		s_dwSubmittedDraws,
+		fDrawsPerActor);
+	s_dwActorInstances = 0;
+	s_dwSubmittedDraws = 0;
+	s_dwLastLogTime = dwNow;
+}
+
+inline void TraceDX11ActorStateParity(int iRenderMode, float fAlphaValue)
+{
+	static DWORD s_dwLastLogTime = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (dwNow - s_dwLastLogTime < 5000)
+		return;
+
+	const char* c_szBlendMode = "opaque";
+	if (iRenderMode == CActorInstance::RENDER_MODE_BLEND)
+		c_szBlendMode = (fAlphaValue < 1.0f) ? "alpha_blend" : "opaque_plus_alpha";
+	else if (iRenderMode == CActorInstance::RENDER_MODE_ADD)
+		c_szBlendMode = "additive";
+	else if (iRenderMode == CActorInstance::RENDER_MODE_MODULATE)
+		c_szBlendMode = "modulate";
+
+	TraceError("DX11_PIPELINE_STATE_PARITY pass=actor_strict path=dx11_native render_mode=%d blend=%s depth=enabled", iRenderMode, c_szBlendMode);
+	s_dwLastLogTime = dwNow;
+}
+}
 bool CActorInstance::ms_isDirLine=false;
 
 bool CActorInstance::IsDirLine()
@@ -32,66 +79,81 @@ void CActorInstance::SetMaterialAlpha(DWORD dwAlpha)
 
 void CActorInstance::OnRender()
 {
-	// Early out if race data is not loaded yet (async loading)
 	if (!m_pkCurRaceData)
 		return;
 
-	D3DMATERIAL9 kMtrl;
-	STATEMANAGER.GetMaterial(&kMtrl);
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!(pDX11Device && pDX11Device->IsValid() && pDX11Device->GetContext()))
+	{
+		static bool s_bLoggedActorRenderNoBackend = false;
+		if (!s_bLoggedActorRenderNoBackend)
+		{
+			s_bLoggedActorRenderNoBackend = true;
+			TraceError("DX11_ACTOR_RENDER_FAIL reason=dx11_context_unavailable");
+		}
+		return;
+	}
 
-	kMtrl.Diffuse=D3DXCOLOR(m_dwMtrlColor);	
-	STATEMANAGER.SetMaterial(&kMtrl);
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	const DWORD dwSubmittedBefore = CGraphicThingInstance::GetDX11SubmittedDrawCount();
+	CCamera* pCamera = CCameraManager::instance().GetCurrentCamera();
+	DirectX::SimpleMath::Matrix matViewProj = (pCamera ? pCamera->GetViewMatrix() : ms_matView) * ms_matProj;
 
-	// 현재는 이렇게.. 최종적인 형태는 Diffuse와 Blend의 분리로..
-	// 아니면 이런 형태로 가되 Texture & State Sorting 지원으로.. - [levites]
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);	
+	// Keep actor pass in world depth-tested path; disabling depth here causes
+	// unstable overdraw artifacts and incorrect scene compositing.
+	if (ID3D11DepthStencilState* pDepthReadState = pDX11Device->GetBootstrapUIDepthReadState())
+		pContext->OMSetDepthStencilState(pDepthReadState, 0u);
+	else
+		pContext->OMSetDepthStencilState(nullptr, 0u);
+	TraceDX11ActorStateParity(m_iRenderMode, m_fAlphaValue);
+
+	ID3D11BlendState* pAlphaBlendState = pDX11Device->GetBootstrapUIAlphaBlendState();
+	ID3D11BlendState* pAdditiveBlendState = pDX11Device->GetBootstrapUIAdditiveBlendState();
+	ID3D11BlendState* pModulateBlendState = pDX11Device->GetBootstrapUIModulateBlendState();
+	const FLOAT afOpaqueBlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
 
 	switch(m_iRenderMode)
 	{
-		case RENDER_MODE_NORMAL:
-			BeginDiffuseRender();
-				RenderWithOneTexture();
-			EndDiffuseRender();
-			BeginOpacityRender();
-				BlendRenderWithOneTexture();
-			EndOpacityRender();
-			break;
-		case RENDER_MODE_BLEND:
-			if (m_fAlphaValue == 1.0f)
-			{
-				BeginDiffuseRender();
-					RenderWithOneTexture();
-				EndDiffuseRender();
-				BeginOpacityRender();
-					BlendRenderWithOneTexture();
-				EndOpacityRender();
-			}
-			else if (m_fAlphaValue > 0.0f)
-			{
-				BeginBlendRender();
-					RenderWithOneTexture();
-					BlendRenderWithOneTexture();
-				EndBlendRender();
-			}
-			break;
-		case RENDER_MODE_ADD:
-			BeginAddRender();
-				RenderWithOneTexture();
-				BlendRenderWithOneTexture();
-			EndAddRender();
-			break;
-		case RENDER_MODE_MODULATE:
-			BeginModulateRender();
-				RenderWithOneTexture();
-				BlendRenderWithOneTexture();
-			EndModulateRender();
-			break;
+	case RENDER_MODE_NORMAL:
+		pContext->OMSetBlendState(nullptr, afOpaqueBlendFactor, 0xffffffffu);
+		RenderWithOneTextureDX11(pContext, matViewProj);
+		break;
+
+	case RENDER_MODE_BLEND:
+		if (m_fAlphaValue == 1.0f)
+		{
+			pContext->OMSetBlendState(nullptr, afOpaqueBlendFactor, 0xffffffffu);
+			RenderWithOneTextureDX11(pContext, matViewProj);
+		}
+		else if (m_fAlphaValue > 0.0f)
+		{
+			if (pAlphaBlendState)
+				pContext->OMSetBlendState(pAlphaBlendState, afOpaqueBlendFactor, 0xffffffffu);
+			RenderWithOneTextureDX11(pContext, matViewProj);
+		}
+		break;
+
+	case RENDER_MODE_ADD:
+		if (pAdditiveBlendState)
+			pContext->OMSetBlendState(pAdditiveBlendState, afOpaqueBlendFactor, 0xffffffffu);
+		else if (pAlphaBlendState)
+			pContext->OMSetBlendState(pAlphaBlendState, afOpaqueBlendFactor, 0xffffffffu);
+		RenderWithOneTextureDX11(pContext, matViewProj);
+		break;
+
+	case RENDER_MODE_MODULATE:
+		if (pModulateBlendState)
+			pContext->OMSetBlendState(pModulateBlendState, afOpaqueBlendFactor, 0xffffffffu);
+		else if (pAlphaBlendState)
+			pContext->OMSetBlendState(pAlphaBlendState, afOpaqueBlendFactor, 0xffffffffu);
+		RenderWithOneTextureDX11(pContext, matViewProj);
+		break;
 	}
 
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
-
-	kMtrl.Diffuse=D3DXCOLOR(0xffffffff);
-	STATEMANAGER.SetMaterial(&kMtrl);
+	pContext->OMSetBlendState(nullptr, afOpaqueBlendFactor, 0xffffffffu);
+	const DWORD dwSubmittedAfter = CGraphicThingInstance::GetDX11SubmittedDrawCount();
+	const DWORD dwSubmittedDelta = (dwSubmittedAfter >= dwSubmittedBefore) ? (dwSubmittedAfter - dwSubmittedBefore) : 0;
+	AccumulateDX11ActorSubmitTelemetry(1u, dwSubmittedDelta);
 
 	if (ms_isDirLine)
 	{
@@ -112,111 +174,45 @@ void CActorInstance::OnRender()
 		D3DXVec3Add(&kD3DVt3AdvDir, &kD3DVt3AdvDir, &kD3DVt3Cur);
 
 		static CScreen s_kScreen;
-
-		STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_DIFFUSE);
-		STATEMANAGER.SaveTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_SELECTARG1);
-		STATEMANAGER.SaveTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_DISABLE);
-		STATEMANAGER.SaveRenderState(D3DRS_ZENABLE, FALSE);
-		STATEMANAGER.SaveRenderState(D3DRS_LIGHTING, FALSE);
-
 		s_kScreen.SetDiffuseColor(1.0f, 1.0f, 0.0f);
 		s_kScreen.RenderLine3d(kD3DVt3Cur.x, kD3DVt3Cur.y, kD3DVt3Cur.z, kD3DVt3AdvDir.x, kD3DVt3AdvDir.y, kD3DVt3AdvDir.z);
 
 		s_kScreen.SetDiffuseColor(0.0f, 1.0f, 1.0f);
 		s_kScreen.RenderLine3d(kD3DVt3Cur.x, kD3DVt3Cur.y, kD3DVt3Cur.z, kD3DVt3LookDir.x, kD3DVt3LookDir.y, kD3DVt3LookDir.z);
-
-		STATEMANAGER.RestoreRenderState(D3DRS_LIGHTING);
-		STATEMANAGER.RestoreRenderState(D3DRS_ZENABLE);
-
-		STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLORARG1);
-		STATEMANAGER.RestoreTextureStageState(0, D3DTSS_COLOROP);
-		STATEMANAGER.RestoreTextureStageState(0, D3DTSS_ALPHAOP);
 	}
 }
-
 void CActorInstance::BeginDiffuseRender()
 {
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::EndDiffuseRender()
 {
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::BeginOpacityRender()
 {
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHATESTENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHAREF, 0);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATER);
-
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::EndOpacityRender()
 {
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHATESTENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHAREF);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHAFUNC);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::BeginBlendRender()
 {
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, D3DXCOLOR(1.0f, 1.0f, 1.0f, m_fAlphaValue));
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TFACTOR);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG2);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::EndBlendRender()
 {
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::BeginAddRender()
 {
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, m_AddColor);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
-
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG1,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG2,	D3DTA_TFACTOR);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP,	D3DTOP_ADD);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP,	D3DTOP_DISABLE);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::EndAddRender()
 {
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::RestoreRenderMode()
 {
 	// NOTE : This is temporary code. I wanna convert this code to that restore the mode to
@@ -255,29 +251,12 @@ void CActorInstance::SetAddColor(const D3DXCOLOR & c_rColor)
 
 void CActorInstance::BeginModulateRender()
 {
-	STATEMANAGER.SetRenderState(D3DRS_TEXTUREFACTOR, m_AddColor);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2,	D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_MODULATE);
-
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG1,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLORARG2,	D3DTA_TFACTOR);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP,	D3DTOP_DISABLE);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::EndModulateRender()
 {
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
+	// Legacy DX9 fixed-function path removed.
 }
-
 void CActorInstance::SetModulateRenderMode()
 {
 	m_iRenderMode = RENDER_MODE_MODULATE;
@@ -291,8 +270,6 @@ void CActorInstance::RenderCollisionData()
 {
 	static CScreen s_Screen;
 
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
 	if (m_pAttributeInstance)
 	{
 		for (DWORD col=0; col < GetCollisionInstanceCount(); ++col)
@@ -302,23 +279,9 @@ void CActorInstance::RenderCollisionData()
 		}
 	}
 
-	STATEMANAGER.SetRenderState(D3DRS_ZENABLE, FALSE);
 	s_Screen.SetColorOperation();
 	s_Screen.SetDiffuseColor(1.0f, 0.0f, 0.0f);
 	TCollisionPointInstanceList::iterator itor;
-	/*itor = m_AttackingPointInstanceList.begin();
-	for (; itor != m_AttackingPointInstanceList.end(); ++itor)
-	{
-		const TCollisionPointInstance & c_rInstance = *itor;
-		for (DWORD i = 0; i < c_rInstance.SphereInstanceVector.size(); ++i)
-		{
-			const CDynamicSphereInstance & c_rSphereInstance = c_rInstance.SphereInstanceVector[i];
-			s_Screen.RenderCircle3d(c_rSphereInstance.v3Position.x,
-									c_rSphereInstance.v3Position.y,
-									c_rSphereInstance.v3Position.z,
-									c_rSphereInstance.fRadius);
-		}
-	}*/
 	s_Screen.SetDiffuseColor(1.0f, (isShow())?1.0f:0.0f, 0.0f);
 	D3DXVECTOR3 center;
 	float r;
@@ -356,7 +319,6 @@ void CActorInstance::RenderCollisionData()
 	}
 
 	s_Screen.SetDiffuseColor(1.0f, 0.0f, 0.0f);
-//	if (m_SplashArea.fDisappearingTime > GetLocalTime())
 	{
 		CDynamicSphereInstanceVector::iterator itor = m_kSplashArea.SphereInstanceVector.begin();
 		for (; itor != m_kSplashArea.SphereInstanceVector.end(); ++itor)
@@ -368,13 +330,7 @@ void CActorInstance::RenderCollisionData()
 									c_rInstance.fRadius);
 		}
 	}
-
-	STATEMANAGER.SetRenderState(D3DRS_ZENABLE, TRUE);
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, TRUE);
 }
-
-
 void CActorInstance::RenderToShadowMap()
 {
 	if (RENDER_MODE_BLEND == m_iRenderMode)
@@ -386,3 +342,4 @@ void CActorInstance::RenderToShadowMap()
 	if (m_pkHorse)
 		m_pkHorse->RenderToShadowMap();
 }
+

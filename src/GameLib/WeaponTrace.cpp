@@ -1,10 +1,205 @@
 #include "StdAfx.h"
 #include "EterLib/ResourceManager.h"
-#include "EterLib/StateManager.h"
+#include "EterLib/GrpDeviceDX11.h"
+#include "EterLib/GrpTextureDX11.h"
+#include "EterLib/GrpBase.h"
 
 #include "WeaponTrace.h"
 
 CDynamicPool<CWeaponTrace> CWeaponTrace::ms_kPool;
+
+namespace
+{
+struct SDX11WeaponTraceVertex
+{
+	float x, y, z;
+	float r, g, b, a;
+	float u, v;
+};
+
+inline void UnpackColorARGB(DWORD dwColor, float& fR, float& fG, float& fB, float& fA)
+{
+	fA = ((dwColor >> 24) & 0xFF) / 255.0f;
+	fR = ((dwColor >> 16) & 0xFF) / 255.0f;
+	fG = ((dwColor >> 8) & 0xFF) / 255.0f;
+	fB = (dwColor & 0xFF) / 255.0f;
+}
+
+inline bool RenderWeaponTraceDX11(
+	CGraphicDeviceDX11* pDX11Device,
+	const std::vector<TPDTVertex>& rkVertices,
+	ID3D11ShaderResourceView* pRequestedSRV)
+{
+	if (!pDX11Device || !pDX11Device->IsValid())
+		return false;
+
+	if (!pDX11Device->EnsureBootstrapPipelineReady() || !pDX11Device->EnsureBootstrapUISamplerReady())
+		return false;
+
+	if (rkVertices.size() < 4u)
+		return false;
+
+	ID3D11Device* pDevice = pDX11Device->GetDevice();
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	if (!pDevice || !pContext)
+		return false;
+
+	ID3D11InputLayout* pInputLayout = pDX11Device->GetBootstrapUIInputLayout();
+	ID3D11VertexShader* pVertexShader = pDX11Device->GetBootstrapUIVertexShader();
+	ID3D11PixelShader* pPixelShader = pDX11Device->GetBootstrapUITexturePixelShader();
+	ID3D11Buffer* pVertexBuffer = pDX11Device->GetBootstrapUIVertexBuffer();
+	ID3D11BlendState* pBlendState = pDX11Device->GetBootstrapUIAlphaBlendState();
+	ID3D11DepthStencilState* pDepthDisableState = pDX11Device->GetBootstrapUIDepthDisableState();
+	ID3D11SamplerState* pSamplerState = pDX11Device->GetBootstrapUISamplerState();
+	ID3D11ShaderResourceView* pWhiteSRV = CGraphicTextureDX11::GetWhiteFallbackTexture(pDevice);
+	ID3D11ShaderResourceView* pTraceSRV = pRequestedSRV ? pRequestedSRV : pWhiteSRV;
+	if (!pInputLayout || !pVertexShader || !pPixelShader || !pVertexBuffer || !pBlendState || !pDepthDisableState || !pSamplerState || !pTraceSRV)
+		return false;
+
+	ID3D11BlendState* pOldBlendState = nullptr;
+	FLOAT afOldBlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
+	UINT uOldSampleMask = 0u;
+	pContext->OMGetBlendState(&pOldBlendState, afOldBlendFactor, &uOldSampleMask);
+
+	ID3D11DepthStencilState* pOldDepthState = nullptr;
+	UINT uOldStencilRef = 0u;
+	pContext->OMGetDepthStencilState(&pOldDepthState, &uOldStencilRef);
+
+	ID3D11RasterizerState* pOldRasterState = nullptr;
+	pContext->RSGetState(&pOldRasterState);
+
+	ID3D11InputLayout* pOldInputLayout = nullptr;
+	pContext->IAGetInputLayout(&pOldInputLayout);
+
+	ID3D11Buffer* pOldVertexBuffer = nullptr;
+	UINT uOldStride = 0u;
+	UINT uOldOffset = 0u;
+	pContext->IAGetVertexBuffers(0, 1, &pOldVertexBuffer, &uOldStride, &uOldOffset);
+
+	D3D11_PRIMITIVE_TOPOLOGY eOldTopology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	pContext->IAGetPrimitiveTopology(&eOldTopology);
+
+	ID3D11VertexShader* pOldVertexShader = nullptr;
+	pContext->VSGetShader(&pOldVertexShader, nullptr, nullptr);
+
+	ID3D11PixelShader* pOldPixelShader = nullptr;
+	pContext->PSGetShader(&pOldPixelShader, nullptr, nullptr);
+
+	ID3D11ShaderResourceView* pOldSRV0 = nullptr;
+	pContext->PSGetShaderResources(0, 1, &pOldSRV0);
+
+	ID3D11SamplerState* pOldSampler0 = nullptr;
+	pContext->PSGetSamplers(0, 1, &pOldSampler0);
+
+	std::vector<SDX11WeaponTraceVertex> akConvertedVertices;
+	akConvertedVertices.reserve(rkVertices.size());
+	const D3DXMATRIX kMatViewProj = CGraphicBase::GetViewMatrix() * CGraphicBase::GetProjMatrix();
+	for (std::vector<TPDTVertex>::const_iterator it = rkVertices.begin(); it != rkVertices.end(); ++it)
+	{
+		const TPDTVertex& rkSrc = *it;
+		D3DXVECTOR4 v4World(rkSrc.position.x, rkSrc.position.y, rkSrc.position.z, 1.0f);
+		D3DXVECTOR4 v4Clip;
+		D3DXVec4Transform(&v4Clip, &v4World, &kMatViewProj);
+		if (fabsf(v4Clip.w) <= 1.0e-6f)
+			continue;
+
+		const float fInvW = 1.0f / v4Clip.w;
+		SDX11WeaponTraceVertex kDst = {};
+		kDst.x = v4Clip.x * fInvW;
+		kDst.y = v4Clip.y * fInvW;
+		kDst.z = v4Clip.z * fInvW;
+		UnpackColorARGB(rkSrc.diffuse, kDst.r, kDst.g, kDst.b, kDst.a);
+		kDst.u = rkSrc.texCoord.x;
+		kDst.v = rkSrc.texCoord.y;
+		akConvertedVertices.push_back(kDst);
+	}
+
+	if (akConvertedVertices.size() < 4u)
+	{
+		SAFE_RELEASE(pOldSampler0);
+		SAFE_RELEASE(pOldSRV0);
+		SAFE_RELEASE(pOldPixelShader);
+		SAFE_RELEASE(pOldVertexShader);
+		SAFE_RELEASE(pOldVertexBuffer);
+		SAFE_RELEASE(pOldInputLayout);
+		SAFE_RELEASE(pOldRasterState);
+		SAFE_RELEASE(pOldDepthState);
+		SAFE_RELEASE(pOldBlendState);
+		return false;
+	}
+
+	D3D11_MAPPED_SUBRESOURCE kMappedResource = {};
+	const HRESULT hMapResult = pContext->Map(pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &kMappedResource);
+	if (FAILED(hMapResult) || !kMappedResource.pData)
+	{
+		SAFE_RELEASE(pOldSampler0);
+		SAFE_RELEASE(pOldSRV0);
+		SAFE_RELEASE(pOldPixelShader);
+		SAFE_RELEASE(pOldVertexShader);
+		SAFE_RELEASE(pOldVertexBuffer);
+		SAFE_RELEASE(pOldInputLayout);
+		SAFE_RELEASE(pOldRasterState);
+		SAFE_RELEASE(pOldDepthState);
+		SAFE_RELEASE(pOldBlendState);
+		return false;
+	}
+
+	memcpy(kMappedResource.pData, &akConvertedVertices[0], sizeof(SDX11WeaponTraceVertex) * akConvertedVertices.size());
+	pContext->Unmap(pVertexBuffer, 0);
+
+	const FLOAT afBlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
+	UINT uStride = sizeof(SDX11WeaponTraceVertex);
+	UINT uOffset = 0u;
+	pContext->IASetInputLayout(pInputLayout);
+	pContext->IASetVertexBuffers(0, 1, &pVertexBuffer, &uStride, &uOffset);
+	pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	pContext->VSSetShader(pVertexShader, nullptr, 0);
+	pContext->PSSetShader(pPixelShader, nullptr, 0);
+	pContext->PSSetSamplers(0, 1, &pSamplerState);
+	pContext->PSSetShaderResources(0, 1, &pTraceSRV);
+	pContext->OMSetBlendState(pBlendState, afBlendFactor, 0xffffffffu);
+	pContext->OMSetDepthStencilState(pDepthDisableState, 0);
+	pContext->RSSetState(nullptr);
+	pContext->Draw(static_cast<UINT>(akConvertedVertices.size()), 0u);
+
+	ID3D11ShaderResourceView* pNullSRV = nullptr;
+	pContext->PSSetShaderResources(0, 1, &pNullSRV);
+
+	pContext->RSSetState(pOldRasterState);
+	pContext->OMSetDepthStencilState(pOldDepthState, uOldStencilRef);
+	pContext->OMSetBlendState(pOldBlendState, afOldBlendFactor, uOldSampleMask);
+	pContext->IASetInputLayout(pOldInputLayout);
+	pContext->IASetVertexBuffers(0, 1, &pOldVertexBuffer, &uOldStride, &uOldOffset);
+	pContext->IASetPrimitiveTopology(eOldTopology);
+	pContext->VSSetShader(pOldVertexShader, nullptr, 0);
+	pContext->PSSetShader(pOldPixelShader, nullptr, 0);
+	pContext->PSSetShaderResources(0, 1, &pOldSRV0);
+	pContext->PSSetSamplers(0, 1, &pOldSampler0);
+
+	SAFE_RELEASE(pOldSampler0);
+	SAFE_RELEASE(pOldSRV0);
+	SAFE_RELEASE(pOldPixelShader);
+	SAFE_RELEASE(pOldVertexShader);
+	SAFE_RELEASE(pOldVertexBuffer);
+	SAFE_RELEASE(pOldInputLayout);
+	SAFE_RELEASE(pOldRasterState);
+	SAFE_RELEASE(pOldDepthState);
+	SAFE_RELEASE(pOldBlendState);
+
+	static DWORD s_dwLastParityLog = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (dwNow - s_dwLastParityLog >= 5000u)
+	{
+		s_dwLastParityLog = dwNow;
+		TraceError("DX11_PIPELINE_STATE_PARITY pass=weapontrace path=dx11_native");
+		TraceError("DX11_PIPELINE_SUBMIT_PARITY pass=weapontrace expected=%u submitted=%u",
+			static_cast<unsigned int>(rkVertices.size()),
+			static_cast<unsigned int>(akConvertedVertices.size()));
+	}
+
+	return true;
+}
+}
 
 void CWeaponTrace::DestroySystem()
 {
@@ -278,6 +473,9 @@ bool CWeaponTrace::BuildVertex()
 
 void CWeaponTrace::Render()
 {
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	const bool bDX11RuntimeActive = (pDX11Device && pDX11Device->IsValid());
+
 	//if (!m_isPlaying)
 	//	return;
 	//if (m_CurvingTraceVector.size() < 4)
@@ -289,64 +487,31 @@ void CWeaponTrace::Render()
 	if (m_PDTVertexVector.size()<4) 
 		return;
 
+	if (!bDX11RuntimeActive)
+	{
+		static bool s_bLoggedDX11WeaponTraceDeviceUnavailable = false;
+		if (!s_bLoggedDX11WeaponTraceDeviceUnavailable)
+		{
+			s_bLoggedDX11WeaponTraceDeviceUnavailable = true;
+			TraceError("DX11_WEAPONTRACE_PATH mode=dx11_native_draw status=skipped reason=dx11_device_unavailable");
+		}
+		return;
+	}
 
-	LPDIRECT3DTEXTURE9 lpTexture=NULL;
+	ID3D11ShaderResourceView* pTraceSRV = nullptr;
+	if (m_bUseTexture && m_ImageInstance.GetGraphicImagePointer())
+		pTraceSRV = m_ImageInstance.GetGraphicImagePointer()->GetTextureReference().GetD3D11TextureSRV();
 
-	// Have to optimize
-	D3DXMATRIX matWorld;
-	D3DXMatrixIdentity(&matWorld);
+	if (RenderWeaponTraceDX11(pDX11Device, m_PDTVertexVector, pTraceSRV))
+		return;
 
-	STATEMANAGER.SaveTransform(D3DTS_WORLD, &matWorld);
-	STATEMANAGER.SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-	STATEMANAGER.SaveRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHATESTENABLE, FALSE);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHAREF, 0x00000011);
-	STATEMANAGER.SaveRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATER);
-
-	STATEMANAGER.SaveRenderState(D3DRS_ZENABLE, TRUE);
-	STATEMANAGER.SaveRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	STATEMANAGER.SaveRenderState(D3DRS_ZWRITEENABLE, FALSE);
-
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, (m_bUseTexture)?D3DTOP_SELECTARG2:D3DTOP_SELECTARG1);
-	//STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-	//STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
-	//STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP, (m_bUseTexture)?D3DTOP_SELECTARG2:D3DTOP_SELECTARG1);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, FALSE);
-	STATEMANAGER.SetTexture(0, lpTexture);
-	STATEMANAGER.SetTexture(1, NULL);
-	STATEMANAGER.DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,
-								 int(m_PDTVertexVector.size() - 2),
-								 &m_PDTVertexVector[0],
-								 sizeof(TPDTVertex));
-	
-	STATEMANAGER.SetRenderState(D3DRS_LIGHTING, TRUE);
-
-	STATEMANAGER.RestoreRenderState(D3DRS_ZENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZFUNC);
-	STATEMANAGER.RestoreRenderState(D3DRS_ZWRITEENABLE);
-
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHATESTENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHAREF);
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHAFUNC);
-
-	STATEMANAGER.RestoreRenderState(D3DRS_ALPHABLENDENABLE);
-	STATEMANAGER.RestoreRenderState(D3DRS_SRCBLEND);
-	STATEMANAGER.RestoreRenderState(D3DRS_DESTBLEND);
-
-	STATEMANAGER.RestoreTransform(D3DTS_WORLD);
-	STATEMANAGER.RestoreRenderState(D3DRS_CULLMODE);
+	static bool s_bLoggedDX11WeaponTraceNativeFail = false;
+	if (!s_bLoggedDX11WeaponTraceNativeFail)
+	{
+		s_bLoggedDX11WeaponTraceNativeFail = true;
+		TraceError("DX11_WEAPONTRACE_PATH mode=dx11_native_draw status=deferred reason=bootstrap_or_submit_failed");
+	}
+	return;
 }
 
 void CWeaponTrace::UseAlpha()

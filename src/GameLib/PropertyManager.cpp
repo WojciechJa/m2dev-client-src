@@ -134,6 +134,35 @@ bool CPropertyManager::Register(const char * c_pszFileName, CProperty ** ppPrope
 	return true;
 }
 
+bool CPropertyManager::Erase(const char * c_pszFileName)
+{
+	if (!c_pszFileName || !*c_pszFileName)
+		return false;
+
+	bool bRemovedFromRegistry = false;
+	for (TPropertyCRCMap::iterator it = m_PropertyByCRCMap.begin(); it != m_PropertyByCRCMap.end(); ++it)
+	{
+		CProperty* pProperty = it->second;
+		if (pProperty && 0 == _stricmp(pProperty->GetFileName(), c_pszFileName))
+		{
+			delete pProperty;
+			m_PropertyByCRCMap.erase(it);
+			bRemovedFromRegistry = true;
+			break;
+		}
+	}
+
+	// Packed mode cannot physically remove entries from pack archives.
+	if (!m_isFileMode)
+		return bRemovedFromRegistry;
+
+	const BOOL bDeleted = DeleteFileA(c_pszFileName);
+	if (bDeleted)
+		return true;
+
+	return bRemovedFromRegistry;
+}
+
 bool CPropertyManager::Get(const char * c_pszFileName, CProperty ** ppProperty)
 {
 	return Register(c_pszFileName, ppProperty);
