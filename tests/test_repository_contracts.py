@@ -66,6 +66,14 @@ class RepositoryContractsTest(unittest.TestCase):
             (REPO_ROOT / "extern" / "third_party" / "DirectXTK" / "Inc" / "SimpleMath.h").is_file()
         )
 
+    def test_imgui_is_pinned_and_available(self) -> None:
+        gitmodules = (REPO_ROOT / ".gitmodules").read_text(encoding="utf-8")
+        self.assertIn("path = vendor/imgui", gitmodules)
+        self.assertTrue((REPO_ROOT / "vendor" / "imgui" / "imgui.h").is_file())
+        self.assertTrue(
+            (REPO_ROOT / "vendor" / "imgui" / "backends" / "imgui_impl_dx11.cpp").is_file()
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
