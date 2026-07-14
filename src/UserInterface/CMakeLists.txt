@@ -52,7 +52,7 @@ target_link_libraries(UserInterface
 )
 
 if(BUILD_DEBUG_UI)
-	target_link_libraries(UserInterface PRIVATE DebugUI)
+	target_link_libraries(UserInterface DebugUI)
 	target_include_directories(UserInterface PRIVATE
 		${CMAKE_SOURCE_DIR}/vendor/imgui
 		${CMAKE_SOURCE_DIR}/vendor/imgui/backends
