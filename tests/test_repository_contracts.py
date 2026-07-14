@@ -59,6 +59,13 @@ class RepositoryContractsTest(unittest.TestCase):
         undeclared = [path for path in gitlinks if f"path = {path}" not in declared]
         self.assertEqual([], undeclared)
 
+    def test_directxtk_is_pinned_and_available(self) -> None:
+        gitmodules = (REPO_ROOT / ".gitmodules").read_text(encoding="utf-8")
+        self.assertIn("path = extern/third_party/DirectXTK", gitmodules)
+        self.assertTrue(
+            (REPO_ROOT / "extern" / "third_party" / "DirectXTK" / "Inc" / "SimpleMath.h").is_file()
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
