@@ -2,10 +2,14 @@ add_subdirectory(lzo-2.10)
 add_subdirectory(mio)
 add_subdirectory(libsodium)
 if(BUILD_DEBUG_UI)
-	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/imgui/CMakeLists.txt")
-		message(FATAL_ERROR "BUILD_DEBUG_UI requires vendor/imgui")
+	if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui.h"
+		OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_dx11.cpp"
+		OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_win32.cpp")
+		message(FATAL_ERROR
+			"BUILD_DEBUG_UI requires the vendor/imgui submodule. "
+			"Run: git submodule update --init --recursive")
 	endif()
-	add_subdirectory(imgui)
+	include("${CMAKE_SOURCE_DIR}/cmake/ImGuiTargets.cmake")
 endif()
 
 ## zstd is a bit tricky

@@ -57,6 +57,17 @@ jobs:
           SpeedTreeLib
           UserInterface
 
+      - name: Configure optional DebugUI
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-debug-ui
+          -DDX11_STRICT_ONLY=ON
+          -DBUILD_DEBUG_UI=ON
+
+      - name: Build optional DebugUI
+        shell: pwsh
+        run: cmake --build build-debug-ui --config RelWithDebInfo --target DebugUI
+
       - name: Collect outputs
         shell: pwsh
         run: |
