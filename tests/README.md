@@ -19,3 +19,13 @@ python tools/verify_dx11_native_ui_log.py H:\m2dev-client\m2dev-client\log\syser
 The validator requires native UI/text submissions, a successful present and a
 zero-failure widget heartbeat while rejecting legacy DX9-device activation and
 critical native-present failures.
+
+Run the one-shot Storm restore diagnostic without changing packed Python files:
+
+```powershell
+$env:M2DEV_STORM_RESTORE_DIAGNOSTIC = '1'
+.\Metin2_RelWithDebInfo.exe
+```
+
+After device creation the client logs `STORM_RESTORE_DIAGNOSTIC` and
+`STORM_RESTORE_STARTUP_DIAGNOSTIC`. Unset the variable for normal runs.

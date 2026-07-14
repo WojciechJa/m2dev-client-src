@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "Resource.h"
 #include "PythonApplication.h"
+#include "PythonBackground.h"
 #include "EterLib/Camera.h"
 #include "EterLib/GrpBase.h"
 #include "PackLib/PackManager.h"
@@ -367,6 +368,17 @@ PyObject* appCreate(PyObject* poSelf, PyObject* poArgs)
 	{
 		//return Py_BuildNone();			
 		return NULL;
+	}
+
+	char szStormDiagnostic[8] = {};
+	const DWORD dwStormDiagnosticLength = GetEnvironmentVariableA(
+		"M2DEV_STORM_RESTORE_DIAGNOSTIC",
+		szStormDiagnostic,
+		static_cast<DWORD>(sizeof(szStormDiagnostic)));
+	if (dwStormDiagnosticLength > 0 && szStormDiagnostic[0] != '0')
+	{
+		const bool bPassed = CPythonBackground::Instance().RunStormWeatherRestoreDiagnostic();
+		TraceError("STORM_RESTORE_STARTUP_DIAGNOSTIC result=%s", bPassed ? "pass" : "fail");
 	}
 
 	return Py_BuildNone();
