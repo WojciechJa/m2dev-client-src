@@ -1389,6 +1389,12 @@ void CPythonBackground::DisableStormEnvironment()
 	__SyncDX11EnvironmentBridgeState();
 }
 
+bool CPythonBackground::RunStormWeatherRestoreDiagnostic()
+{
+	m_StormEnvironment.SetRainEnvironment(&m_RainEnvironment);
+	return m_StormEnvironment.RunWeatherRestoreDiagnostic();
+}
+
 // Public getters for weather environments (for DebugUI)
 CSnowEnvironment* CPythonBackground::GetSnowEnvironment()
 {

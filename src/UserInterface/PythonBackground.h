@@ -166,6 +166,7 @@ public:
 	void DisableRainEnvironment();
 	void EnableStormEnvironment();
 	void DisableStormEnvironment();
+	bool RunStormWeatherRestoreDiagnostic();
 
 	// Public getters for weather environments (for DebugUI)
 	class CSnowEnvironment* GetSnowEnvironment();

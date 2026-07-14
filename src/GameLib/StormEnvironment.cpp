@@ -23,7 +23,7 @@ void CStormEnvironment::__Initialize()
 
 	m_pRainEnvironment = nullptr;
 	m_fStormRainIntensity = 0.8f;   // During storm: 80% of max rain
-	m_fBaseRainIntensity = 0.3f;    // Before storm: 30% of max rain
+	m_dwBaseRainParticleCount = 3000; // Before storm: 30% of max rain
 
 	m_bWindGustActive = false;
 	m_fWindGustIntensity = 0.0f;
@@ -98,7 +98,7 @@ void CStormEnvironment::__CaptureBaseWeather()
 	if (!m_pRainEnvironment)
 		return;
 
-	m_fBaseRainIntensity = static_cast<float>(m_pRainEnvironment->GetParticleCount()) / 10000.0f;
+	m_dwBaseRainParticleCount = m_pRainEnvironment->GetParticleCount();
 	m_v3BaseWind = m_pRainEnvironment->GetWindVector();
 }
 
@@ -107,9 +107,52 @@ void CStormEnvironment::__RestoreBaseWeather()
 	if (!m_pRainEnvironment)
 		return;
 
-	const DWORD dwBaseParticleCount = static_cast<DWORD>(m_fBaseRainIntensity * 10000.0f + 0.5f);
-	m_pRainEnvironment->SetParticleCount(dwBaseParticleCount);
+	m_pRainEnvironment->SetParticleCount(m_dwBaseRainParticleCount);
 	m_pRainEnvironment->SetWindVector(m_v3BaseWind);
+}
+
+bool CStormEnvironment::RunWeatherRestoreDiagnostic()
+{
+	if (!m_pRainEnvironment || m_bStormEnabled)
+	{
+		TraceError("STORM_RESTORE_DIAGNOSTIC result=skipped reason=%s",
+			m_bStormEnabled ? "storm_already_enabled" : "rain_environment_missing");
+		return false;
+	}
+
+	const DWORD dwExpectedParticleCount = m_pRainEnvironment->GetParticleCount();
+	const DirectX::SimpleMath::Vector3 v3ExpectedWind = m_pRainEnvironment->GetWindVector();
+	const bool bSavedAutoLightning = m_bAutoLightning;
+	const float fSavedWindGustChance = m_fWindGustChance;
+
+	m_bAutoLightning = false;
+	m_fWindGustChance = 0.0f;
+	Enable();
+	Update(m_fStormRampUpTime);
+	const DWORD dwStormParticleCount = m_pRainEnvironment->GetParticleCount();
+	Disable();
+
+	m_bAutoLightning = bSavedAutoLightning;
+	m_fWindGustChance = fSavedWindGustChance;
+
+	const DWORD dwRestoredParticleCount = m_pRainEnvironment->GetParticleCount();
+	const DirectX::SimpleMath::Vector3 v3RestoredWind = m_pRainEnvironment->GetWindVector();
+	const bool bParticleCountRestored = dwRestoredParticleCount == dwExpectedParticleCount;
+	const bool bWindRestored = v3RestoredWind.x == v3ExpectedWind.x &&
+		v3RestoredWind.y == v3ExpectedWind.y &&
+		v3RestoredWind.z == v3ExpectedWind.z;
+	const bool bPassed = bParticleCountRestored && bWindRestored;
+
+	TraceError(
+		"STORM_RESTORE_DIAGNOSTIC result=%s particles_before=%u particles_storm=%u particles_after=%u "
+		"wind_before=(%.3f,%.3f,%.3f) wind_after=(%.3f,%.3f,%.3f)",
+		bPassed ? "pass" : "fail",
+		dwExpectedParticleCount,
+		dwStormParticleCount,
+		dwRestoredParticleCount,
+		v3ExpectedWind.x, v3ExpectedWind.y, v3ExpectedWind.z,
+		v3RestoredWind.x, v3RestoredWind.y, v3RestoredWind.z);
+	return bPassed;
 }
 
 void CStormEnvironment::SetLightningFrequency(float fMinInterval, float fMaxInterval)
@@ -243,8 +286,9 @@ void CStormEnvironment::__UpdateStormIntensity(float fElapsedTime)
 	}
 
 	// Interpolate rain intensity based on storm intensity
-	float fCurrentRainIntensity = m_fBaseRainIntensity +
-		(m_fStormRainIntensity - m_fBaseRainIntensity) * m_fStormIntensity;
+	const float fBaseRainIntensity = static_cast<float>(m_dwBaseRainParticleCount) / 10000.0f;
+	float fCurrentRainIntensity = fBaseRainIntensity +
+		(m_fStormRainIntensity - fBaseRainIntensity) * m_fStormIntensity;
 
 	// Apply to rain environment
 	DWORD dwParticleCount = (DWORD)(fCurrentRainIntensity * 10000.0f);

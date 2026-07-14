@@ -1,0 +1,8 @@
+0000 00:00:00004 :: DX11_CONFIG_STATE render_api=11 native_world_autogate=1 strict_native_only=1 disable_dx9_compat_device=1 terrain_stabilization=0 texture_pipeline_mode=0
+0714 23:06:00226 :: DX11_RUNTIME_COMPAT legacy_dx9_device=0 reason=dx11_strict_only
+0714 23:06:00299 :: DX11_UI_STATE_GUARD interface_render_state_dx11_only w=1920 h=1002 depth=1000.000
+0714 23:06:00299 :: DX11_STARTUP_TIMELINE event=first_ui_submit
+0714 23:06:00303 :: DX11_TEXT_RENDER_DX11 glyphs_submitted=21 glyphs_emitted=21 srv_failures=0 srv_failures_persistent=0 outline_quads=0 main_quads=21
+0714 23:06:00303 :: DX11_PIPELINE_STATE_PARITY pass=ui_text_strict path=dx11_native state_manager=unused
+0714 23:06:00314 :: DX11_STARTUP_TIMELINE event=first_present_success vsync=1 scene_patches=0 scene_textures=0
+0714 23:06:05014 :: DX11_UI_WIDGET_HEARTBEAT image=6231 expanded=7380 mark=0 fail=0

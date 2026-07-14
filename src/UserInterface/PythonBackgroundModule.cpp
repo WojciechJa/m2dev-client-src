@@ -71,6 +71,11 @@ PyObject * backgroundEnableStorm(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildNone();
 }
 
+PyObject * backgroundRunStormWeatherRestoreDiagnostic(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonBackground::Instance().RunStormWeatherRestoreDiagnostic() ? 1 : 0);
+}
+
 PyObject * backgroundSetWeatherMonth(PyObject * poSelf, PyObject * poArgs)
 {
 	int iMonth;
@@ -987,6 +992,7 @@ void initBackground()
 		{ "EnableSnow",							backgroundEnableSnow,						METH_VARARGS },
 		{ "EnableRain",							backgroundEnableRain,						METH_VARARGS },
 		{ "EnableStorm",						backgroundEnableStorm,						METH_VARARGS },
+		{ "RunStormWeatherRestoreDiagnostic",	backgroundRunStormWeatherRestoreDiagnostic,	METH_VARARGS },
 		{ "SetWeatherMonth",					backgroundSetWeatherMonth,					METH_VARARGS },
 		{ "GetWeatherMonth",					backgroundGetWeatherMonth,					METH_VARARGS },
 		{ "SetRainIntensity",					backgroundSetRainIntensity,					METH_VARARGS },

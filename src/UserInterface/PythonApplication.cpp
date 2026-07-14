@@ -4231,9 +4231,8 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 	// Render-first policy: shadows are optional and never gate native world rendering.
 	bDX11NativeWorldShadowActive = false;
 
-	// Minimal DX11 UI path currently draws only the hardware cursor overlay.
-	// Full UI port is still pending; by default visible output still uses DX9 bridge copy
-	// unless world-force-visible native present is explicitly requested and all gates are stable.
+	// The complete UI tree is submitted by OnUIRender() through native DX11 primitives.
+	// These flags only select the optional native cursor overlay and do not gate UI rendering.
 	const bool bDX11NativeCursorOverlayTestActive =
 		(bDX11UINativeTest && bDX11NativeVisibleRequested && bDX11NativeVisibleRuntimeReady);
 	const bool bDX11NativeCursorOverlayActive =

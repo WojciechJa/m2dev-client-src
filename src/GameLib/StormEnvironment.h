@@ -45,6 +45,7 @@ public:
 	float GetStormIntensity() const { return m_fStormIntensity; } // 0.0 - 1.0 (current storm strength)
 	bool IsWindGustActive() const { return m_bWindGustActive; }
 	float GetWindGustIntensity() const { return m_fWindGustIntensity; }
+	bool RunWeatherRestoreDiagnostic();
 
 	// Link to rain environment
 	void SetRainEnvironment(class CRainEnvironment* pRainEnv);
@@ -70,7 +71,7 @@ private:
 	// Rain integration
 	CRainEnvironment* m_pRainEnvironment;
 	float m_fStormRainIntensity;    // Rain intensity during storm (0.0 - 1.0)
-	float m_fBaseRainIntensity;     // Rain intensity before storm
+	DWORD m_dwBaseRainParticleCount; // Exact particle count before storm
 
 	// Wind gust system
 	bool m_bWindGustActive;
