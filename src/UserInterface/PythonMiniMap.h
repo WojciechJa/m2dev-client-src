@@ -1,6 +1,10 @@
 #pragma once
 
 #include "PythonBackground.h"
+#include "EterLib/DirectXMathHelpers.h" // M2-USERINTERFACE-DX11-NATIVE-01: Added for SimpleMath types
+class CGraphicTexture;
+struct ID3D11PixelShader;
+struct ID3D11Buffer;
 
 class CPythonMiniMap : public CScreen, public CSingleton<CPythonMiniMap>
 {
@@ -105,6 +109,14 @@ class CPythonMiniMap : public CScreen, public CSingleton<CPythonMiniMap>
 		void __Initialize();
 		void __SetPosition();
 
+		// W4: DX11 rendering paths
+		bool __RenderTilesDX11();
+		bool __RenderAtlasDX11();
+		bool __RenderMarksDX11();  // W4.4: DX11 minimap marks (player/party/PC/NPC/monster/warp)
+		bool __EnsureDX11MiniMapMaskResources();
+		void __DestroyDX11MiniMapMaskResources();
+		bool __UpdateDX11MiniMapMaskCB(float fCenterX, float fCenterY, float fRadius, float fEdgeSoftness);
+
 		void __RenderWayPointMark(int ixCenter, int iyCenter);
 		void __RenderMiniWayPointMark(int ixCenter, int iyCenter);
 		void __RenderTargetMark(int ixCenter, int iyCenter);
@@ -187,7 +199,7 @@ class CPythonMiniMap : public CScreen, public CSingleton<CPythonMiniMap>
 		float							m_fMiniMapRadius;
 
 		// 맵 그림...
-		LPDIRECT3DTEXTURE9				m_lpMiniMapTexture[AROUND_AREA_NUM];
+		CGraphicTexture*				m_apMiniMapTexture[AROUND_AREA_NUM];
 
 		// 미니맵 커버
 		CGraphicImageInstance			m_MiniMapFilterGraphicImageInstance;
@@ -210,13 +222,13 @@ class CPythonMiniMap : public CScreen, public CSingleton<CPythonMiniMap>
 		CGraphicVertexBuffer			m_VertexBuffer;
 		CGraphicIndexBuffer				m_IndexBuffer;
 
-		D3DXMATRIX						m_matIdentity;
-		D3DXMATRIX						m_matWorld;
-		D3DXMATRIX						m_matMiniMapCover;
+		DirectX::SimpleMath::Matrix		m_matIdentity; // M2-USERINTERFACE-DX11-NATIVE-01: Migrated from D3DXMATRIX
+		DirectX::SimpleMath::Matrix		m_matWorld; // M2-USERINTERFACE-DX11-NATIVE-01: Migrated from D3DXMATRIX
+		DirectX::SimpleMath::Matrix		m_matMiniMapCover; // M2-USERINTERFACE-DX11-NATIVE-01: Migrated from D3DXMATRIX
 
 		bool							m_bShowAtlas;
 		CGraphicExpandedImageInstance	m_AtlasImageInstance;
-		D3DXMATRIX						m_matWorldAtlas;
+		DirectX::SimpleMath::Matrix		m_matWorldAtlas; // M2-USERINTERFACE-DX11-NATIVE-01: Migrated from D3DXMATRIX
 		CGraphicExpandedImageInstance	m_AtlasPlayerMark;
 
 		float							m_fAtlasScreenX;
@@ -253,10 +265,16 @@ class CPythonMiniMap : public CScreen, public CSingleton<CPythonMiniMap>
 		// SignalPoint
 		struct TSignalPoint
 		{
-			D3DXVECTOR2 v2Pos;
+			DirectX::SimpleMath::Vector2 v2Pos; // M2-USERINTERFACE-DX11-NATIVE-01: Migrated from D3DXVECTOR2
 			unsigned int id;
 		};
 		std::vector<TSignalPoint>				m_SignalPointVector;
 
 		PyObject*							m_poHandler;
+
+		// DX11 minimap mask resources (radial clip)
+		ID3D11PixelShader*					m_pDX11MiniMapMaskPixelShader;
+		ID3D11Buffer*						m_pDX11MiniMapMaskConstantBuffer;
+		bool								m_bDX11MiniMapMaskResourcesReady;
+		bool								m_bDX11MiniMapMaskResourcesFailed;
 };

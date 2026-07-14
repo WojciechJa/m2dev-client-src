@@ -29,6 +29,15 @@ std::set<DWORD> g_kSet_dwDUELKey;
 
 bool g_isEmpireNameMode=false;
 
+namespace
+{
+	// Extremely verbose per-hit diagnostics. Keep disabled by default because
+	// they create heavy syserr I/O and can distort runtime FPS in Debug tests.
+	static const bool kDX11VerboseDamageEffectLogs = false;
+}
+
+#define TRACE_DAMAGE_VERBOSE(...) do { if (kDX11VerboseDamageEffectLogs) TraceError(__VA_ARGS__); } while (0)
+
 void  CInstanceBase::SetEmpireNameMode(bool isEnable)
 {
 	g_isEmpireNameMode=isEnable;
@@ -66,7 +75,7 @@ const D3DXCOLOR& CInstanceBase::GetIndexedNameColor(UINT eNameColor)
 
 void CInstanceBase::AddDamageEffect(DWORD damage, BYTE flag, BOOL bSelf, BOOL bTarget)
 {
-	TraceError("AddDamageEffect: damage=%u flag=%u bSelf=%d bTarget=%d IsShowDamage=%d",
+	TRACE_DAMAGE_VERBOSE("AddDamageEffect: damage=%u flag=%u bSelf=%d bTarget=%d IsShowDamage=%d",
 		damage, flag, bSelf, bTarget, CPythonSystem::Instance().IsShowDamage());
 	if(CPythonSystem::Instance().IsShowDamage())
 	{
@@ -76,7 +85,7 @@ void CInstanceBase::AddDamageEffect(DWORD damage, BYTE flag, BOOL bSelf, BOOL bT
 		sDamage.damage = damage;
 		sDamage.flag = flag;
 		m_DamageQueue.push_back(sDamage);
-		TraceError("AddDamageEffect: Queued, queue size now=%d", m_DamageQueue.size());
+		TRACE_DAMAGE_VERBOSE("AddDamageEffect: Queued, queue size now=%d", m_DamageQueue.size());
 	}
 }
 
@@ -85,7 +94,7 @@ void CInstanceBase::ProcessDamage()
 	if(m_DamageQueue.empty())
 		return;
 
-	TraceError("ProcessDamage: Queue not empty, processing...");
+	TRACE_DAMAGE_VERBOSE("ProcessDamage: Queue not empty, processing...");
 
 	SEffectDamage sDamage = m_DamageQueue.front();
 
@@ -96,7 +105,7 @@ void CInstanceBase::ProcessDamage()
 	BOOL bSelf = sDamage.bSelf;
 	BOOL bTarget = sDamage.bTarget;
 
-	TraceError("ProcessDamage: damage=%u flag=%u bSelf=%d bTarget=%d", damage, flag, bSelf, bTarget);
+	TRACE_DAMAGE_VERBOSE("ProcessDamage: damage=%u flag=%u bSelf=%d bTarget=%d", damage, flag, bSelf, bTarget);
 
 	CCamera * pCamera = CCameraManager::Instance().GetCurrentCamera();
 	float cameraAngle = GetDegreeFromPosition2(pCamera->GetTarget().x,pCamera->GetTarget().y,pCamera->GetEye().x,pCamera->GetEye().y);
@@ -105,14 +114,14 @@ void CInstanceBase::ProcessDamage()
 
 	CEffectManager& rkEftMgr=CEffectManager::Instance();
 
-	D3DXVECTOR3 v3Pos = m_GraphicThingInstance.GetPosition();
+	DirectX::SimpleMath::Vector3 v3Pos = m_GraphicThingInstance.GetPosition();
 	v3Pos.z += float(m_GraphicThingInstance.GetHeight());
 
-	D3DXVECTOR3 v3Rot = D3DXVECTOR3(0.0f, 0.0f, cameraAngle);
+	DirectX::SimpleMath::Vector3 v3Rot = DirectX::SimpleMath::Vector3(0.0f, 0.0f, cameraAngle);
 
 	if ( (flag & DAMAGE_DODGE) || (flag & DAMAGE_BLOCK) )
 	{
-		TraceError("ProcessDamage: DODGE or BLOCK");
+		TRACE_DAMAGE_VERBOSE("ProcessDamage: DODGE or BLOCK");
 		if(bSelf)
 			rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[EFFECT_DAMAGE_MISS],v3Pos,v3Rot);
 		else
@@ -122,7 +131,7 @@ void CInstanceBase::ProcessDamage()
 	}
 	else if (flag & DAMAGE_CRITICAL)
 	{
-		TraceError("ProcessDamage: CRITICAL");
+		TRACE_DAMAGE_VERBOSE("ProcessDamage: CRITICAL");
 		//rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[EFFECT_DAMAGE_CRITICAL],v3Pos,v3Rot);
 		//return; 숫자도 표시.
 	}
@@ -140,7 +149,7 @@ void CInstanceBase::ProcessDamage()
 	{
 		if (bSelf)
 		{
-			TraceError("ProcessDamage: bSelf path - damage_");
+			TRACE_DAMAGE_VERBOSE("ProcessDamage: bSelf path - damage_");
 			strDamageType = "damage_";
 
 			if (m_bDamageEffectType == 0)
@@ -152,7 +161,7 @@ void CInstanceBase::ProcessDamage()
 		}
 		else if (!bTarget || ((IsAffect(AFFECT_INVISIBILITY) || IsAffect(AFFECT_EUNHYEONG)) && bTarget))
 		{
-			TraceError("ProcessDamage: non-target path (early return) bTarget=%d INVIS=%d EUNHYEONG=%d",
+			TRACE_DAMAGE_VERBOSE("ProcessDamage: non-target path (early return) bTarget=%d INVIS=%d EUNHYEONG=%d",
 				bTarget, IsAffect(AFFECT_INVISIBILITY), IsAffect(AFFECT_EUNHYEONG));
 			strDamageType = "nontarget_";
 			rdwCRCEft = EFFECT_DAMAGE_NOT_TARGET;
@@ -161,13 +170,13 @@ void CInstanceBase::ProcessDamage()
 		}
 		else
 		{
-			TraceError("ProcessDamage: target path - target_");
+			TRACE_DAMAGE_VERBOSE("ProcessDamage: target path - target_");
 			strDamageType = "target_";
 			rdwCRCEft = EFFECT_DAMAGE_TARGET;
 		}
 	}
 	
-	TraceError("ProcessDamage: Creating effect strDamageType=%s rdwCRCEft=%u effectCRC=%u",
+	TRACE_DAMAGE_VERBOSE("ProcessDamage: Creating effect strDamageType=%s rdwCRCEft=%u effectCRC=%u",
 		strDamageType.c_str(), rdwCRCEft, ms_adwCRCAffectEffect[rdwCRCEft]);
 
 	DWORD index = 0;
@@ -189,35 +198,37 @@ void CInstanceBase::ProcessDamage()
 		sprintf(numBuf, "%d.dds", num);
 		textures.push_back("d:/ymir work/effect/affect/damagevalue/"  +strDamageType + numBuf);
 
-		TraceError("ProcessDamage: texture path=%s", textures.back().c_str());
+		TRACE_DAMAGE_VERBOSE("ProcessDamage: texture path=%s", textures.back().c_str());
 
 		rkEftMgr.SetEffectTextures(ms_adwCRCAffectEffect[rdwCRCEft],textures);
 
-		D3DXMATRIX matrix, matTrans;
-		D3DXMatrixIdentity(&matrix);
+		DirectX::SimpleMath::Matrix matrix, matTrans;
+		matrix = DirectX::SimpleMath::Matrix::Identity;
 
 		matrix._41 = v3Pos.x;
 		matrix._42 = v3Pos.y;
 		matrix._43 = v3Pos.z;
 
-		D3DXMatrixTranslation(&matrix, v3Pos.x, v3Pos.y, v3Pos.z);
-		D3DXMatrixMultiply(&matrix, &pCamera->GetInverseViewMatrix(), &matrix);
-		D3DXMatrixTranslation(&matTrans, FONT_WIDTH * index, 0, 0);
+		matrix = DirectX::SimpleMath::Matrix::CreateTranslation(v3Pos.x, v3Pos.y, v3Pos.z);
+		matrix = pCamera->GetInverseViewMatrix() * matrix;
+		matTrans = DirectX::SimpleMath::Matrix::CreateTranslation(FONT_WIDTH * index, 0, 0);
 
 		matTrans._41 = -matTrans._41;
 		matrix = matTrans*matrix;
 
-		D3DXMatrixMultiply(&matrix, &pCamera->GetViewMatrix(), &matrix);
+		matrix = pCamera->GetViewMatrix() * matrix;
 
-		DWORD effectResult = rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[rdwCRCEft], D3DXVECTOR3(matrix._41, matrix._42, matrix._43)
+		DWORD effectResult = rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[rdwCRCEft], DirectX::SimpleMath::Vector3(matrix._41, matrix._42, matrix._43)
 			,v3Rot);
-		TraceError("ProcessDamage: CreateEffect returned %u", effectResult);	
+		TRACE_DAMAGE_VERBOSE("ProcessDamage: CreateEffect returned %u", effectResult);	
 		
 		textures.clear();
 
 		index++;
 	}	
 }
+
+#undef TRACE_DAMAGE_VERBOSE
 
 void CInstanceBase::AttachSpecialEffect(DWORD effect)
 {
@@ -236,7 +247,7 @@ void CInstanceBase::SkillUp()
 
 void CInstanceBase::CreateSpecialEffect(DWORD iEffectIndex)
 {
-	const D3DXMATRIX & c_rmatGlobal = m_GraphicThingInstance.GetTransform();
+	const DirectX::SimpleMath::Matrix & c_rmatGlobal = m_GraphicThingInstance.GetTransform();
 
 	DWORD dwEffectIndex = CEffectManager::Instance().GetEmptyIndex();
 	DWORD dwEffectCRC = ms_adwCRCAffectEffect[iEffectIndex];
@@ -295,10 +306,9 @@ void CInstanceBase::__EffectContainer_DetachEffect(DWORD dwEftKey)
 
 void CInstanceBase::__AttachEmpireEffect(DWORD eEmpire)
 {
-	if (!__IsExistMainInstance())
-		return;	
-	
 	CInstanceBase* pkInstMain=__GetMainInstancePtr();
+	if (!pkInstMain)
+		return;
 
 	if (IsWarp())
 		return;
@@ -991,19 +1001,19 @@ void CInstanceBase::SetEmoticon(UINT eEmoticon)
 	}
 	if (IsPossibleEmoticon())
 	{
-		D3DXVECTOR3 v3Pos = m_GraphicThingInstance.GetPosition();
+		DirectX::SimpleMath::Vector3 v3Pos = m_GraphicThingInstance.GetPosition();
 		v3Pos.z += float(m_GraphicThingInstance.GetHeight());
 
 		//CEffectManager& rkEftMgr=CEffectManager::Instance();
 		CCamera * pCamera = CCameraManager::Instance().GetCurrentCamera();
 		
-		D3DXVECTOR3 v3Dir = (pCamera->GetEye()-v3Pos)*9/10;	
+		DirectX::SimpleMath::Vector3 v3Dir = (pCamera->GetEye()-v3Pos)*9/10;	
 		v3Pos = pCamera->GetEye()-v3Dir;
 
-		v3Pos = D3DXVECTOR3(0,0,0);
+		v3Pos = DirectX::SimpleMath::Vector3(0,0,0);
 		v3Pos.z += float(m_GraphicThingInstance.GetHeight());
 
-		//rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[EFFECT_EMOTICON+eEmoticon],v3Pos,D3DXVECTOR3(0,0,0));
+		//rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[EFFECT_EMOTICON+eEmoticon],v3Pos,DirectX::SimpleMath::Vector3(0,0,0));
 		m_GraphicThingInstance.AttachEffectByID(0, NULL, ms_adwCRCAffectEffect[EFFECT_EMOTICON+eEmoticon],&v3Pos);
 		m_dwEmoticonTime = ELTimer_GetMSec();
 	}

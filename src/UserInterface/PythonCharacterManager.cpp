@@ -7,6 +7,51 @@
 #include "packet.h"
 
 #include "EterLib/Camera.h"
+#include "EterLib/GrpDeviceDX11.h"
+
+namespace {
+inline void ApplyCharacterRenderBaselineDX11()
+{
+	CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+	if (!pDX11Device || !pDX11Device->IsValid())
+	{
+		static bool s_bLoggedNoDevice = false;
+		if (!s_bLoggedNoDevice)
+		{
+			s_bLoggedNoDevice = true;
+			TraceError("DX11_CHARACTER_BASELINE_SKIP reason=no_dx11_device");
+		}
+		return;
+	}
+
+	ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+	if (!pContext)
+	{
+		static bool s_bLoggedNoContext = false;
+		if (!s_bLoggedNoContext)
+		{
+			s_bLoggedNoContext = true;
+			TraceError("DX11_CHARACTER_BASELINE_SKIP reason=no_dx11_context");
+		}
+		return;
+	}
+
+	pDX11Device->BindMainRenderTargets();
+
+	ID3D11ShaderResourceView* apNullSRV[2] = { nullptr, nullptr };
+	ID3D11SamplerState* apNullSampler[2] = { nullptr, nullptr };
+	const FLOAT afBlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
+
+	// Character pass in DX11 is shader-based; clear any inherited UI SRV/sampler state.
+	pContext->PSSetShaderResources(0, 2, apNullSRV);
+	pContext->VSSetShaderResources(0, 2, apNullSRV);
+	pContext->PSSetSamplers(0, 2, apNullSampler);
+	pContext->VSSetSamplers(0, 2, apNullSampler);
+	pContext->OMSetBlendState(nullptr, afBlendFactor, 0xFFFFFFFFu);
+	pContext->OMSetDepthStencilState(nullptr, 0u);
+	pContext->RSSetState(pDX11Device->GetBootstrapRasterizerState());
+}
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Frame Process
@@ -41,7 +86,7 @@ void CPythonCharacterManager::AdjustCollisionWithOtherObjects(CActorInstance* pI
 		if(pInst->TestPhysicsBlendingCollision(*rkActorEach) )
 		{
 			// NOTE : 일단 기존위치로 원복
-			// TODO : 향후 조금더 잘 처리한다면 physic movement거리를 steping해서 iteration처리해야 함.
+			// NOTE : 향후 조금더 잘 처리한다면 physic movement거리를 steping해서 iteration처리해야 함.
 			TPixelPosition curPos;
 			pInst->GetPixelPosition(&curPos);
 			pInst->SetBlendingPosition(curPos);
@@ -451,7 +496,7 @@ CInstanceBase * CPythonCharacterManager::OLD_GetPickedInstancePtr()
 	return m_pkInstPick;
 }
 
-D3DXVECTOR2 & CPythonCharacterManager::OLD_GetPickedInstPosReference()
+DirectX::SimpleMath::Vector2 & CPythonCharacterManager::OLD_GetPickedInstPosReference()
 {
 	return m_v2PickedInstProjPos;
 }
@@ -484,20 +529,20 @@ bool CPythonCharacterManager::IsDeadVID(DWORD dwVID)
 // to avoid overdrawing
 struct LessCharacterInstancePtrRenderOrder
 {
-	D3DXVECTOR3 v3CameraPosition;
+	DirectX::SimpleMath::Vector3 v3CameraPosition;
 	bool operator() (CInstanceBase* pkLeft, CInstanceBase* pkRight)
 	{
-		D3DXVECTOR3 v3Left, v3Right;
+		DirectX::SimpleMath::Vector3 v3Left, v3Right;
 		pkLeft->NEW_GetPixelPosition(&v3Left);
 		pkRight->NEW_GetPixelPosition(&v3Right);
 
 		v3Left.y *= -1;
 		v3Right.y *= -1;
 
-		D3DXVECTOR3 v3LeftDiff = v3Left - v3CameraPosition;
-		D3DXVECTOR3 v3RightDiff = v3Right - v3CameraPosition;
+		DirectX::SimpleMath::Vector3 v3LeftDiff = v3Left - v3CameraPosition;
+		DirectX::SimpleMath::Vector3 v3RightDiff = v3Right - v3CameraPosition;
 
-		return D3DXVec3Dot(&v3LeftDiff, &v3LeftDiff) < D3DXVec3Dot(&v3RightDiff, &v3RightDiff);
+			return v3LeftDiff.Dot(v3LeftDiff) < v3RightDiff.Dot(v3RightDiff);
 	}
 };
 
@@ -531,12 +576,12 @@ void CPythonCharacterManager::__RenderSortedAliveActorList()
 	if (!pCamera) [[unlikely]]
 		return;
 
-	const D3DXVECTOR3 v3CameraEye = pCamera->GetEye();
-	const D3DXVECTOR3 v3CameraDiff = v3CameraEye - m_v3LastSortCameraEye;
+	const DirectX::SimpleMath::Vector3 v3CameraEye = pCamera->GetEye();
+	const DirectX::SimpleMath::Vector3 v3CameraDiff = v3CameraEye - m_v3LastSortCameraEye;
 	const DWORD dwCurrentTargetVID = CPythonPlayer::Instance().GetTargetVID();
 	const bool bCameraMoved =
 		(!m_bHasLastSortCameraEye) ||
-		(D3DXVec3LengthSq(&v3CameraDiff) > (120.0f * 120.0f));
+			(v3CameraDiff.LengthSquared() > (120.0f * 120.0f));
 	const bool bTargetChanged = (m_dwLastSortTargetVID != dwCurrentTargetVID);
 	const bool bFrameRefresh = (m_dwSortRenderFrame - m_dwLastAliveSortFrame) >= 3;
 	const bool bSizeChanged = (m_kVctAliveSortCache.size() != m_kAliveInstMap.size());
@@ -570,11 +615,11 @@ void CPythonCharacterManager::__RenderSortedDeadActorList()
 		return;
 
 	const DWORD dwFrameInterval = (m_iAnimLODProfile >= 2) ? 2 : 1;
-	const D3DXVECTOR3 v3CameraEye = pCamera->GetEye();
-	const D3DXVECTOR3 v3CameraDiff = v3CameraEye - m_v3LastSortCameraEye;
+	const DirectX::SimpleMath::Vector3 v3CameraEye = pCamera->GetEye();
+	const DirectX::SimpleMath::Vector3 v3CameraDiff = v3CameraEye - m_v3LastSortCameraEye;
 	const bool bCameraMoved =
 		(!m_bHasLastSortCameraEye) ||
-		(D3DXVec3LengthSq(&v3CameraDiff) > (120.0f * 120.0f));
+			(v3CameraDiff.LengthSquared() > (120.0f * 120.0f));
 	const bool bFrameRefresh = (m_dwSortRenderFrame - m_dwLastDeadSortFrame) >= dwFrameInterval;
 	const bool bSizeChanged = (m_kVctDeadSortCache.size() != m_kDeadInstList.size());
 
@@ -602,18 +647,7 @@ void CPythonCharacterManager::__RenderSortedDeadActorList()
 void CPythonCharacterManager::Render()
 {
 	++m_dwSortRenderFrame;
-
-	STATEMANAGER.SetTexture(0, NULL);	
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG2,	D3DTA_CURRENT);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_MODULATE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAARG1,	D3DTA_TEXTURE);
-	STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_SELECTARG1);
-
-	STATEMANAGER.SetTexture(1, NULL);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_COLOROP,	D3DTOP_DISABLE);
-	STATEMANAGER.SetTextureStageState(1, D3DTSS_ALPHAOP,	D3DTOP_DISABLE);
-
+	ApplyCharacterRenderBaselineDX11();
 
 	__RenderSortedAliveActorList();
 	__RenderSortedDeadActorList();
@@ -621,8 +655,27 @@ void CPythonCharacterManager::Render()
 	CInstanceBase * pkPickedInst = OLD_GetPickedInstancePtr();
 	if (pkPickedInst)
 	{
-		const D3DXVECTOR3 & c_rv3Position = pkPickedInst->GetGraphicThingInstanceRef().GetPosition();
+		const DirectX::SimpleMath::Vector3 & c_rv3Position = pkPickedInst->GetGraphicThingInstanceRef().GetPosition();
 		CPythonGraphic::Instance().ProjectPosition(c_rv3Position.x, c_rv3Position.y, c_rv3Position.z, &m_v2PickedInstProjPos.x, &m_v2PickedInstProjPos.y);
+	}
+}
+
+void CPythonCharacterManager::CollectVisibleThingInstancesDX11(std::vector<CGraphicThingInstance*>& outInstances)
+{
+	outInstances.clear();
+	outInstances.reserve(m_kAliveInstMap.size());
+
+	for (TCharacterInstanceMap::iterator it = m_kAliveInstMap.begin(); it != m_kAliveInstMap.end(); ++it)
+	{
+		CInstanceBase* pInstance = it->second;
+		if (!pInstance || pInstance->IsDead())
+			continue;
+
+		CActorInstance* pActorInstance = pInstance->GetGraphicThingInstancePtr();
+		if (!pActorInstance || !pActorInstance->isShow())
+			continue;
+
+		outInstances.push_back(pActorInstance);
 	}
 }
 
@@ -893,7 +946,7 @@ struct CInstanceBase_SLessCameraDistance
 void CPythonCharacterManager::__SortPickedActorList()
 {
 	CCamera * pCamera = CCameraManager::Instance().GetCurrentCamera();
-	const D3DXVECTOR3& c_rv3EyePos=pCamera->GetEye();
+	const DirectX::SimpleMath::Vector3& c_rv3EyePos=pCamera->GetEye();
 
 	CInstanceBase_SLessCameraDistance kLess;
 	kLess.m_kPPosEye=TPixelPosition(+c_rv3EyePos.x, -c_rv3EyePos.y, +c_rv3EyePos.z);
@@ -1118,7 +1171,7 @@ void CPythonCharacterManager::__Initialize()
 	m_pkInstMain = NULL;
 	m_pkInstBind = NULL;
 	m_pkInstPick = NULL;
-	m_v2PickedInstProjPos = D3DXVECTOR2(0.0f, 0.0f);
+	m_v2PickedInstProjPos = DirectX::SimpleMath::Vector2(0.0f, 0.0f);
 	m_kVctAliveSortCache.clear();
 	m_kVctDeadSortCache.clear();
 	m_bAliveSortCacheDirty = true;
@@ -1128,7 +1181,7 @@ void CPythonCharacterManager::__Initialize()
 	m_dwLastDeadSortFrame = 0;
 	m_dwLastSortTargetVID = 0;
 	m_bHasLastSortCameraEye = false;
-	m_v3LastSortCameraEye = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+	m_v3LastSortCameraEye = DirectX::SimpleMath::Vector3(0.0f, 0.0f, 0.0f);
 	m_bAnimLODEnabled = true;
 	m_iAnimLODProfile = 1;
 	m_dwAnimLODFrameCounter = 0;

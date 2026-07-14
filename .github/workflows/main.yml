@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: cmake -S . -B build -DDX11_STRICT_ONLY=ON
 
-      - name: Build verified DX11 foundation
+      - name: Build verified DX11 client
         id: build_project
         shell: pwsh
         run: >-
@@ -55,6 +55,7 @@ jobs:
           PRTerrainLib
           SphereLib
           SpeedTreeLib
+          UserInterface
 
       - name: Collect outputs
         shell: pwsh
@@ -75,10 +76,12 @@ jobs:
             if (-not $artifact) { throw "Missing build artifact: $target.lib" }
             Copy-Item -LiteralPath $artifact.FullName -Destination _output
           }
+          $client = Get-Item -LiteralPath 'build/bin/Metin2_RelWithDebInfo.exe'
+          Copy-Item -LiteralPath $client.FullName -Destination _output
 
       - name: Upload
         uses: actions/upload-artifact@v6
         with:
-          name: dx11_foundation_win
+          name: dx11_client_win
           path: _output
           if-no-files-found: error

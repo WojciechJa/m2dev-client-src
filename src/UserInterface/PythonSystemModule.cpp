@@ -163,6 +163,36 @@ PyObject * systemGetRenderFPSLimit(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildValue("i", CPythonSystem::Instance().GetRenderFPSLimit());
 }
 
+PyObject * systemGetRenderAPI(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetRenderAPI());
+}
+
+PyObject * systemSetRenderAPI(PyObject * poSelf, PyObject * poArgs)
+{
+	int iRenderAPI;
+	if (!PyTuple_GetInteger(poArgs, 0, &iRenderAPI))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetRenderAPI(iRenderAPI);
+	return Py_BuildNone();
+}
+
+PyObject * systemGetShaderCacheVersion(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetShaderCacheVersion());
+}
+
+PyObject * systemSetShaderCacheVersion(PyObject * poSelf, PyObject * poArgs)
+{
+	int iVersion;
+	if (!PyTuple_GetInteger(poArgs, 0, &iVersion))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetShaderCacheVersion(iVersion);
+	return Py_BuildNone();
+}
+
 PyObject * systemSetRenderFPSLimit(PyObject * poSelf, PyObject * poArgs)
 {
 	int iFPSLimit;
@@ -179,6 +209,146 @@ PyObject * systemGetVSync(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildValue("i", CPythonSystem::Instance().IsVSyncEnabled() ? 1 : 0);
 }
 
+PyObject * systemGetDX11ExperimentalPresent(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11ExperimentalPresentEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11NativeWorldAutoGate(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11NativeWorldAutoGateEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11StrictNativeOnly(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11StrictNativeOnlyEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11DisableDX9CompatDevice(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11DisableDX9CompatDeviceEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11TerrainStabilizationMode(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11TerrainStabilizationModeEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11TexturePipelineMode(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().GetDX11TexturePipelineMode());
+}
+
+PyObject * systemGetDX11UIPassOnly(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11UIPassOnlyEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11UINativeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11UINativeTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11UITextureTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11UITextureTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldDepthTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldDepthTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldBatchTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldBatchTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldSpriteTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldSpriteTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldStateTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldStateTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldPassesTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldPassesTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldBridgeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldBridgeTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldSubsystemTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldSubsystemTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldRealtimeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldRealtimeTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldMetricsTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldMetricsTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldInstanceFeedTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldInstanceFeedTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldFinalcheckTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldFinalcheckTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldHandoffTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldHandoffTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldSwapchainTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldSwapchainTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldPresentPathTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldPresentPathTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldVisiblePass1Test(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldVisiblePass1TestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldComposerTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldComposerTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldScenegraphTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldScenegraphTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldPipelineTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldPipelineTestEnabled() ? 1 : 0);
+}
+
+PyObject * systemGetDX11WorldFramegraphTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonSystem::Instance().IsDX11WorldFramegraphTestEnabled() ? 1 : 0);
+}
+
 PyObject * systemSetVSync(PyObject * poSelf, PyObject * poArgs)
 {
 	int iEnabled;
@@ -192,6 +362,288 @@ PyObject * systemSetVSync(PyObject * poSelf, PyObject * poArgs)
 	if (!applied)
 		CPythonSystem::Instance().SetVSyncEnabled(oldState);
 	return Py_BuildValue("i", applied ? 1 : 0);
+}
+
+PyObject * systemSetDX11ExperimentalPresent(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	const bool isEnabled = iEnabled ? true : false;
+	CPythonSystem::Instance().SetDX11ExperimentalPresentEnabled(isEnabled);
+	CPythonApplication::Instance().SetDX11ExperimentalPresent(isEnabled);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11NativeWorldAutoGate(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11NativeWorldAutoGateEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11StrictNativeOnly(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11StrictNativeOnlyEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11DisableDX9CompatDevice(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11DisableDX9CompatDeviceEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11TerrainStabilizationMode(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11TerrainStabilizationModeEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11TexturePipelineMode(PyObject * poSelf, PyObject * poArgs)
+{
+	int iMode;
+	if (!PyTuple_GetInteger(poArgs, 0, &iMode))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11TexturePipelineMode(iMode);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11UIPassOnly(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11UIPassOnlyEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11UINativeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11UINativeTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11UITextureTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11UITextureTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldDepthTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldDepthTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldBatchTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldBatchTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldSpriteTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldSpriteTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldStateTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldStateTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldPassesTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldPassesTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldBridgeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldBridgeTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldSubsystemTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldSubsystemTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldRealtimeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldRealtimeTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldMetricsTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldMetricsTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldInstanceFeedTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldInstanceFeedTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldFinalcheckTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldFinalcheckTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldHandoffTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldHandoffTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldSwapchainTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldSwapchainTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldPresentPathTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldPresentPathTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldVisiblePass1Test(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldVisiblePass1TestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldComposerTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldComposerTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldScenegraphTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldScenegraphTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldPipelineTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldPipelineTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * systemSetDX11WorldFramegraphTest(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonSystem::Instance().SetDX11WorldFramegraphTestEnabled(iEnabled ? true : false);
+	return Py_BuildNone();
 }
 
 PyObject * systemGetPerfProfile(PyObject * poSelf, PyObject * poArgs)
@@ -673,8 +1125,38 @@ void initsystem()
 
 		{ "GetMusicVolume",				systemGetMusicVolume,			METH_VARARGS },
 		{ "GetSoundVolume",				systemGetSoundVolume,			METH_VARARGS },
+		{ "GetRenderAPI",				systemGetRenderAPI,				METH_VARARGS },
+		{ "GetShaderCacheVersion",		systemGetShaderCacheVersion,	METH_VARARGS },
 		{ "GetRenderFPSLimit",			systemGetRenderFPSLimit,		METH_VARARGS },
 		{ "GetVSync",					systemGetVSync,					METH_VARARGS },
+		{ "GetDX11ExperimentalPresent",	systemGetDX11ExperimentalPresent, METH_VARARGS },
+		{ "GetDX11NativeWorldAutoGate",	systemGetDX11NativeWorldAutoGate, METH_VARARGS },
+		{ "GetDX11StrictNativeOnly",	systemGetDX11StrictNativeOnly, METH_VARARGS },
+		{ "GetDX11DisableDX9CompatDevice",	systemGetDX11DisableDX9CompatDevice, METH_VARARGS },
+		{ "GetDX11TerrainStabilizationMode",	systemGetDX11TerrainStabilizationMode, METH_VARARGS },
+		{ "GetDX11TexturePipelineMode",	systemGetDX11TexturePipelineMode, METH_VARARGS },
+		{ "GetDX11UIPassOnly",			systemGetDX11UIPassOnly,		METH_VARARGS },
+		{ "GetDX11UINativeTest",		systemGetDX11UINativeTest,		METH_VARARGS },
+		{ "GetDX11UITextureTest",		systemGetDX11UITextureTest,		METH_VARARGS },
+		{ "GetDX11WorldDepthTest",		systemGetDX11WorldDepthTest,	METH_VARARGS },
+		{ "GetDX11WorldBatchTest",		systemGetDX11WorldBatchTest,	METH_VARARGS },
+		{ "GetDX11WorldSpriteTest",		systemGetDX11WorldSpriteTest,	METH_VARARGS },
+		{ "GetDX11WorldStateTest",		systemGetDX11WorldStateTest,	METH_VARARGS },
+		{ "GetDX11WorldPassesTest",		systemGetDX11WorldPassesTest,	METH_VARARGS },
+		{ "GetDX11WorldBridgeTest",		systemGetDX11WorldBridgeTest,	METH_VARARGS },
+		{ "GetDX11WorldSubsystemTest",	systemGetDX11WorldSubsystemTest,	METH_VARARGS },
+		{ "GetDX11WorldRealtimeTest",	systemGetDX11WorldRealtimeTest,	METH_VARARGS },
+		{ "GetDX11WorldMetricsTest",	systemGetDX11WorldMetricsTest,	METH_VARARGS },
+		{ "GetDX11WorldInstanceFeedTest",	systemGetDX11WorldInstanceFeedTest,	METH_VARARGS },
+		{ "GetDX11WorldFinalcheckTest",	systemGetDX11WorldFinalcheckTest,	METH_VARARGS },
+		{ "GetDX11WorldHandoffTest",	systemGetDX11WorldHandoffTest,	METH_VARARGS },
+		{ "GetDX11WorldSwapchainTest",	systemGetDX11WorldSwapchainTest,	METH_VARARGS },
+		{ "GetDX11WorldPresentPathTest",	systemGetDX11WorldPresentPathTest,	METH_VARARGS },
+		{ "GetDX11WorldVisiblePass1Test",	systemGetDX11WorldVisiblePass1Test,	METH_VARARGS },
+		{ "GetDX11WorldComposerTest",	systemGetDX11WorldComposerTest,	METH_VARARGS },
+		{ "GetDX11WorldScenegraphTest",	systemGetDX11WorldScenegraphTest,	METH_VARARGS },
+		{ "GetDX11WorldPipelineTest",	systemGetDX11WorldPipelineTest,	METH_VARARGS },
+		{ "GetDX11WorldFramegraphTest",	systemGetDX11WorldFramegraphTest,	METH_VARARGS },
 		{ "GetPerfProfile",				systemGetPerfProfile,			METH_VARARGS },
 		{ "GetFXAdaptive",				systemGetFXAdaptive,			METH_VARARGS },
 		{ "GetAnimLOD",					systemGetAnimLOD,				METH_VARARGS },
@@ -687,8 +1169,38 @@ void initsystem()
 
 		{ "SetMusicVolume",				systemSetMusicVolume,			METH_VARARGS },
 		{ "SetSoundVolume",				systemSetSoundVolume,			METH_VARARGS },
+		{ "SetRenderAPI",				systemSetRenderAPI,				METH_VARARGS },
+		{ "SetShaderCacheVersion",		systemSetShaderCacheVersion,	METH_VARARGS },
 		{ "SetRenderFPSLimit",			systemSetRenderFPSLimit,		METH_VARARGS },
 		{ "SetVSync",					systemSetVSync,					METH_VARARGS },
+		{ "SetDX11ExperimentalPresent",	systemSetDX11ExperimentalPresent, METH_VARARGS },
+		{ "SetDX11NativeWorldAutoGate",	systemSetDX11NativeWorldAutoGate, METH_VARARGS },
+		{ "SetDX11StrictNativeOnly",	systemSetDX11StrictNativeOnly, METH_VARARGS },
+		{ "SetDX11DisableDX9CompatDevice",	systemSetDX11DisableDX9CompatDevice, METH_VARARGS },
+		{ "SetDX11TerrainStabilizationMode",	systemSetDX11TerrainStabilizationMode, METH_VARARGS },
+		{ "SetDX11TexturePipelineMode",	systemSetDX11TexturePipelineMode, METH_VARARGS },
+		{ "SetDX11UIPassOnly",			systemSetDX11UIPassOnly,		METH_VARARGS },
+		{ "SetDX11UINativeTest",		systemSetDX11UINativeTest,		METH_VARARGS },
+		{ "SetDX11UITextureTest",		systemSetDX11UITextureTest,		METH_VARARGS },
+		{ "SetDX11WorldDepthTest",		systemSetDX11WorldDepthTest,	METH_VARARGS },
+		{ "SetDX11WorldBatchTest",		systemSetDX11WorldBatchTest,	METH_VARARGS },
+		{ "SetDX11WorldSpriteTest",		systemSetDX11WorldSpriteTest,	METH_VARARGS },
+		{ "SetDX11WorldStateTest",		systemSetDX11WorldStateTest,	METH_VARARGS },
+		{ "SetDX11WorldPassesTest",		systemSetDX11WorldPassesTest,	METH_VARARGS },
+		{ "SetDX11WorldBridgeTest",		systemSetDX11WorldBridgeTest,	METH_VARARGS },
+		{ "SetDX11WorldSubsystemTest",	systemSetDX11WorldSubsystemTest,	METH_VARARGS },
+		{ "SetDX11WorldRealtimeTest",	systemSetDX11WorldRealtimeTest,	METH_VARARGS },
+		{ "SetDX11WorldMetricsTest",	systemSetDX11WorldMetricsTest,	METH_VARARGS },
+		{ "SetDX11WorldInstanceFeedTest",	systemSetDX11WorldInstanceFeedTest,	METH_VARARGS },
+		{ "SetDX11WorldFinalcheckTest",	systemSetDX11WorldFinalcheckTest,	METH_VARARGS },
+		{ "SetDX11WorldHandoffTest",	systemSetDX11WorldHandoffTest,	METH_VARARGS },
+		{ "SetDX11WorldSwapchainTest",	systemSetDX11WorldSwapchainTest,	METH_VARARGS },
+		{ "SetDX11WorldPresentPathTest",	systemSetDX11WorldPresentPathTest,	METH_VARARGS },
+		{ "SetDX11WorldVisiblePass1Test",	systemSetDX11WorldVisiblePass1Test,	METH_VARARGS },
+		{ "SetDX11WorldComposerTest",	systemSetDX11WorldComposerTest,	METH_VARARGS },
+		{ "SetDX11WorldScenegraphTest",	systemSetDX11WorldScenegraphTest,	METH_VARARGS },
+		{ "SetDX11WorldPipelineTest",	systemSetDX11WorldPipelineTest,	METH_VARARGS },
+		{ "SetDX11WorldFramegraphTest",	systemSetDX11WorldFramegraphTest,	METH_VARARGS },
 		{ "SetPerfProfile",				systemSetPerfProfile,			METH_VARARGS },
 		{ "SetFXAdaptive",				systemSetFXAdaptive,			METH_VARARGS },
 		{ "SetAnimLOD",					systemSetAnimLOD,				METH_VARARGS },

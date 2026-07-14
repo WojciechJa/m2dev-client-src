@@ -85,8 +85,8 @@ void CPythonApplication::__UpdateCamera()
 		pMainCamera->MoveVertical(m_kCmrPos.m_fUpDir);
 
 	// Sound Setting
-	const D3DXVECTOR3 & c_rv3CameraDirection = pMainCamera->GetView();
-	const D3DXVECTOR3 & c_rv3CameraUp = pMainCamera->GetUp();
+	const DirectX::SimpleMath::Vector3 & c_rv3CameraDirection = pMainCamera->GetView();
+	const DirectX::SimpleMath::Vector3 & c_rv3CameraUp = pMainCamera->GetUp();
 	m_SoundEngine.SetListenerPosition(m_v3CenterPosition.x, m_v3CenterPosition.y, m_v3CenterPosition.z);	// Listener - 캐릭터 위치
 	m_SoundEngine.SetListenerOrientation(c_rv3CameraDirection.x, c_rv3CameraDirection.y, c_rv3CameraDirection.z, c_rv3CameraUp.x, c_rv3CameraUp.y, c_rv3CameraUp.z);
 	m_SoundEngine.Update();
@@ -126,7 +126,7 @@ void CPythonApplication::SetCamera(float Distance, float Pitch, float Rotation, 
 	if (!pCurrentCamera)
 		return;
 
-	D3DXVECTOR3 v3Target = pCurrentCamera->GetTarget();
+	DirectX::SimpleMath::Vector3 v3Target = pCurrentCamera->GetTarget();
 	m_pyGraphic.SetPositionCamera(v3Target.x, v3Target.y, v3Target.z, Distance, Pitch, Rotation);
 
 	CCamera * pMainCamera = CCameraManager::Instance().GetCurrentCamera();
@@ -389,7 +389,7 @@ bool CPythonApplication::LoadCameraSetting(const char * c_szFileName)
 
 	TextFileLoader.SetTop();
 
-	D3DXVECTOR3 v3CenterPosition;
+	DirectX::SimpleMath::Vector3 v3CenterPosition;
 	CTokenVector * pCameraSetting;
 	CTokenVector * pCmrPos;
 	if (TextFileLoader.GetTokenVector3("centerpos", &v3CenterPosition))

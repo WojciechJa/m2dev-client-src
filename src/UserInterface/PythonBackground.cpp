@@ -183,16 +183,42 @@ void CPythonBackground::SelectViewDistanceNum(int eNum)
         return;
     }
 
+    TraceError("M3_SELECT_VIEW_DIST num=%d bApplied=%d lastIndex=%d",
+        eNum, m_bPresetApplied, m_iLastPresetIndex);
+
     m_eViewDistanceNum = eNum;
     TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+    TraceError("M3_SELECT_VIEW_DIST_BEFORE fog_near=%.1f fog_far=%.1f sky_scale=%.1f",
+        env->m_fFogNearDistance, env->m_fFogFarDistance, env->v3SkyBoxScale.x);
 
     const bool bDX11Active = (CGraphicDeviceDX11::GetActiveDevice() != nullptr);
     if (env->bReserve || bDX11Active)
     {
-        env->m_fFogNearDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogStart;
-        env->m_fFogFarDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogEnd;
+        // M3-SKY-PRESET-PERSIST-74: Don't overwrite fog distances if preset is active
+        // Preset values are managed by ApplyEnvironmentPreset, not ViewDistanceSet
+        if (!m_bPresetApplied)
+        {
+            env->m_fFogNearDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogStart;
+            env->m_fFogFarDistance = m_ViewDistanceSet[m_eViewDistanceNum].m_fFogEnd;
+        }
+
         env->v3SkyBoxScale = m_ViewDistanceSet[m_eViewDistanceNum].m_v3SkyBoxScale;
         rkMap.ApplyEnvironmentDistanceOnly();
+
+        TraceError("M3_SELECT_VIEW_DIST_AFTER fog_near=%.1f fog_far=%.1f sky_scale=%.1f preset_active=%d from_ViewDistSet_start=%.1f end=%.1f",
+            env->m_fFogNearDistance, env->m_fFogFarDistance, env->v3SkyBoxScale.x,
+            m_bPresetApplied ? 1 : 0,
+            m_ViewDistanceSet[m_eViewDistanceNum].m_fFogStart,
+            m_ViewDistanceSet[m_eViewDistanceNum].m_fFogEnd);
+    }
+
+    // M3-ENV-DEFAULT-DAY: Apply Day preset once on first initialization
+    static bool s_bDefaultPresetApplied = false;
+    if (!s_bDefaultPresetApplied)
+    {
+        s_bDefaultPresetApplied = true;
+        ApplyEnvironmentPreset(0); // 0 = Day preset
     }
 }
 
@@ -204,7 +230,8 @@ void CPythonBackground::SetViewDistanceSet(int eNum, float fFarClip)
     const float fClampedFarClip = fMAX(kDX11ViewDistanceMinFarClip, fMIN(kDX11ViewDistanceFarClipFixed, fFarClip));
     const float fFogStart = fClampedFarClip * DX11RuntimeConfig::kViewDistanceFogStartRatio;
     const float fFogEnd = fClampedFarClip * DX11RuntimeConfig::kViewDistanceFogEndRatio;
-    const float fSkyBoxScale = fClampedFarClip * DX11RuntimeConfig::kViewDistanceSkyScaleRatio;
+    // M3-SKY-SCALE-DEFAULT: Use default sky scale from config.h instead of calculating from far clip
+    const float fSkyBoxScale = DX11RuntimeConfig::kEnvironmentSkyScaleDefault;
 
     const float fPrevFarClip = m_ViewDistanceSet[eNum].m_fFarClip;
     const float fPrevFogStart = m_ViewDistanceSet[eNum].m_fFogStart;
@@ -300,6 +327,9 @@ CPythonBackground::CPythonBackground()
 	m_iWeatherMonth = 1;
 	m_fRainIntensity = 0.0f;
 	m_iXMasTreeGrade = 0;
+	// M3-SKY-PRESET-PERSIST-74: Initialize preset tracking
+	m_bPresetApplied = false;
+	m_iLastPresetIndex = -1;
 	m_bVisibleGuildArea = FALSE;
 	m_bSoftwareTilingReserved = false;
 
@@ -369,9 +399,9 @@ BOOL CPythonBackground::GetLightDirection(DirectX::SimpleMath::Vector3 & rv3Ligh
 void CPythonBackground::Destroy()
 {
 	CMapManager::Destroy();
+	m_StormEnvironment.Destroy();
 	m_SnowEnvironment.Destroy();
 	m_RainEnvironment.Destroy();
-	m_StormEnvironment.Destroy();
 	m_bVisibleGuildArea = FALSE;
 	m_kDX11WorldSubmitTelemetry = SDX11WorldSubmitTelemetry();
 }
@@ -1612,6 +1642,548 @@ void CPythonBackground::DeleteSpecialEffect(DWORD dwID)
 {
 	CMapOutdoor& rkMap=GetMapOutdoorRef();
 	rkMap.SpecialEffect_Delete(dwID);
+}
+
+// M3-ENV-ADMIN-PANEL-74: Environment parameter controls for Admin Panel TAB7
+// These methods allow real-time environment tweaking from Python UI
+
+void CPythonBackground::SetSkyScale(float fScale)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->v3SkyBoxScale = D3DXVECTOR3(fScale, fScale, fScale);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentSkyBox();
+	}
+}
+
+void CPythonBackground::SetCloudScale(float fX, float fY)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->v2CloudScale = D3DXVECTOR2(fX, fY);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentSkyBox();
+	}
+}
+
+void CPythonBackground::SetCloudHeight(float fHeight)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->fCloudHeight = fHeight;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentSkyBox();
+	}
+}
+
+void CPythonBackground::SetCloudTextureScale(float fX, float fY)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->v2CloudTextureScale = D3DXVECTOR2(fX, fY);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentSkyBox();
+	}
+}
+
+void CPythonBackground::SetCloudSpeed(float fX, float fY)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->v2CloudSpeed = D3DXVECTOR2(fX, fY);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentSkyBox();
+	}
+}
+
+void CPythonBackground::SetFogEnable(bool bEnable)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bFogEnable = bEnable;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.ApplyEnvironmentDistanceOnly();
+	}
+}
+
+void CPythonBackground::SetFogDensity(bool bDensity)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bDensityFog = bDensity;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.ApplyEnvironmentDistanceOnly();
+	}
+}
+
+void CPythonBackground::SetFogNear(float fDistance)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->m_fFogNearDistance = fDistance;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.ApplyEnvironmentDistanceOnly();
+	}
+}
+
+void CPythonBackground::SetFogFar(float fDistance)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->m_fFogFarDistance = fDistance;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.ApplyEnvironmentDistanceOnly();
+	}
+}
+
+void CPythonBackground::SetFogLevel(BYTE byLevel)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bFogLevel = byLevel;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.ApplyEnvironmentDistanceOnly();
+	}
+}
+
+void CPythonBackground::SetFogColor(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->FogColor = D3DXCOLOR(r, g, b, a);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.ApplyEnvironmentDistanceOnly();
+	}
+}
+
+void CPythonBackground::SetLensFlareEnable(bool bEnable)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bLensFlareEnable = bEnable;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentLensFlare();
+	}
+}
+
+void CPythonBackground::SetMainFlareEnable(bool bEnable)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bMainFlareEnable = bEnable;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentLensFlare();
+	}
+}
+
+void CPythonBackground::SetSunSize(float fSize)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->fMainFlareSize = fSize;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentLensFlare();
+	}
+}
+
+void CPythonBackground::SetSunBrightness(float fBrightness)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->fLensFlareMaxBrightness = fBrightness;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentLensFlare();
+	}
+}
+
+void CPythonBackground::SetSunColor(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->LensFlareBrightnessColor = D3DXCOLOR(r, g, b, a);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentLensFlare();
+	}
+}
+
+void CPythonBackground::SetBGDirectionalLightEnable(bool bEnable)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bDirLightsEnable[ENV_DIRLIGHT_BACKGROUND] = bEnable;
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::SetCharDirectionalLightEnable(bool bEnable)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bDirLightsEnable[ENV_DIRLIGHT_CHARACTER] = bEnable;
+	SetCharacterDirLight();
+}
+
+void CPythonBackground::SetBGLightDirection(float x, float y, float z)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+	D3DXVECTOR3 v3Dir(x, y, z);
+	D3DXVec3Normalize(&v3Dir, &v3Dir);
+
+	env->DirLights[ENV_DIRLIGHT_BACKGROUND].Direction = v3Dir;
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::SetBGLightAmbient(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->DirLights[ENV_DIRLIGHT_BACKGROUND].Ambient = D3DXCOLOR(r, g, b, a);
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::SetBGLightDiffuse(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->DirLights[ENV_DIRLIGHT_BACKGROUND].Diffuse = D3DXCOLOR(r, g, b, a);
+	SetBackgroundDirLight();
+}
+
+void CPythonBackground::SetCharLightDirection(float x, float y, float z)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+	D3DXVECTOR3 v3Dir(x, y, z);
+	D3DXVec3Normalize(&v3Dir, &v3Dir);
+
+	env->DirLights[ENV_DIRLIGHT_CHARACTER].Direction = v3Dir;
+	SetCharacterDirLight();
+}
+
+void CPythonBackground::SetCharLightAmbient(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->DirLights[ENV_DIRLIGHT_CHARACTER].Ambient = D3DXCOLOR(r, g, b, a);
+	SetCharacterDirLight();
+}
+
+void CPythonBackground::SetCharLightDiffuse(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->DirLights[ENV_DIRLIGHT_CHARACTER].Diffuse = D3DXCOLOR(r, g, b, a);
+	SetCharacterDirLight();
+}
+
+void CPythonBackground::SetScreenFilterEnable(bool bEnable)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->bFilteringEnable = bEnable;
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentScreenFilter();
+	}
+}
+
+void CPythonBackground::SetScreenFilterColor(float r, float g, float b, float a)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->FilteringColor = D3DXCOLOR(r, g, b, a);
+
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentScreenFilter();
+	}
+}
+
+void CPythonBackground::SetWindStrength(float fStrength)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->fWindStrength = fStrength;
+}
+
+void CPythonBackground::SetWindRandomness(float fRandomness)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+	env->fWindRandom = fRandomness;
+}
+
+void CPythonBackground::ApplyEnvironmentPreset(int iPresetIndex)
+{
+	if (!mc_pcurEnvironmentData)
+		return;
+
+	// M3-SKY-PRESET-PERSIST-74: Guard against recursion from SelectViewDistanceNum
+	static bool s_bInApplyPreset = false;
+	if (s_bInApplyPreset)
+		return;
+	s_bInApplyPreset = true;
+
+	TraceError("M3_PRESET_APPLY START preset=%d bApplied=%d lastIndex=%d",
+		iPresetIndex, m_bPresetApplied, m_iLastPresetIndex);
+
+	TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+
+	// M3-SKY-SCALE-PERSIST: Save current sky scale before applying preset
+	// This prevents overwriting user's manual sky scale adjustments
+	D3DXVECTOR3 v3SavedSkyScale = env->v3SkyBoxScale;
+	TraceError("M3_PRESET_BEFORE fog_near=%.1f fog_far=%.1f sky_scale=%.1f fog_enable=%d density_fog=%d",
+		env->m_fFogNearDistance, env->m_fFogFarDistance, env->v3SkyBoxScale.x,
+		env->bFogEnable ? 1 : 0, env->bDensityFog ? 1 : 0);
+
+	// Apply preset based on index (0=Day, 1=Night, 2=Sunset, 3=Overcast)
+	switch (iPresetIndex)
+	{
+	case 0: // Day
+		env->m_fFogNearDistance = 5000.0f;   // From config.h: kEnvironmentFogNearDistanceDay
+		env->m_fFogFarDistance = 15000.0f;   // From config.h: kEnvironmentFogFarDistanceDay
+		env->bFogLevel = 2;
+		env->FogColor = D3DXCOLOR(0.7f, 0.8f, 0.9f, 1.0f);
+		env->bFogEnable = TRUE;   // M3-SKY-PRESET-PERSIST-74: Enable fog (ImGui default)
+		env->bDensityFog = FALSE; // M3-SKY-PRESET-PERSIST-74: Use distance fog, not density fog
+		env->bLensFlareEnable = TRUE;
+		env->fMainFlareSize = 0.4f;
+		env->fLensFlareMaxBrightness = 1.0f;   // From config.h: kEnvironmentLensFlareBrightnessSun
+		env->LensFlareBrightnessColor = D3DXCOLOR(1.0f, 0.95f, 0.9f, 1.0f);
+		break;
+
+	case 1: // Night
+		env->m_fFogNearDistance = 3000.0f;   // From config.h: kEnvironmentFogNearDistanceNight
+		env->m_fFogFarDistance = 12000.0f;   // From config.h: kEnvironmentFogFarDistanceNight
+		env->bFogLevel = 7;
+		env->FogColor = D3DXCOLOR(0.1f, 0.1f, 0.15f, 1.0f);
+		env->bFogEnable = TRUE;   // M3-SKY-PRESET-PERSIST-74: Enable fog (ImGui default)
+		env->bDensityFog = FALSE; // M3-SKY-PRESET-PERSIST-74: Use distance fog, not density fog
+		env->bLensFlareEnable = FALSE;
+		env->fMainFlareSize = 0.3f;
+		env->fLensFlareMaxBrightness = 0.4f;   // From config.h: kEnvironmentLensFlareBrightnessMoon
+		env->LensFlareBrightnessColor = D3DXCOLOR(0.8f, 0.8f, 1.0f, 1.0f);
+		break;
+
+	case 2: // Sunset
+		env->m_fFogNearDistance = 3000.0f;
+		env->m_fFogFarDistance = 20000.0f;
+		env->bFogLevel = 5;
+		env->FogColor = D3DXCOLOR(1.0f, 0.7f, 0.5f, 1.0f);
+		env->bFogEnable = TRUE;   // M3-SKY-PRESET-PERSIST-74: Enable fog (ImGui default)
+		env->bDensityFog = FALSE; // M3-SKY-PRESET-PERSIST-74: Use distance fog, not density fog
+		env->bLensFlareEnable = TRUE;
+		env->fMainFlareSize = 0.6f;
+		env->fLensFlareMaxBrightness = 1.2f;
+		env->LensFlareBrightnessColor = D3DXCOLOR(1.0f, 0.6f, 0.3f, 1.0f);
+		break;
+
+	case 3: // Overcast
+		env->m_fFogNearDistance = 2000.0f;
+		env->m_fFogFarDistance = 12000.0f;
+		env->bFogLevel = 8;
+		env->FogColor = D3DXCOLOR(0.5f, 0.5f, 0.55f, 1.0f);
+		env->bFogEnable = TRUE;   // M3-SKY-PRESET-PERSIST-74: Enable fog (ImGui default)
+		env->bDensityFog = FALSE; // M3-SKY-PRESET-PRESET-PERSIST-74: Use distance fog, not density fog
+		env->bLensFlareEnable = FALSE;
+		env->fMainFlareSize = 0.2f;
+		env->fLensFlareMaxBrightness = 0.4f;
+		env->LensFlareBrightnessColor = D3DXCOLOR(0.7f, 0.7f, 0.75f, 1.0f);
+		break;
+
+	default:
+		return;
+	}
+
+	// M3-SKY-SCALE-PERSIST: Restore saved sky scale (don't overwrite user's manual setting)
+	env->v3SkyBoxScale = v3SavedSkyScale;
+
+	// M3-SKY-PRESET-PERSIST-74: Store preset for re-application when environment data changes
+	m_bPresetApplied = true;
+	m_iLastPresetIndex = iPresetIndex;
+
+	// M3-SKY-PRESET-PERSIST-74: Update ViewDistanceSet to match preset values
+	// This prevents SelectViewDistanceNum from overwriting preset fog distances
+	m_ViewDistanceSet[m_eViewDistanceNum].m_fFogStart = env->m_fFogNearDistance;
+	m_ViewDistanceSet[m_eViewDistanceNum].m_fFogEnd = env->m_fFogFarDistance;
+
+	TraceError("M3_PRESET_AFTER fog_near=%.1f fog_far=%.1f sky_scale=%.1f fog_enable=%d density_fog=%d",
+		env->m_fFogNearDistance, env->m_fFogFarDistance, env->v3SkyBoxScale.x,
+		env->bFogEnable ? 1 : 0, env->bDensityFog ? 1 : 0);
+
+	// Call ChangeToDay/ChangeToNight like ImGui does
+	if (iPresetIndex == 1)
+		ChangeToNight();
+	else
+		ChangeToDay();
+
+	// Apply changes to the rendering system
+	if (IsMapOutdoor())
+	{
+		CMapOutdoor& rkMap = GetMapOutdoorRef();
+		rkMap.SetEnvironmentSkyBox();
+		rkMap.SetEnvironmentLensFlare();
+		rkMap.ApplyEnvironmentDistanceOnly();
+		rkMap.SetEnvironmentScreenFilter();
+
+		// M3-SKY-PRESET-PERSIST-74: Update DX11 bridge with new fog distances
+		rkMap.UpdateDX11EnvironmentBridgeState(
+			m_bSnowEnvironmentEnabled,
+			m_iDayMode,
+			m_iWeatherMonth,
+			m_fRainIntensity);
+
+		TraceError("M3_PRESET_APPLY_DONE preset=%d bridge_updated=1", iPresetIndex);
+	}
+
+	// Also forward to ImGui if available
+	#ifdef ENABLE_IMGUI_ENVIRONMENT_CONTROLS
+	if (ImGuiEnvCtrl() && IsImGuiEnvCtrlEnabled())
+	{
+		ImGuiEnvCtrl()->ApplyPreset(iPresetIndex);
+	}
+	#endif
+
+	// M3-SKY-PRESET-PERSIST-74: Reset recursion guard
+	s_bInApplyPreset = false;
+}
+
+// M3-SKY-PRESET-PERSIST-74: Override to re-apply preset after environment data reset
+void CPythonBackground::ResetEnvironmentDataPtr(const TEnvironmentData * c_pEnvironmentData)
+{
+	TraceError("M3_RESET_ENV_PTR bApplied=%d lastIndex=%d", m_bPresetApplied, m_iLastPresetIndex);
+
+	// Call base class to load new environment data
+	CMapManager::ResetEnvironmentDataPtr(c_pEnvironmentData);
+
+	if (mc_pcurEnvironmentData)
+	{
+		TEnvironmentData* env = ((TEnvironmentData*)mc_pcurEnvironmentData);
+		TraceError("M3_RESET_ENV_AFTER_LOAD fog_near=%.1f fog_far=%.1f sky_scale=%.1f",
+			env->m_fFogNearDistance, env->m_fFogFarDistance, env->v3SkyBoxScale.x);
+	}
+
+	// Re-apply preset if one was previously applied
+	if (m_bPresetApplied && m_iLastPresetIndex >= 0)
+	{
+		TraceError("M3_RESET_ENV_REAPPLY preset=%d", m_iLastPresetIndex);
+		ApplyEnvironmentPreset(m_iLastPresetIndex);
+	}
+	else
+	{
+		TraceError("M3_RESET_ENV_NO_REAPPLY bApplied=%d lastIndex=%d",
+			m_bPresetApplied, m_iLastPresetIndex);
+	}
 }
 
 

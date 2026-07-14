@@ -278,6 +278,21 @@ void CPythonPlayer::NEW_SetMouseMiddleButtonState(int eMBState)
 	NEW_SetMouseCameraState(eMBState);
 }
 
+void CPythonPlayer::DX11_ForceReleaseMouseHoldState()
+{
+	m_isSmtMov = false;
+	m_isDirMov = false;
+	m_isAtkKey = false;
+
+	CInstanceBase* pkInstMain = NEW_GetMainActorPtr();
+	if (pkInstMain)
+		pkInstMain->NEW_Stop();
+
+	CCamera* pkCmrCur = CCameraManager::Instance().GetCurrentCamera();
+	if (pkCmrCur)
+		pkCmrCur->EndDrag();
+}
+
 
 
 void CPythonPlayer::NEW_RefreshMouseWalkingDirection()

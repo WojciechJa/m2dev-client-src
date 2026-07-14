@@ -151,6 +151,355 @@ PyObject * backgroundGetSunDirection(PyObject * poSelf, PyObject * poArgs)
 	return Py_BuildValue("(fff)", x, y, z);
 }
 
+// M3-ENV-ADMIN-PANEL-74: Environment parameter controls for Admin Panel TAB7
+// Python wrapper functions for environment tweaking
+
+PyObject * backgroundSetSkyScale(PyObject * poSelf, PyObject * poArgs)
+{
+	float fScale;
+	if (!PyTuple_GetFloat(poArgs, 0, &fScale))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetSkyScale(fScale);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCloudScale(PyObject * poSelf, PyObject * poArgs)
+{
+	float fX, fY;
+	if (!PyTuple_GetFloat(poArgs, 0, &fX))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &fY))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCloudScale(fX, fY);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCloudHeight(PyObject * poSelf, PyObject * poArgs)
+{
+	float fHeight;
+	if (!PyTuple_GetFloat(poArgs, 0, &fHeight))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCloudHeight(fHeight);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCloudTextureScale(PyObject * poSelf, PyObject * poArgs)
+{
+	float fX, fY;
+	if (!PyTuple_GetFloat(poArgs, 0, &fX))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &fY))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCloudTextureScale(fX, fY);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCloudSpeed(PyObject * poSelf, PyObject * poArgs)
+{
+	float fX, fY;
+	if (!PyTuple_GetFloat(poArgs, 0, &fX))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &fY))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCloudSpeed(fX, fY);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetFogEnable(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnable))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetFogEnable(iEnable != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetFogDensity(PyObject * poSelf, PyObject * poArgs)
+{
+	int iDensity;
+	if (!PyTuple_GetInteger(poArgs, 0, &iDensity))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetFogDensity(iDensity != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetFogNear(PyObject * poSelf, PyObject * poArgs)
+{
+	float fDistance;
+	if (!PyTuple_GetFloat(poArgs, 0, &fDistance))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetFogNear(fDistance);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetFogFar(PyObject * poSelf, PyObject * poArgs)
+{
+	float fDistance;
+	if (!PyTuple_GetFloat(poArgs, 0, &fDistance))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetFogFar(fDistance);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetFogLevel(PyObject * poSelf, PyObject * poArgs)
+{
+	int iLevel;
+	if (!PyTuple_GetInteger(poArgs, 0, &iLevel))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetFogLevel((BYTE)iLevel);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetFogColor(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetFogColor(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetLensFlareEnable(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnable))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetLensFlareEnable(iEnable != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetMainFlareEnable(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnable))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetMainFlareEnable(iEnable != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetSunSize(PyObject * poSelf, PyObject * poArgs)
+{
+	float fSize;
+	if (!PyTuple_GetFloat(poArgs, 0, &fSize))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetSunSize(fSize);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetSunBrightness(PyObject * poSelf, PyObject * poArgs)
+{
+	float fBrightness;
+	if (!PyTuple_GetFloat(poArgs, 0, &fBrightness))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetSunBrightness(fBrightness);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetSunColor(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetSunColor(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetBGDirectionalLightEnable(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnable))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetBGDirectionalLightEnable(iEnable != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCharDirectionalLightEnable(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnable))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCharDirectionalLightEnable(iEnable != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetBGLightDirection(PyObject * poSelf, PyObject * poArgs)
+{
+	float x, y, z;
+	if (!PyTuple_GetFloat(poArgs, 0, &x))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &y))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &z))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetBGLightDirection(x, y, z);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetBGLightAmbient(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetBGLightAmbient(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetBGLightDiffuse(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetBGLightDiffuse(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCharLightDirection(PyObject * poSelf, PyObject * poArgs)
+{
+	float x, y, z;
+	if (!PyTuple_GetFloat(poArgs, 0, &x))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &y))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &z))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCharLightDirection(x, y, z);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCharLightAmbient(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCharLightAmbient(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetCharLightDiffuse(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetCharLightDiffuse(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetScreenFilterEnable(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnable;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnable))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetScreenFilterEnable(iEnable != 0);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetScreenFilterColor(PyObject * poSelf, PyObject * poArgs)
+{
+	float r, g, b, a;
+	if (!PyTuple_GetFloat(poArgs, 0, &r))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 1, &g))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 2, &b))
+		return Py_BadArgument();
+	if (!PyTuple_GetFloat(poArgs, 3, &a))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetScreenFilterColor(r, g, b, a);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetWindStrength(PyObject * poSelf, PyObject * poArgs)
+{
+	float fStrength;
+	if (!PyTuple_GetFloat(poArgs, 0, &fStrength))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetWindStrength(fStrength);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundSetWindRandomness(PyObject * poSelf, PyObject * poArgs)
+{
+	float fRandomness;
+	if (!PyTuple_GetFloat(poArgs, 0, &fRandomness))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().SetWindRandomness(fRandomness);
+	return Py_BuildNone();
+}
+
+PyObject * backgroundApplyEnvironmentPreset(PyObject * poSelf, PyObject * poArgs)
+{
+	int iPresetIndex;
+	if (!PyTuple_GetInteger(poArgs, 0, &iPresetIndex))
+		return Py_BadArgument();
+
+	CPythonBackground::Instance().ApplyEnvironmentPreset(iPresetIndex);
+	return Py_BuildNone();
+}
+
 PyObject * backgroundLoadMap(PyObject * poSelf, PyObject * poArgs)
 {
 	char * pszMapPathName;
@@ -685,6 +1034,37 @@ void initBackground()
 		{ "SetSunAzimuth",						backgroundSetSunAzimuth,					METH_VARARGS },
 		{ "SetSunElevation",					backgroundSetSunElevation,					METH_VARARGS },
 		{ "GetSunDirection",					backgroundGetSunDirection,					METH_VARARGS },
+
+		// M3-ENV-ADMIN-PANEL-74: Environment parameter controls for Admin Panel TAB7
+		{ "SetSkyScale",						backgroundSetSkyScale,						METH_VARARGS },
+		{ "SetCloudScale",						backgroundSetCloudScale,					METH_VARARGS },
+		{ "SetCloudHeight",						backgroundSetCloudHeight,					METH_VARARGS },
+		{ "SetCloudTextureScale",				backgroundSetCloudTextureScale,				METH_VARARGS },
+		{ "SetCloudSpeed",						backgroundSetCloudSpeed,					METH_VARARGS },
+		{ "SetFogEnable",						backgroundSetFogEnable,						METH_VARARGS },
+		{ "SetFogDensity",						backgroundSetFogDensity,					METH_VARARGS },
+		{ "SetFogNear",							backgroundSetFogNear,						METH_VARARGS },
+		{ "SetFogFar",							backgroundSetFogFar,						METH_VARARGS },
+		{ "SetFogLevel",						backgroundSetFogLevel,						METH_VARARGS },
+		{ "SetFogColor",						backgroundSetFogColor,						METH_VARARGS },
+		{ "SetLensFlareEnable",					backgroundSetLensFlareEnable,				METH_VARARGS },
+		{ "SetMainFlareEnable",					backgroundSetMainFlareEnable,				METH_VARARGS },
+		{ "SetSunSize",							backgroundSetSunSize,						METH_VARARGS },
+		{ "SetSunBrightness",					backgroundSetSunBrightness,					METH_VARARGS },
+		{ "SetSunColor",						backgroundSetSunColor,						METH_VARARGS },
+		{ "SetBGDirectionalLightEnable",			backgroundSetBGDirectionalLightEnable,		METH_VARARGS },
+		{ "SetCharDirectionalLightEnable",		backgroundSetCharDirectionalLightEnable,	METH_VARARGS },
+		{ "SetBGLightDirection",				backgroundSetBGLightDirection,				METH_VARARGS },
+		{ "SetBGLightAmbient",					backgroundSetBGLightAmbient,					METH_VARARGS },
+		{ "SetBGLightDiffuse",					backgroundSetBGLightDiffuse,					METH_VARARGS },
+		{ "SetCharLightDirection",				backgroundSetCharLightDirection,				METH_VARARGS },
+		{ "SetCharLightAmbient",				backgroundSetCharLightAmbient,				METH_VARARGS },
+		{ "SetCharLightDiffuse",				backgroundSetCharLightDiffuse,				METH_VARARGS },
+		{ "SetScreenFilterEnable",				backgroundSetScreenFilterEnable,				METH_VARARGS },
+		{ "SetScreenFilterColor",				backgroundSetScreenFilterColor,				METH_VARARGS },
+		{ "SetWindStrength",					backgroundSetWindStrength,					METH_VARARGS },
+		{ "SetWindRandomness",					backgroundSetWindRandomness,					METH_VARARGS },
+		{ "ApplyEnvironmentPreset",				backgroundApplyEnvironmentPreset,			METH_VARARGS },
 
 		{ "GetRenderedGraphicThingInstanceNum",	backgroundGetRenderedGTINum,				METH_VARARGS },
 		{ "SelectViewDistanceNum",				backgroundSelectViewDistanceNum,			METH_VARARGS },

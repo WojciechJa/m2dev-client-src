@@ -578,8 +578,10 @@ void CParticleSystemInstance::OnRender()
 			{
 				pGrpDevice->IncrementFrameDrawCalls(dwDX11DrawCount, uDX11PrimitiveCount);
 
+#ifdef BUILD_DEBUG_UI
 				extern void ReportImGuiEffectsDrawCalls(UINT32 draws, UINT64 prims);
 				ReportImGuiEffectsDrawCalls(dwDX11DrawCount, static_cast<UINT64>(uDX11PrimitiveCount));
+#endif
 
 				rMgr.AddDX11SubmittedEffectCount(dwDX11DrawCount);
 				rMgr.AddDX11SubmittedParticleCount(dwDX11DrawCount);  // W4.2: telemetry split

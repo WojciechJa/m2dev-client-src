@@ -912,8 +912,10 @@ void CSpeedTreeForestDirectX::AddDX11SubmittedInstanceCount(DWORD dwCount, UINT6
 		m_dwLastDX11SubmittedInstanceCount += dwCount;
 
 	// Report to ImGui metrics system (Map/Tree draw calls)
+#ifdef BUILD_DEBUG_UI
 	extern void ReportImGuiMapTreeDrawCalls(UINT32 draws, UINT64 prims);
 	ReportImGuiMapTreeDrawCalls(dwCount, ullPrimitiveCount);
+#endif
 }
 
 bool CSpeedTreeForestDirectX::IsDX11SpeedTreeResourcesReady() const

@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "PythonCharacterManager.h"
 #include "PythonNonPlayer.h"
+#include "EterPythonLib/PythonGraphic.h"
 
 PyObject * chrRaceToJob(PyObject * poSelf, PyObject * poArgs)
 {
@@ -40,6 +41,8 @@ PyObject * chrDeform(PyObject * poSelf, PyObject * poArgs)
 
 PyObject * chrRender(PyObject * poSelf, PyObject * poArgs)
 {
+	// DX11 strict guard: world actor draw should always start from game render state.
+	CPythonGraphic::Instance().SetGameRenderState();
 	CPythonCharacterManager::Instance().Render();
 	return Py_BuildNone();
 }
@@ -499,7 +502,7 @@ PyObject * chrAttachEffectByID(PyObject* poSelf, PyObject* poArgs)
 	}
 	//	return Py_BuildException();
 	
-	// FIXME : bug or error on getting unsigned value
+	// NOTE: Python binding reads this as signed int for compatibility with legacy script payloads.
 	int iEffectID;
 	if (!PyTuple_GetInteger(poArgs, 2, &iEffectID))
 		return Py_BuildException();
@@ -908,7 +911,7 @@ PyObject * chrGetBoundBoxOnlyXY(PyObject* poSelf, PyObject* poArgs)
 	if (!pkInst)
 		return Py_BuildValue("ffff", 0.0f, 0.0f, 0.0f, 0.0f);
 
-	D3DXVECTOR3 v3Min, v3Max;
+	DirectX::SimpleMath::Vector3 v3Min, v3Max;
 	pkInst->GetBoundBox(&v3Min, &v3Max);
 
 	return Py_BuildValue("ffff", v3Min.x, v3Min.y, v3Max.x, v3Max.y);

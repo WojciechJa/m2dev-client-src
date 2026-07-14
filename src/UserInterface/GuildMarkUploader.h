@@ -18,13 +18,13 @@ class CGuildMarkUploader : public CNetworkStream, public CSingleton<CGuildMarkUp
 		};
 
 	public:
-		CGuildMarkUploader() {}
-		virtual ~CGuildMarkUploader() {}
+		CGuildMarkUploader() = default;
+		virtual ~CGuildMarkUploader() = default;
 
-		void Disconnect() {}
+		void Disconnect() { CNetworkStream::Disconnect(); }
 		bool Connect(const CNetworkAddress& c_rkNetAddr, DWORD dwHandle, DWORD dwRandomKey, DWORD dwGuildID, const char* c_szFileName, UINT* peError) {return false;}
 		bool ConnectToSendSymbol(const CNetworkAddress& c_rkNetAddr, DWORD dwHandle, DWORD dwRandomKey, DWORD dwGuildID, const char* c_szFileName, UINT* peError) {return false;}
-		void Process() {}
+		void Process() { CNetworkStream::Process(); }
 };
 
 #else

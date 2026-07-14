@@ -490,8 +490,10 @@ void CEffectMeshInstance::OnRenderDX11()
 	if (!bDepthOnlyPass && dwDrawCount > 0u)
 	{
 		pGrpDevice->IncrementFrameDrawCalls(dwDrawCount, static_cast<UINT>(ullPrimitiveCount));
+#ifdef BUILD_DEBUG_UI
 		extern void ReportImGuiEffectsDrawCalls(UINT32 draws, UINT64 prims);
 		ReportImGuiEffectsDrawCalls(dwDrawCount, ullPrimitiveCount);
+#endif
 		rMgr.AddDX11SubmittedEffectCount(dwDrawCount);
 		rMgr.AddDX11SubmittedMeshEffectCount(dwDrawCount);
 		if (bTargetRing)

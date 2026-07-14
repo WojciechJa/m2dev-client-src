@@ -4,6 +4,7 @@
 #include "eterLib/Input.h"
 #include "eterLib/Profiler.h"
 #include "eterLib/GrpDevice.h"
+#include "eterLib/GrpDeviceDX11.h"
 #include "eterLib/NetDevice.h"
 #include "eterLib/GrpLightManager.h"
 #include "eterLib/GameThreadPool.h"
@@ -41,8 +42,23 @@
 #include "ServerStateChecker.h"
 #include "AbstractApplication.h"
 #include "MovieMan.h"
+#include <cstdint>
 
-#include <qedit.h>
+// DX11 Model Sync: ImGui Developer Monitoring Tool (DX11_STRICT_ONLY)
+#ifdef BUILD_DEBUG_UI
+#include "DebugUI/ImGuiManager.h"
+#include "DebugUI/ImGuiMetricsCollector.h"
+#include "DebugUI/ImGuiGraphicsMetrics.h"
+#include "DebugUI/ImGuiGraphPlotter.h"
+#endif
+
+struct IGraphBuilder;
+struct IBaseFilter;
+struct ISampleGrabber;
+struct IMediaControl;
+struct IMediaEventEx;
+struct IVideoWindow;
+struct IBasicVideo;
 
 class CPythonApplication : public CMSApplication, public CInputKeyboard, public IAbstractApplication
 {
@@ -58,6 +74,21 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		{
 			CURSOR_MODE_HARDWARE,
 			CURSOR_MODE_SOFTWARE,
+		};
+
+		enum ERenderBackend
+		{
+			RENDER_BACKEND_DX9 = 0,
+			RENDER_BACKEND_DX11 = 1,
+		};
+
+		enum ERenderBackendFallbackReason
+		{
+			RENDER_BACKEND_FALLBACK_NONE = 0,
+			RENDER_BACKEND_FALLBACK_DX11_PORT_NOT_ENABLED = 1,
+			RENDER_BACKEND_FALLBACK_OS_UNSUPPORTED = 2,
+			RENDER_BACKEND_FALLBACK_DX11_PROBE_FAILED = 3,
+			RENDER_BACKEND_FALLBACK_DX11_BOOTSTRAP_CREATE_FAILED = 4,
 		};
 
 		enum ECursorShape
@@ -161,6 +192,12 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		bool Create(PyObject* poSelf, const char* c_szName, int width, int height, int Windowed);
 		bool CreateDevice(int width, int height, int Windowed, int bit = 32, int frequency = 0);
 
+#ifdef BUILD_DEBUG_UI
+		// DX11 Model Sync: ImGui Developer Monitoring Tool initialization
+		bool InitializeImGui();
+		void ShutdownImGui();
+#endif
+
 		void UpdateGame();
 		void RenderGame();
 
@@ -209,6 +246,45 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		int GetFPSLimit() const { return m_iFPS; }
 		bool SetVSync(bool isEnabled);
 		int GetVSync() const { return m_isVSyncEnabled ? 1 : 0; }
+		const char* GetRenderBackend() const;
+		const char* GetRequestedRenderBackend() const;
+		int IsRenderBackendFallback() const { return m_isRenderBackendFallback ? 1 : 0; }
+		int GetRenderBackendFallbackReasonCode() const { return m_iRenderBackendFallbackReason; }
+		const char* GetRenderBackendFallbackReason() const;
+		int GetDX11ProbeResult() const { return m_isDX11ProbeSuccessful ? 1 : 0; }
+		int GetDX11ProbeFeatureLevel() const { return m_iDX11ProbeFeatureLevel; }
+		int IsDX11BootstrapActive() const { return m_grpDeviceDX11.IsValid() ? 1 : 0; }
+		int GetDX11FirstPassActive();
+		int GetDX11VisibleBootstrap();
+		int GetDX11UIPassOnly();
+		int GetDX11UINativeTest();
+		int GetDX11UITextureTest();
+		int GetDX11WorldDepthTest();
+		int GetDX11WorldBatchTest();
+		int GetDX11WorldSpriteTest();
+		int GetDX11WorldStateTest();
+		int GetDX11WorldPassesTest();
+		int GetDX11WorldBridgeTest();
+		int GetDX11WorldSubsystemTest();
+		int GetDX11WorldRealtimeTest();
+		int GetDX11WorldMetricsTest();
+		int GetDX11WorldInstanceFeedTest();
+		int GetDX11WorldFinalcheckTest();
+		int GetDX11WorldHandoffTest();
+		int GetDX11WorldSwapchainTest();
+		int GetDX11WorldPresentPathTest();
+		int GetDX11WorldComposerTest();
+		int GetDX11WorldScenegraphTest();
+		int GetDX11WorldPipelineTest();
+		int GetDX11WorldFramegraphTest();
+		const char* GetDX11RuntimeStage();
+		const char* GetDX11FullRenderPhase();
+		DWORD GetDX11FullRenderBlockMask();
+		const char* GetDX11FullRenderBlockSummary();
+		int GetDX11FullRenderRemainingMajorStages();
+		const char* GetDX11RuntimeCompatGraceReason() const;
+		void SetDX11ExperimentalPresent(bool isEnabled);
+		int GetDX11ExperimentalPresent() const { return m_bDX11ExperimentalPresent ? 1 : 0; }
 		void ApplyPerformanceConfig(int iProfile, bool bFXAdaptive, bool bAnimLOD, bool bTextTailOpt, int iShadowCadence, int iFXStrideBias = 1, bool bShadowDynamicBoost = true, bool bTextTailGridOpt = true);
 		int GetPerfProfile() const { return m_iPerfProfile; }
 		int GetFXAdaptive() const { return m_bFXAdaptive ? 1 : 0; }
@@ -331,6 +407,7 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		void __SleepFrame(DWORD dwNow, DWORD dwNextUpdateTime);
 		void __ApplyPerformanceSettings();
 		void __UpdatePerfAutoAdjustment();
+		bool __ResizeRenderBackend(UINT uWidth, UINT uHeight);
 
 
 	protected:
@@ -375,13 +452,78 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		CAccountConnector			m_kAccountConnector;
 
 		CGraphicDevice				m_grpDevice;
+		CGraphicDeviceDX11			m_grpDeviceDX11;
 		CNetworkDevice				m_netDevice;
 
 		CPythonSystem				m_pySystem;
 
+		ERenderBackend				m_eRenderBackend;
+		int							m_iRequestedRenderAPI;
+		bool						m_isRenderBackendFallback;
+		int							m_iRenderBackendFallbackReason;
+		bool						m_isDX11ProbeSuccessful;
+		int							m_iDX11ProbeFeatureLevel;
+		bool						m_bDX11ExperimentalPresent;
+		DWORD						m_dwDX11ExperimentalPresentFailCount;
+		bool						m_bDX11RuntimeCompatMode;
+		bool						m_bDX11WorldNativePass1Mode;
+		bool						m_bDX11WorldNativePass2Mode;
+		bool						m_bDX11WorldNativePass3Mode;
+		bool						m_bDX11WorldNativePass4Mode;
+		bool						m_bDX11WorldNativePass5Mode;
+		bool						m_bDX11WorldNativePass6Mode;
+		bool						m_bDX11WorldNativePass7Mode;
+		bool						m_bDX11WorldNativePass8Mode;
+		bool						m_bDX11WorldNativePass9Mode;
+		bool						m_bDX11WorldNativePass10Mode;
+		bool						m_bDX11WorldNativePass11Mode;
+		bool						m_bDX11WorldNativePass12Mode;
+		bool						m_bDX11WorldNativePass13Mode;
+		bool						m_bDX11WorldNativePass14Mode;
+		bool						m_bDX11WorldNativePass15Mode;
+		bool						m_bDX11WorldNativePass16Mode;
+		bool						m_bDX11WorldHandoffProbeMode;
+		DWORD						m_dwDX11RuntimeCompatFrameCount;
+		DWORD						m_dwDX11RuntimeCompatStartMS;
+		DWORD						m_dwDX11RuntimeCompatElapsedMS;
+		DWORD						m_dwDX11RuntimeCompatGraceUntilMS;
+		bool						m_bDX11RuntimeCompatGraceMode;
+		int							m_iDX11RuntimeCompatGraceReasonMask;
+		DWORD						m_dwDX11RuntimeCompatGraceUsedCount;
+		DWORD						m_dwDX11RuntimeCompatGraceExpiredCount;
+		DWORD						m_dwDX11RuntimeCompatGraceCoalescedCount;
+		DWORD						m_dwDX11RuntimeCompatGraceSuppressedCount;
+		DWORD						m_dwDX11RuntimeCompatGracePendingSinceMS;
+		int							m_iDX11RuntimeCompatGracePendingReasonMask;
+		DWORD						m_dwDX11RuntimeCompatLastGraceEnterMS;
+		DWORD						m_dwDX11RuntimeCompatLastGraceLeaveMS;
+		DWORD						m_dwDX11HandoffStableGoodFrames;
+		bool						m_bDX11HandoffStableLatched;
+		DWORD						m_dwDX11StableStressFrames;
+		bool						m_bDX11VisiblePass1AutoDisabled;
+		DWORD						m_dwDX11VisiblePass1FailCount;
+		DWORD						m_dwDX11VisiblePass1SuccessCount;
+		DWORD						m_dwDX11VisiblePass1LastAttemptFrame;
+		DWORD						m_dwDX11VisiblePass1LastIntervalFrames;
+		DWORD						m_dwDX11WorldSubmitMaskMismatchCount;
+		bool						m_bDX11WorldSubmitMaskMismatchActive;
+		DWORD						m_dwDX11WorldSubmitMaskMismatchLastLogMS;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchTelemetryObserved;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchTelemetrySubmitted;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchTelemetryApplicable;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchTelemetryCommitted;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchGateObserved;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchGateSubmitted;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchGateApplicable;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchGateCommitted;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchLastReasonMask;
+		uint32_t					m_uDX11WorldSubmitMaskMismatchLastPhaseActive;
+		DWORD						m_dwDX11WorldSubmitMaskMismatchLastFrame;
+		DWORD						m_dwDX11WorldSubmitMaskMismatchLastElapsedMS;
+
 
 		PyObject *					m_poMouseHandler;
-		D3DXVECTOR3					m_v3CenterPosition;
+		DirectX::SimpleMath::Vector3					m_v3CenterPosition;
 
 		unsigned int				m_iFPS;
 		float						m_fRenderFrameIntervalMS;
@@ -424,6 +566,11 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		DWORD						m_dwStartLocalTime;
 		time_t						m_tServerTime;
 		time_t						m_tLocalStartTime;
+
+#ifdef DX11_STRICT_ONLY
+		// DX11 Model Sync: Simple entity counter cache
+		UINT						m_uEntityCount;
+#endif
 		float						m_fGlobalTime;
 		float						m_fGlobalElapsedTime;
 
@@ -485,7 +632,7 @@ class CPythonApplication : public CMSApplication, public CInputKeyboard, public 
 		bool						m_isActivateWnd;
 		BOOL						m_isWindowFullScreenEnable;
 		bool						m_bHasLastShadowCameraEye;
-		D3DXVECTOR3					m_v3LastShadowCameraEye;
+		DirectX::SimpleMath::Vector3					m_v3LastShadowCameraEye;
 
 		DWORD						m_dwStickyKeysFlag;
 		int							m_iForceSightRange;

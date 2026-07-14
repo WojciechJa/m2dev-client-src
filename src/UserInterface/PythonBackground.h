@@ -184,6 +184,40 @@ public:
 	void SetSunElevation(float fElevationDegrees);
 	void GetSunDirection(float& x, float& y, float& z) const;
 
+	// Environment parameter controls (for Admin Panel TAB7)
+	void SetSkyScale(float fScale);
+	void SetCloudScale(float fX, float fY);
+	void SetCloudHeight(float fHeight);
+	void SetCloudTextureScale(float fX, float fY);
+	void SetCloudSpeed(float fX, float fY);
+	void SetFogEnable(bool bEnable);
+	void SetFogDensity(bool bDensity);
+	void SetFogNear(float fDistance);
+	void SetFogFar(float fDistance);
+	void SetFogLevel(BYTE byLevel);
+	void SetFogColor(float r, float g, float b, float a);
+	void SetLensFlareEnable(bool bEnable);
+	void SetMainFlareEnable(bool bEnable);
+	void SetSunSize(float fSize);
+	void SetSunBrightness(float fBrightness);
+	void SetSunColor(float r, float g, float b, float a);
+	void SetBGDirectionalLightEnable(bool bEnable);
+	void SetCharDirectionalLightEnable(bool bEnable);
+	void SetBGLightDirection(float x, float y, float z);
+	void SetBGLightAmbient(float r, float g, float b, float a);
+	void SetBGLightDiffuse(float r, float g, float b, float a);
+	void SetCharLightDirection(float x, float y, float z);
+	void SetCharLightAmbient(float r, float g, float b, float a);
+	void SetCharLightDiffuse(float r, float g, float b, float a);
+	void SetScreenFilterEnable(bool bEnable);
+	void SetScreenFilterColor(float r, float g, float b, float a);
+	void SetWindStrength(float fStrength);
+	void SetWindRandomness(float fRandomness);
+	void ApplyEnvironmentPreset(int iPresetIndex);
+
+	// M3-SKY-PRESET-PERSIST-74: Override to re-apply preset after environment data reset
+	void ResetEnvironmentDataPtr(const TEnvironmentData * c_pEnvironmentData);
+
 	void ClearGuildArea();
 	void RegisterGuildArea(int isx, int isy, int iex, int iey);
 
@@ -223,6 +257,10 @@ private:
 	int m_iWeatherMonth;
 	float m_fRainIntensity;
 	int m_iXMasTreeGrade;
+
+	// M3-SKY-PRESET-PERSIST-74: Track last applied preset for re-application
+	bool m_bPresetApplied;
+	int m_iLastPresetIndex;
 
 	int m_eShadowLevel;
 	int m_eViewDistanceNum;

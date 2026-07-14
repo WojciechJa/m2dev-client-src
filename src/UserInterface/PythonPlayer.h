@@ -203,6 +203,7 @@ class CPythonPlayer : public CSingleton<CPythonPlayer>, public IAbstractPlayer
 		bool	NEW_SetMouseFunc(int eMBType, int eMBFunc);
 		int		NEW_GetMouseFunc(int eMBT);
 		void	NEW_SetMouseMiddleButtonState(int eMBState);
+		void	DX11_ForceReleaseMouseHoldState();
 
 		void	NEW_SetAutoCameraRotationSpeed(float fRotSpd);
 		void	NEW_ResetCameraRotation();
@@ -579,7 +580,7 @@ class CPythonPlayer : public CSingleton<CPythonPlayer>, public IAbstractPlayer
 		DWORD					m_dwWeaponMaxMagicPower;
 		DWORD					m_dwWeaponAddPower;
 
-		// Todo
+		// Current target sync state used by outgoing target updates.
 		DWORD					m_dwSendingTargetVID;
 		float					m_fTargetUpdateTime;
 

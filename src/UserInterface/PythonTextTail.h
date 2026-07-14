@@ -20,8 +20,8 @@ class CPythonTextTail : public CSingleton<CPythonTextTail>
 			CGraphicTextInstance*			pLevelTextInstance;
 
 
-			// Todo : 이건 전부 VID로 바꾸도록 한다.
-			//        도중 캐릭터가 없어질 경우 튕길 가능성이 있음
+			// NOTE: Owner pointer is still used by legacy ownership flow.
+			//       Runtime validates pointer liveness before projection/render.
 			CGraphicObjectInstance *		pOwner;
 
 			DWORD							dwVirtualID;
@@ -38,8 +38,8 @@ class CPythonTextTail : public CSingleton<CPythonTextTail>
 
 			float							fHeight;
 
-			STextTail() {}
-			virtual ~STextTail() {}
+			STextTail() = default;
+			virtual ~STextTail() = default;
 		} TTextTail;
 
 		typedef std::map<DWORD, TTextTail*>		TTextTailMap;

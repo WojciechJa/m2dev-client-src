@@ -3899,19 +3899,37 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 	if (bDX11NativeVisibleActive && bDX11NativeWorldMinimalRequested)
 	{
 		// Promote world native render as soon as warmup is stable and runtime is safe.
-		// Shadow/bridge readiness must not block core world rendering in DX11.
+		// In strict DX11 there is no DX9 bridge image to show while dry-run converges,
+		// so draw the real native world immediately and let present gates keep validating.
+		const bool bDX11StrictNativeWorldBootstrapVisible = bDX11StrictNativeOnlyEnabled;
 		const bool bDX11WorldNativeEligible =
-			s_bDX11WorldDryRunReadyLatched;
+			s_bDX11WorldDryRunReadyLatched ||
+			bDX11StrictNativeWorldBootstrapVisible;
 
-		if (!s_bDX11WorldDryRunReadyLatched)
-		{
-			bDX11NativeWorldMinimalDryRunActive = true;
-		}
-		else if (bDX11WorldNativeEligible)
+		if (bDX11WorldNativeEligible)
 		{
 			bDX11NativeWorldMinimalActive = true;
 			bDX11NativeWorldMinimalDryRunActive = false;
-			__ResolveDX11NativeBlockerSubsystem("world_native_visible", "world_native_active");
+			__ResolveDX11NativeBlockerSubsystem(
+				"world_native_visible",
+				s_bDX11WorldDryRunReadyLatched ? "world_native_active" : "strict_bootstrap_visible");
+
+			if (bDX11StrictNativeWorldBootstrapVisible && !s_bDX11WorldDryRunReadyLatched)
+			{
+				static bool s_bDX11StrictWorldBootstrapVisibleLogged = false;
+				if (!s_bDX11StrictWorldBootstrapVisibleLogged)
+				{
+					s_bDX11StrictWorldBootstrapVisibleLogged = true;
+					TraceError(
+						"DX11_WORLD_NATIVE_BOOTSTRAP visible=1 reason=strict_native_no_bridge frame=%u elapsed_ms=%u",
+						m_dwDX11RuntimeCompatFrameCount,
+						m_dwDX11RuntimeCompatElapsedMS);
+				}
+			}
+		}
+		else if (!s_bDX11WorldDryRunReadyLatched)
+		{
+			bDX11NativeWorldMinimalDryRunActive = true;
 		}
 		else
 		{
@@ -5425,12 +5443,13 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 					}
 				}
 
-				const bool bDX11HideWorldUntilNativePresent =
+				const bool bDX11WorldWarmupVisiblePending =
 					bDX11WorldSceneReadyForPresent &&
 					bDX11StrictNativeOnlyEnabled &&
 					bDX11NativeVisibleActive &&
 					!bDX11NativeWorldForceVisibleActive &&
-					!bDX11NativeWorldAutoPresentActive;
+					!bDX11NativeWorldAutoPresentActive &&
+					!bDX11NativeWorldCommittedReady;
 
 				if (bDX11WorldSceneReadyForPresent)
 				{
@@ -5438,21 +5457,29 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 					// Re-render UI right before native present so HUD is not covered by world draw.
 					__SetDX11RenderCheckpoint("dx11_ui_overlay_post_world");
 					m_grpDeviceDX11.BindMainRenderTargets();
-					if (bDX11HideWorldUntilNativePresent)
+					if (bDX11WorldWarmupVisiblePending)
 					{
-						// Hide incremental world warmup from the user: render world for readiness/counters,
-						// but present only UI on black until native-present gate is fully active.
-						__SetDX11RenderCheckpoint("dx11_world_visibility_hold");
-						if (!m_grpDeviceDX11.BeginFrame(0.0f, 0.0f, 0.0f, 1.0f))
-							__LogDX11NativeBlocker("world_visibility_hold", "begin_failed");
-
-						static DWORD s_dwDX11WorldVisibilityHoldLogTick = 0;
-						if (0 == s_dwDX11WorldVisibilityHoldLogTick ||
-							dwVisibleNow - s_dwDX11WorldVisibilityHoldLogTick >= 3000u)
+						__SetDX11RenderCheckpoint("dx11_world_warmup_visible");
+						static DWORD s_dwDX11WorldWarmupVisibleLogTick = 0;
+						if (0 == s_dwDX11WorldWarmupVisibleLogTick ||
+							dwVisibleNow - s_dwDX11WorldWarmupVisibleLogTick >= 3000u)
 						{
-							s_dwDX11WorldVisibilityHoldLogTick = dwVisibleNow;
+							s_dwDX11WorldWarmupVisibleLogTick = dwVisibleNow;
 							TraceError(
-								"DX11_WORLD_VISIBILITY_HOLD active=1 reason=warmup_pending frame=%u elapsed_ms=%u",
+								"DX11_WORLD_VISIBILITY_HOLD active=0 reason=warmup_visible_no_clear frame=%u elapsed_ms=%u",
+								m_dwDX11RuntimeCompatFrameCount,
+								m_dwDX11RuntimeCompatElapsedMS);
+						}
+					}
+					else if (bDX11StrictNativeOnlyEnabled && !bDX11NativeWorldAutoPresentActive && bDX11NativeWorldCommittedReady)
+					{
+						static DWORD s_dwDX11WorldVisibilityHoldReleasedLogTick = 0;
+						if (0 == s_dwDX11WorldVisibilityHoldReleasedLogTick ||
+							dwVisibleNow - s_dwDX11WorldVisibilityHoldReleasedLogTick >= 3000u)
+						{
+							s_dwDX11WorldVisibilityHoldReleasedLogTick = dwVisibleNow;
+							TraceError(
+								"DX11_WORLD_VISIBILITY_HOLD active=0 reason=world_committed_pre_present frame=%u elapsed_ms=%u",
 								m_dwDX11RuntimeCompatFrameCount,
 								m_dwDX11RuntimeCompatElapsedMS);
 						}
@@ -5673,20 +5700,13 @@ void CPythonApplication::__RunRenderStep(DWORD& rRenderFrameCount, DWORD& rFaceC
 						bDX11NativeVisibleActive = false;
 					else
 					{
-						// Strict DX11 path: while native world present gate is still converging, we still need a real swapchain Present.
-						__SetDX11RenderCheckpoint("dx11_present_pending_strict_native_visible");
-						if (!m_grpDeviceDX11.Present())
-						{
-							__SetDX11RenderCheckpoint("dx11_present_pending_strict_native_visible_fail");
-							__LogDX11RenderCheckpoint(true);
-							return;
-						}
-
+						// PresentNativeWorldDryRun already presents the swapchain. Do not issue a second Present()
+						// here, or flip-model swapchains can immediately show an unrendered backbuffer.
 						bDX11StrictPendingPresentedThisFrame = true;
 						static bool s_bDX11StrictPendingNativeVisiblePresentLogged = false;
 						if (!s_bDX11StrictPendingNativeVisiblePresentLogged)
 						{
-							TraceError("DX11_STRICT_PENDING_PRESENT path=swapchain_present reason=world_native_present_inactive");
+							TraceError("DX11_STRICT_PENDING_PRESENT path=native_world_dryrun_present reason=world_native_present_inactive");
 							s_bDX11StrictPendingNativeVisiblePresentLogged = true;
 						}
 						__SetDX11RenderCheckpoint("dx11_present_pending_strict_native_visible_done");
@@ -6281,7 +6301,7 @@ bool CPythonApplication::CreateDevice(int width, int height, int Windowed, int b
 			bUseDX9CompatDevice ? 1 : 0,
 			c_szRuntimeCompatReason);
 
-#ifdef DX11_STRICT_ONLY
+#ifdef BUILD_DEBUG_UI
 		// DX11 Model Sync: Initialize ImGui Developer Monitoring Tool
 		if (!InitializeImGui())
 		{
@@ -6349,6 +6369,7 @@ void CPythonApplication::Loop()
 		CGraphicTextureDX11::ProcessAsyncResults();
 
 		// M3-SPEEDTREE-ATLAS-09: Report async texture stats to ImGui (every frame)
+#ifdef BUILD_DEBUG_UI
 		{
 			DWORD dwPending, dwCompleted, dwFailed;
 			CGraphicTextureDX11::GetAsyncStats(&dwPending, &dwCompleted, &dwFailed);
@@ -6370,6 +6391,7 @@ void CPythonApplication::Loop()
 				dwBudgetMB,
 				dwUsageMB);
 		}
+#endif
 
 		// M3-TEXTURE-ASYNC-10-RUNTIME: Periodic memory adjustment (every 30s)
 		static DWORD s_dwLastMemoryCheck = 0;
@@ -6402,7 +6424,7 @@ void CPythonApplication::Loop()
 
 
 
-#ifdef DX11_STRICT_ONLY
+#ifdef BUILD_DEBUG_UI
 		// DX11 Model Sync: Update ImGui metrics collector each frame
 		if (CImGuiMetricsCollector::Instance())
 		{
@@ -7981,7 +8003,7 @@ void CPythonApplication::Destroy()
 	SystemParametersInfo( SPI_SETSTICKYKEYS, sizeof(sStickKeys), &sStickKeys, 0 );
 }
 
-#ifdef DX11_STRICT_ONLY
+#ifdef BUILD_DEBUG_UI
 // DX11 Model Sync: ImGui Developer Monitoring Tool Implementation
 bool CPythonApplication::InitializeImGui()
 {

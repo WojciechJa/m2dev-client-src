@@ -31,7 +31,7 @@ bool CGuildMarkDownloader::Connect(const CNetworkAddress& c_rkNetAddr, DWORD dwH
 
 	m_dwHandle=dwHandle;
 	m_dwRandomKey=dwRandomKey;
-	m_dwTodo=TODO_RECV_MARK;
+	m_dwRecvPlan=RECV_PLAN_MARK;
 	return CNetworkStream::Connect(c_rkNetAddr);
 }
 
@@ -41,7 +41,7 @@ bool CGuildMarkDownloader::ConnectToRecvSymbol(const CNetworkAddress& c_rkNetAdd
 
 	m_dwHandle=dwHandle;
 	m_dwRandomKey=dwRandomKey;
-	m_dwTodo=TODO_RECV_SYMBOL;
+	m_dwRecvPlan=RECV_PLAN_SYMBOL;
 	m_kVec_dwGuildID = c_rkVec_dwGuildID;
 	return CNetworkStream::Connect(c_rkNetAddr);
 }
@@ -88,7 +88,7 @@ void CGuildMarkDownloader::__Initialize()
 
 	m_dwHandle=0;
 	m_dwRandomKey=0;
-	m_dwTodo=TODO_RECV_NONE;
+	m_dwRecvPlan=RECV_PLAN_NONE;
 	m_kVec_dwGuildID.clear();
 	m_setUpdatedImageIndices.clear();
 }
@@ -236,14 +236,14 @@ bool CGuildMarkDownloader::__LoginState_RecvPhase()
 
 	if (kPacketPhase.phase == PHASE_LOGIN)
 	{
-		switch (m_dwTodo)
+		switch (m_dwRecvPlan)
 		{
-			case TODO_RECV_NONE:
+			case RECV_PLAN_NONE:
 			{
-				assert(!"CGuildMarkDownloader::__LoginState_RecvPhase - Todo type is none");
+				assert(!"CGuildMarkDownloader::__LoginState_RecvPhase - Receive plan is none");
 				break;
 			}
-			case TODO_RECV_MARK:
+			case RECV_PLAN_MARK:
 			{
 				// MARK_BUG_FIX
 				if (!__SendMarkIDXList())
@@ -251,7 +251,7 @@ bool CGuildMarkDownloader::__LoginState_RecvPhase()
 				// END_OF_MARK_BUG_FIX
 				break;
 			}
-			case TODO_RECV_SYMBOL:
+			case RECV_PLAN_SYMBOL:
 			{
 				if (!__SendSymbolCRCList())
 					return false;
@@ -296,11 +296,11 @@ bool CGuildMarkDownloader::__LoginState_RecvMarkIndex()
 		Recv(sizeof(WORD), &guildID);
 		Recv(sizeof(WORD), &markID);
 
-		// 길드ID -> 마크ID 인덱스 등록
+		// ??????ID -> ??????ID ????????? ??????
 		CGuildMarkManager::Instance().AddMarkIDByGuildID(guildID, markID);
 	}
 
-	// 모든 마크 이미지 파일을 로드한다. (파일이 없으면 만들어짐)
+	// ?????? ?????? ????????? ????????? ????????????. (????????? ????????? ????????????)
 	CGuildMarkManager::Instance().LoadMarkImages();
 
 	m_currentRequestingImageIndex = 0;
@@ -358,21 +358,21 @@ bool CGuildMarkDownloader::__LoginState_RecvMarkBlock()
 		else
 		{
 			Recv(compSize, compBuf);
-			// 압축된 이미지를 실제로 저장한다. CRC등 여러가지 정보가 함께 빌드된다.
+			// ????????? ???????????? ????????? ????????????. CRC??? ???????????? ????????? ?????? ????????????.
 			CGuildMarkManager::Instance().SaveBlockFromCompressedData(kPacket.imgIdx, posBlock, (const uint8_t *) compBuf, compSize);
 		}
 	}
 
 	if (kPacket.count > 0)
 	{
-		// 마크 이미지 저장
+		// ?????? ????????? ??????
 		CGuildMarkManager::Instance().SaveMarkImage(kPacket.imgIdx);
 
 		// Track updated image index for deferred reload
 		m_setUpdatedImageIndices.insert(kPacket.imgIdx);
 	}
 
-	// 더 요청할 것이 있으면 요청하고 아니면 이미지를 저장하고 종료
+	// ??? ????????? ?????? ????????? ???????????? ????????? ???????????? ???????????? ??????
 	if (m_currentRequestingImageIndex < CGuildMarkManager::Instance().GetMarkImageCount())
 		__SendMarkCRCList();
 	else
@@ -473,3 +473,4 @@ bool CGuildMarkDownloader::__LoginState_RecvSymbolData()
 	delete[] pbyBuf;
 	return true;
 }
+

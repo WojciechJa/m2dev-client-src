@@ -2,6 +2,7 @@
 #include "Resource.h"
 #include "PythonApplication.h"
 #include "EterLib/Camera.h"
+#include "EterLib/GrpBase.h"
 #include "PackLib/PackManager.h"
 #include "EterBase/tea.h"
 
@@ -74,7 +75,7 @@ PyObject* appEnablePerformanceTime(PyObject* poSelf, PyObject* poArgs)
 	if (!PyTuple_GetInteger(poArgs, 1, &nEnable))
 		return Py_BuildException();
 
-	// TODO: remove this function
+	// Legacy API: intentionally retained for script compatibility.
 	
 	return Py_BuildNone();
 }
@@ -102,6 +103,16 @@ PyObject* appSetTextTailLivingTime(PyObject* poSelf, PyObject* poArgs)
 	return Py_BuildNone();
 }
 // END_OF_TEXTTAIL_LIVINGTIME_CONTROL
+
+PyObject* appGetViewport(PyObject* poSelf, PyObject* poArgs)
+{
+	DWORD dwX, dwY, dwWidth, dwHeight;
+	float fMinZ, fMaxZ;
+
+	CGraphicBase::GetViewport(&dwX, &dwY, &dwWidth, &dwHeight, &fMinZ, &fMaxZ);
+
+	return Py_BuildValue("(iiiiff)", dwX, dwY, dwWidth, dwHeight, fMinZ, fMaxZ);
+}
 
 PyObject* appSetHairColorEnable(PyObject* poSelf, PyObject* poArgs)
 {
@@ -552,7 +563,7 @@ PyObject * appGetFaceCount(PyObject * poSelf, PyObject * poArgs)
 
 PyObject * appGetAvaiableTextureMememory(PyObject * poSelf, PyObject * poArgs)
 {											
-	return Py_BuildValue("i", CGraphicBase::GetAvailableTextureMemory());
+	return Py_BuildValue("K", CGraphicBase::GetAvailableTextureMemory());
 }
 
 PyObject * appSetFPS(PyObject * poSelf, PyObject * poArgs)
@@ -583,6 +594,181 @@ PyObject * appSetVSync(PyObject * poSelf, PyObject * poArgs)
 PyObject * appGetVSync(PyObject * poSelf, PyObject * poArgs)
 {
 	return Py_BuildValue("i", CPythonApplication::Instance().GetVSync());
+}
+
+PyObject * appGetRenderBackend(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("s", CPythonApplication::Instance().GetRenderBackend());
+}
+
+PyObject * appGetRequestedRenderBackend(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("s", CPythonApplication::Instance().GetRequestedRenderBackend());
+}
+
+PyObject * appIsRenderBackendFallback(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().IsRenderBackendFallback());
+}
+
+PyObject * appGetRenderBackendFallbackReasonCode(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetRenderBackendFallbackReasonCode());
+}
+
+PyObject * appGetRenderBackendFallbackReason(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("s", CPythonApplication::Instance().GetRenderBackendFallbackReason());
+}
+
+PyObject * appGetDX11ProbeResult(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11ProbeResult());
+}
+
+PyObject * appGetDX11ProbeFeatureLevel(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11ProbeFeatureLevel());
+}
+
+PyObject * appIsDX11BootstrapActive(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().IsDX11BootstrapActive());
+}
+
+PyObject * appGetDX11FirstPassActive(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11FirstPassActive());
+}
+
+PyObject * appGetDX11VisibleBootstrap(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11VisibleBootstrap());
+}
+
+PyObject * appGetDX11UIPassOnly(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11UIPassOnly());
+}
+
+PyObject * appGetDX11UINativeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11UINativeTest());
+}
+
+PyObject * appGetDX11UITextureTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11UITextureTest());
+}
+
+PyObject * appGetDX11WorldDepthTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldDepthTest());
+}
+
+PyObject * appGetDX11WorldBatchTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldBatchTest());
+}
+
+PyObject * appGetDX11WorldSpriteTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldSpriteTest());
+}
+
+PyObject * appGetDX11WorldStateTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldStateTest());
+}
+
+PyObject * appGetDX11WorldPassesTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldPassesTest());
+}
+
+PyObject * appGetDX11WorldBridgeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldBridgeTest());
+}
+
+PyObject * appGetDX11WorldSubsystemTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldSubsystemTest());
+}
+
+PyObject * appGetDX11WorldRealtimeTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldRealtimeTest());
+}
+
+PyObject * appGetDX11WorldMetricsTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldMetricsTest());
+}
+
+PyObject * appGetDX11WorldInstanceFeedTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldInstanceFeedTest());
+}
+
+PyObject * appGetDX11WorldFinalcheckTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldFinalcheckTest());
+}
+
+PyObject * appGetDX11WorldHandoffTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldHandoffTest());
+}
+
+PyObject * appGetDX11WorldSwapchainTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldSwapchainTest());
+}
+
+PyObject * appGetDX11WorldPresentPathTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldPresentPathTest());
+}
+
+PyObject * appGetDX11WorldComposerTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldComposerTest());
+}
+
+PyObject * appGetDX11WorldScenegraphTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldScenegraphTest());
+}
+
+PyObject * appGetDX11WorldPipelineTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldPipelineTest());
+}
+
+PyObject * appGetDX11WorldFramegraphTest(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11WorldFramegraphTest());
+}
+
+PyObject * appGetDX11RuntimeStage(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("s", CPythonApplication::Instance().GetDX11RuntimeStage());
+}
+
+PyObject * appSetDX11ExperimentalPresent(PyObject * poSelf, PyObject * poArgs)
+{
+	int iEnabled;
+	if (!PyTuple_GetInteger(poArgs, 0, &iEnabled))
+		return Py_BuildException();
+
+	CPythonApplication::Instance().SetDX11ExperimentalPresent(iEnabled ? true : false);
+	return Py_BuildNone();
+}
+
+PyObject * appGetDX11ExperimentalPresent(PyObject * poSelf, PyObject * poArgs)
+{
+	return Py_BuildValue("i", CPythonApplication::Instance().GetDX11ExperimentalPresent());
 }
 
 PyObject * appGetPerfStats(PyObject * poSelf, PyObject * poArgs)
@@ -1292,6 +1478,40 @@ void initapp()
 		{ "GetFPSLimit",				appGetFPSLimit,					METH_VARARGS },
 		{ "SetVSync",					appSetVSync,					METH_VARARGS },
 		{ "GetVSync",					appGetVSync,					METH_VARARGS },
+		{ "GetRenderBackend",			appGetRenderBackend,			METH_VARARGS },
+		{ "GetRequestedRenderBackend",	appGetRequestedRenderBackend,	METH_VARARGS },
+		{ "IsRenderBackendFallback",	appIsRenderBackendFallback,	METH_VARARGS },
+		{ "GetRenderBackendFallbackReasonCode",	appGetRenderBackendFallbackReasonCode,	METH_VARARGS },
+		{ "GetRenderBackendFallbackReason",	appGetRenderBackendFallbackReason,	METH_VARARGS },
+		{ "GetDX11ProbeResult",			appGetDX11ProbeResult,			METH_VARARGS },
+		{ "GetDX11ProbeFeatureLevel",	appGetDX11ProbeFeatureLevel,	METH_VARARGS },
+		{ "IsDX11BootstrapActive",		appIsDX11BootstrapActive,		METH_VARARGS },
+		{ "GetDX11FirstPassActive",		appGetDX11FirstPassActive,		METH_VARARGS },
+		{ "GetDX11VisibleBootstrap",	appGetDX11VisibleBootstrap,		METH_VARARGS },
+		{ "GetDX11UIPassOnly",			appGetDX11UIPassOnly,			METH_VARARGS },
+		{ "GetDX11UINativeTest",		appGetDX11UINativeTest,			METH_VARARGS },
+		{ "GetDX11UITextureTest",		appGetDX11UITextureTest,		METH_VARARGS },
+		{ "GetDX11WorldDepthTest",		appGetDX11WorldDepthTest,		METH_VARARGS },
+		{ "GetDX11WorldBatchTest",		appGetDX11WorldBatchTest,		METH_VARARGS },
+		{ "GetDX11WorldSpriteTest",		appGetDX11WorldSpriteTest,		METH_VARARGS },
+		{ "GetDX11WorldStateTest",		appGetDX11WorldStateTest,		METH_VARARGS },
+		{ "GetDX11WorldPassesTest",		appGetDX11WorldPassesTest,		METH_VARARGS },
+		{ "GetDX11WorldBridgeTest",		appGetDX11WorldBridgeTest,		METH_VARARGS },
+		{ "GetDX11WorldSubsystemTest",	appGetDX11WorldSubsystemTest,	METH_VARARGS },
+		{ "GetDX11WorldRealtimeTest",	appGetDX11WorldRealtimeTest,	METH_VARARGS },
+		{ "GetDX11WorldMetricsTest",	appGetDX11WorldMetricsTest,		METH_VARARGS },
+		{ "GetDX11WorldInstanceFeedTest",	appGetDX11WorldInstanceFeedTest,	METH_VARARGS },
+		{ "GetDX11WorldFinalcheckTest",	appGetDX11WorldFinalcheckTest,	METH_VARARGS },
+		{ "GetDX11WorldHandoffTest",	appGetDX11WorldHandoffTest,	METH_VARARGS },
+		{ "GetDX11WorldSwapchainTest",	appGetDX11WorldSwapchainTest,	METH_VARARGS },
+		{ "GetDX11WorldPresentPathTest",	appGetDX11WorldPresentPathTest,	METH_VARARGS },
+		{ "GetDX11WorldComposerTest",	appGetDX11WorldComposerTest,	METH_VARARGS },
+		{ "GetDX11WorldScenegraphTest",	appGetDX11WorldScenegraphTest,	METH_VARARGS },
+		{ "GetDX11WorldPipelineTest",	appGetDX11WorldPipelineTest,	METH_VARARGS },
+		{ "GetDX11WorldFramegraphTest",	appGetDX11WorldFramegraphTest,	METH_VARARGS },
+		{ "GetDX11RuntimeStage",		appGetDX11RuntimeStage,			METH_VARARGS },
+		{ "SetDX11ExperimentalPresent",	appSetDX11ExperimentalPresent,	METH_VARARGS },
+		{ "GetDX11ExperimentalPresent",	appGetDX11ExperimentalPresent,	METH_VARARGS },
 		{ "GetPerfStats",				appGetPerfStats,				METH_VARARGS },
 		{ "SetGlobalCenterPosition",	appSetGlobalCenterPosition,		METH_VARARGS },
 		{ "SetCenterPosition",			appSetCenterPosition,			METH_VARARGS },
@@ -1367,6 +1587,8 @@ void initapp()
 
 		{ "ReloadLocaleConfig",			appReloadLocaleConfig,			METH_VARARGS },
 		{ "ReloadLocale",				appReloadLocale,				METH_VARARGS },
+
+		{ "GetViewport",				appGetViewport,					METH_VARARGS },
 
 		{ NULL, NULL },
 	};
@@ -1539,7 +1761,6 @@ void initapp()
 #else
 	PyModule_AddIntConstant(poModule, "ENABLE_ENERGY_SYSTEM",	0);
 #endif
-
 #ifdef ENABLE_DRAGON_SOUL_SYSTEM
 	PyModule_AddIntConstant(poModule, "ENABLE_DRAGON_SOUL_SYSTEM",	1);
 #else
@@ -1573,5 +1794,10 @@ void initapp()
 	PyModule_AddIntConstant(poModule, "ENABLE_EXTENDED_SLIDERBAR", true);
 #else
 	PyModule_AddIntConstant(poModule, "ENABLE_EXTENDED_SLIDERBAR", false);
+#endif
+#ifdef ENABLE_MESSENGER_BLOCK
+	PyModule_AddIntConstant(poModule, "ENABLE_MESSENGER_BLOCK", 1);
+#else
+	PyModule_AddIntConstant(poModule, "ENABLE_MESSENGER_BLOCK", 0);
 #endif
 }

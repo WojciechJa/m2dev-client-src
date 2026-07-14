@@ -175,7 +175,6 @@ bool RunMainScript(CPythonLauncher& pyLauncher, const char* lpCmdLine)
 	initgrpImage();
 	initgrpText();
 	initwndMgr();
-
 	initapp();
 	initsystem();
 	initchr();

@@ -59,9 +59,11 @@ void CInstanceBase::StartFishing(float frot)
 	if (!__Background_GetWaterHeight(kPPosFishing, &kPPosFishing.z))
 		kPPosFishing.z=c_rkPPosCur.z;
 	
-	D3DXVECTOR3 v3Fishing;
-	PixelPositionToD3DXVECTOR3(kPPosFishing, &v3Fishing);
-	m_GraphicThingInstance.SetFishingPosition(v3Fishing);
+		DirectX::SimpleMath::Vector3 v3Fishing;
+		v3Fishing.x = kPPosFishing.x;
+		v3Fishing.y = kPPosFishing.y;
+		v3Fishing.z = kPPosFishing.z;
+		m_GraphicThingInstance.SetFishingPosition(v3Fishing);
 
 	PushOnceMotion(CRaceMotionData::NAME_FISHING_THROW);
 	PushLoopMotion(CRaceMotionData::NAME_FISHING_WAIT);

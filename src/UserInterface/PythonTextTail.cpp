@@ -11,6 +11,8 @@
 #include "Locale.h"
 #include "MarkManager.h"
 #include "PackLib/PackManager.h"
+#include "EterLib/GrpDeviceDX11.h"
+#include "config.h"
 
 #include <utf8.h>
 // EPlaceDir and TextTailBiDi() template are defined in utf8.h
@@ -26,6 +28,58 @@ const float c_fxMarkPosition = 1.5f;
 const float c_fyGuildNamePosition = 15.0f;
 const float c_fyMarkPosition = 15.0f + 11.0f;
 BOOL bPKTitleEnable = TRUE;
+
+// DX11 Model Sync M3-TEXTTAIL-29: Early culling telemetry
+namespace {
+	inline void LogEarlyCullStats()
+	{
+		static DWORD s_dwLastHeartbeatTick = 0u;
+		static DWORD s_dwEarlyDistanceCulls = 0u;
+		static DWORD s_dwOwnerInvalidCulls = 0u;
+		static DWORD s_dwProjectionAttempts = 0u;
+
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwLastHeartbeatTick || (dwNow - s_dwLastHeartbeatTick) >= 30000u)
+		{
+			s_dwLastHeartbeatTick = dwNow;
+			if (s_dwProjectionAttempts > 0u || s_dwEarlyDistanceCulls > 0u || s_dwOwnerInvalidCulls > 0u)
+			{
+				const DWORD dwTotalCulls = s_dwEarlyDistanceCulls + s_dwOwnerInvalidCulls;
+				const DWORD dwProjections = s_dwProjectionAttempts;
+				const float fCullRate = (dwProjections > 0u) ? (100.0f * static_cast<float>(dwTotalCulls) / static_cast<float>(dwProjections + dwTotalCulls)) : 0.0f;
+				TraceError("DX11_TEXTTAIL_CULL_EARLY_STATS projections=%u early_dist_culls=%u owner_invalid_culls=%u cull_rate=%.1f%% interval_ms=30000",
+					dwProjections, s_dwEarlyDistanceCulls, s_dwOwnerInvalidCulls, fCullRate);
+				s_dwProjectionAttempts = 0u;
+				s_dwEarlyDistanceCulls = 0u;
+				s_dwOwnerInvalidCulls = 0u;
+			}
+		}
+	}
+
+	inline void IncrementEarlyDistanceCull()
+	{
+		static DWORD s_dwEarlyDistanceCulls = 0u;
+		++s_dwEarlyDistanceCulls;
+		LogEarlyCullStats();
+	}
+
+	inline void IncrementOwnerInvalidCull()
+	{
+		static DWORD s_dwOwnerInvalidCulls = 0u;
+		++s_dwOwnerInvalidCulls;
+		LogEarlyCullStats();
+	}
+
+	inline void IncrementProjectionAttempt()
+	{
+		static DWORD s_dwProjectionAttempts = 0u;
+		++s_dwProjectionAttempts;
+		LogEarlyCullStats();
+	}
+}
+
+// M2-UIPY-40: Global visibility state tracking (shared between Render and ShowCharacterTextTail)
+static int g_iStateBlocked = 0;
 
 // TEXTTAIL_LIVINGTIME_CONTROL
 long gs_TextTail_LivingTime = 5000;
@@ -162,19 +216,39 @@ void CPythonTextTail::UpdateShowingTextTail()
 {
 	TTextTailList::iterator itor;
 
+	// DX11 Model Sync M3-TEXTTAIL-29: Early distance culling for item texttails
 	for (itor = m_ItemTextTailList.begin(); itor != m_ItemTextTailList.end(); ++itor)
 	{
-		UpdateTextTail(*itor);
+		TTextTail* pTextTail = *itor;
+		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+		{
+			IncrementEarlyDistanceCull();
+			continue; // Skip expensive projection for far objects
+		}
+		UpdateTextTail(pTextTail);
 	}
 
+	// DX11 Model Sync M3-TEXTTAIL-29: Early distance culling for chat texttails
 	for (TChatTailMap::iterator itorChat=m_ChatTailMap.begin(); itorChat!=m_ChatTailMap.end(); ++itorChat)
 	{
-		UpdateTextTail(itorChat->second);
+		TTextTail* pTextTail = itorChat->second;
+		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+		{
+			IncrementEarlyDistanceCull();
+			continue; // Skip expensive projection for far objects
+		}
+		UpdateTextTail(pTextTail);
 	}
 
+	// DX11 Model Sync M3-TEXTTAIL-29: Early distance culling for character texttails
 	for (itor = m_CharacterTextTailList.begin(); itor != m_CharacterTextTailList.end(); ++itor)
 	{
 		TTextTail * pTextTail = *itor;
+		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+		{
+			IncrementEarlyDistanceCull();
+			continue; // Skip expensive projection for far objects
+		}
 		UpdateTextTail(pTextTail);
 
 		// NOTE : Chat TextTail이 있을 경우 위치를 바꾼다.
@@ -200,13 +274,99 @@ void CPythonTextTail::UpdateTextTail(TTextTail * pTextTail)
 	CPythonGraphic & rpyGraphic = CPythonGraphic::Instance();
 	rpyGraphic.Identity();
 
-	const D3DXVECTOR3 & c_rv3Position = pTextTail->pOwner->GetPosition();
-	rpyGraphic.ProjectPosition(c_rv3Position.x,
-							   c_rv3Position.y,
-							   c_rv3Position.z + pTextTail->fHeight,
-							   &pTextTail->x,
-							   &pTextTail->y,
-							   &pTextTail->z);
+	const DirectX::SimpleMath::Vector3 & c_rv3Position = pTextTail->pOwner->GetPosition();
+
+	// DX11 Model Sync M3-TEXTTAIL-29: Validate owner position before expensive projection
+	if (!std::isfinite(c_rv3Position.x) || !std::isfinite(c_rv3Position.y) || !std::isfinite(c_rv3Position.z))
+	{
+		IncrementOwnerInvalidCull();
+		pTextTail->x = -10000.0f;
+		pTextTail->y = -10000.0f;
+		pTextTail->z = 0.0f;
+		return;
+	}
+
+	// DX11 Model Sync M3-TEXTTAIL-29: Track projection attempts for culling effectiveness stats
+	IncrementProjectionAttempt();
+
+	const bool bDX11Active =
+		(CGraphicDeviceDX11::GetActiveDevice() && CGraphicDeviceDX11::GetActiveDevice()->IsValid());
+	bool bUsedDX11WorldProjection = false;
+	if (bDX11Active)
+	{
+		bUsedDX11WorldProjection = CGraphicBase::ProjectPositionDX11World(
+			c_rv3Position.x,
+			c_rv3Position.y,
+			c_rv3Position.z + pTextTail->fHeight,
+			&pTextTail->x,
+			&pTextTail->y,
+			&pTextTail->z);
+	}
+
+	if (!bUsedDX11WorldProjection)
+	{
+		rpyGraphic.ProjectPosition(c_rv3Position.x,
+								   c_rv3Position.y,
+								   c_rv3Position.z + pTextTail->fHeight,
+								   &pTextTail->x,
+								   &pTextTail->y,
+								   &pTextTail->z);
+	}
+
+	{
+		static DWORD s_dwDX11ProjectionSourceTick = 0u;
+		static DWORD s_dwDX11WorldProjectionCount = 0u;
+		static DWORD s_dwLegacyProjectionCount = 0u;
+		if (bUsedDX11WorldProjection)
+			++s_dwDX11WorldProjectionCount;
+		else
+			++s_dwLegacyProjectionCount;
+
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (bDX11Active && (0u == s_dwDX11ProjectionSourceTick || (dwNow - s_dwDX11ProjectionSourceTick) >= 5000u))
+		{
+			s_dwDX11ProjectionSourceTick = dwNow;
+			TraceError("DX11_TEXTTAIL_PROJECTION_SOURCE world_snapshot=%u legacy_current_state=%u",
+				s_dwDX11WorldProjectionCount, s_dwLegacyProjectionCount);
+			s_dwDX11WorldProjectionCount = 0u;
+			s_dwLegacyProjectionCount = 0u;
+		}
+	}
+
+	UINT uBackBufferWidth = 0u;
+	UINT uBackBufferHeight = 0u;
+	CGraphicBase::GetBackBufferSize(&uBackBufferWidth, &uBackBufferHeight);
+	const float fGuardMarginX = static_cast<float>(uBackBufferWidth) * 2.0f;
+	const float fGuardMarginY = static_cast<float>(uBackBufferHeight) * 2.0f;
+	if (!std::isfinite(pTextTail->x) || !std::isfinite(pTextTail->y) || !std::isfinite(pTextTail->z) ||
+		pTextTail->z < -0.05f || pTextTail->z > 1.05f ||
+		pTextTail->x < -fGuardMarginX || pTextTail->x > (static_cast<float>(uBackBufferWidth) + fGuardMarginX) ||
+		pTextTail->y < -fGuardMarginY || pTextTail->y > (static_cast<float>(uBackBufferHeight) + fGuardMarginY))
+	{
+		static DWORD s_dwProjectionRejectStatsTick = 0u;
+		static DWORD s_dwProjectionRejectCount = 0u;
+		static float s_fLastRejectX = 0.0f;
+		static float s_fLastRejectY = 0.0f;
+		static float s_fLastRejectZ = 0.0f;
+		++s_dwProjectionRejectCount;
+		s_fLastRejectX = pTextTail->x;
+		s_fLastRejectY = pTextTail->y;
+		s_fLastRejectZ = pTextTail->z;
+
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (0u == s_dwProjectionRejectStatsTick || (dwNow - s_dwProjectionRejectStatsTick) >= 10000u)
+		{
+			s_dwProjectionRejectStatsTick = dwNow;
+			TraceError("DX11_TEXTTAIL_PROJECTION_REJECT_STATS count=%u last_x=%.2f last_y=%.2f last_z=%.3f bb_w=%u bb_h=%u",
+				s_dwProjectionRejectCount, s_fLastRejectX, s_fLastRejectY, s_fLastRejectZ, uBackBufferWidth, uBackBufferHeight);
+			s_dwProjectionRejectCount = 0u;
+		}
+		// Keep tail out of the visible frame when projection is invalid.
+		pTextTail->x = -10000.0f;
+		pTextTail->y = -10000.0f;
+		pTextTail->z = 0.0f;
+		return;
+	}
 
 	pTextTail->x = floorf(pTextTail->x);
 	pTextTail->y = floorf(pTextTail->y);
@@ -220,6 +380,55 @@ void CPythonTextTail::UpdateTextTail(TTextTail * pTextTail)
 	{
 		pTextTail->z = pTextTail->z * CPythonGraphic::Instance().GetOrthoDepth() * -1.0f;
 		pTextTail->z += 10.0f;
+	}
+
+	// DX11 UI/text path draws in clip space; large legacy z values can push
+	// text tails outside visible clip range. Keep tails on UI plane in DX11.
+	if (CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice())
+	{
+		if (pDX11Device->IsValid())
+			pTextTail->z = 0.0f;
+	}
+
+	// DX11 Model Sync M3-TEXTTAIL22.A: Track z-plane projection for DX11 parity
+	static DWORD s_dwZClampTelemetryTick = 0;
+	static int s_iZClamped = 0;
+	static int s_iZNotClamped = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+
+	if (pTextTail->z == 0.0f)
+		++s_iZClamped;
+	else
+		++s_iZNotClamped;
+
+	if (0 == s_dwZClampTelemetryTick || dwNow - s_dwZClampTelemetryTick >= 5000u)
+	{
+		s_dwZClampTelemetryTick = dwNow;
+		CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+
+		// M2-UI-PARITY-FILTER-25: Check if ScreenFilter overlay is active during z-clamping
+		bool hasRTBound = false;
+		if (pDX11Device && pDX11Device->IsValid())
+		{
+			ID3D11DeviceContext* pContext = pDX11Device->GetContext();
+			if (pContext)
+			{
+				ID3D11RenderTargetView* pCurrentRTV = nullptr;
+				ID3D11DepthStencilView* pCurrentDSV = nullptr;
+				pContext->OMGetRenderTargets(1, &pCurrentRTV, &pCurrentDSV);
+				hasRTBound = (pCurrentRTV != nullptr);
+
+				if (pCurrentRTV) pCurrentRTV->Release();
+				if (pCurrentDSV) pCurrentDSV->Release();
+			}
+		}
+
+		TraceError("DX11_TEXTTAIL_ZPROJ z_clamped=%d z_legacy=%d dx11_active=%d filter_rt_active=%d",
+			s_iZClamped, s_iZNotClamped,
+			(pDX11Device && pDX11Device->IsValid()) ? 1 : 0,
+			hasRTBound ? 1 : 0);
+		s_iZClamped = 0;
+		s_iZNotClamped = 0;
 	}
 }
 
@@ -537,10 +746,33 @@ void CPythonTextTail::Render()
 	int iRendered = 0;
 	const DWORD dwTargetVID = CPythonPlayer::Instance().GetTargetVID();
 
+	// DX11 Model Sync M3-TEXTTAIL22.A: Track visibility funnel (submitted → culled → throttled → rendered)
+	static int s_iDistanceCulled = 0;
+	static int s_iLimitThrottled = 0;
+
+	// M2-UIPY-40: Enhanced visibility diagnostics
+	static int s_iNotEmitted = 0;  // Failed visibility checks in ShowCharacterTextTail
+
+	// DX11 Model Sync M3-TEXTTAIL-PARITY-25: Track screen-space placement buckets
+	static int s_iOnscreen = 0;
+	static int s_iEdge = 0;
+	static int s_iOffscreen = 0;
+	static int s_iAlphaZero = 0;
+	static int s_iOffscreenClip = 0;  // M2-UIPY-40: Tails clipped by scissor rect
+	static DWORD s_dwScreenBucketTelemetryTick = 0;
+
 	std::vector<TTextTail*> kCharacterRenderList;
 	kCharacterRenderList.reserve(m_CharacterTextTailList.size());
 	for (TTextTailList::iterator itor = m_CharacterTextTailList.begin(); itor != m_CharacterTextTailList.end(); ++itor)
 		kCharacterRenderList.push_back(*itor);
+
+	// M2-UIPY-40: Snapshot tails not emitted into render list this frame.
+	// Keep this as a per-frame value (not cumulative), otherwise telemetry quickly
+	// explodes with frame count and becomes hard to correlate with runtime behavior.
+	const int iNotEmittedCurrent = std::max(
+		0,
+		static_cast<int>(m_CharacterTextTailMap.size()) - static_cast<int>(m_CharacterTextTailList.size()));
+	s_iNotEmitted = iNotEmittedCurrent;
 
 	if (m_bOptimizationEnabled)
 	{
@@ -582,14 +814,54 @@ void CPythonTextTail::Render()
 		std::stable_sort(kCharacterRenderList.begin(), kCharacterRenderList.end(), kSorter);
 	}
 
+	// M3-TEXTTAIL-PARITY-25: Get screen dimensions for bucket categorization
+	UINT uBackBufferWidth = 0u;
+	UINT uBackBufferHeight = 0u;
+	CGraphicBase::GetBackBufferSize(&uBackBufferWidth, &uBackBufferHeight);
+	const float fEdgeMargin = 100.0f;
+
 	for (std::vector<TTextTail*>::iterator it = kCharacterRenderList.begin(); it != kCharacterRenderList.end(); ++it)
 	{
 		if (iRendered >= iRenderLimit)
+		{
+			++s_iLimitThrottled; // M3-TEXTTAIL22.A: Track limit throttling
 			break;
+		}
 
 		TTextTail* pTextTail = *it;
 		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+		{
+			++s_iDistanceCulled; // M3-TEXTTAIL22.A: Track distance culling
 			continue;
+		}
+
+		// M3-TEXTTAIL-PARITY-25: Categorize screen-space bucket
+		const float x = pTextTail->x;
+		const float y = pTextTail->y;
+		const float alpha = pTextTail->Color.a;
+
+		if (alpha <= 0.01f)
+		{
+			++s_iAlphaZero;
+		}
+		else if (x >= 0.0f && x <= static_cast<float>(uBackBufferWidth) &&
+		         y >= 0.0f && y <= static_cast<float>(uBackBufferHeight))
+		{
+			if (x < fEdgeMargin || x > (static_cast<float>(uBackBufferWidth) - fEdgeMargin) ||
+			    y < fEdgeMargin || y > (static_cast<float>(uBackBufferHeight) - fEdgeMargin))
+			{
+				++s_iEdge;
+			}
+			else
+			{
+				++s_iOnscreen;
+			}
+		}
+		else
+		{
+			++s_iOffscreen;
+		}
+
 		pTextTail->pTextInstance->Render();
 		if (pTextTail->pMarkInstance && pTextTail->pGuildNameTextInstance)
 		{
@@ -625,11 +897,45 @@ void CPythonTextTail::Render()
 	for (std::vector<TTextTail*>::iterator it = kItemRenderList.begin(); it != kItemRenderList.end(); ++it)
 	{
 		if (iRendered >= iRenderLimit)
+		{
+			++s_iLimitThrottled; // M3-TEXTTAIL22.A: Track limit throttling
 			break;
+		}
 
 		TTextTail* pTextTail = *it;
 		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
+		{
+			++s_iDistanceCulled; // M3-TEXTTAIL22.A: Track distance culling
 			continue;
+		}
+
+		// M3-TEXTTAIL-PARITY-25: Categorize screen-space bucket
+		const float x = pTextTail->x;
+		const float y = pTextTail->y;
+		const float alpha = pTextTail->Color.a;
+
+		if (alpha <= 0.01f)
+		{
+			++s_iAlphaZero;
+		}
+		else if (x >= 0.0f && x <= static_cast<float>(uBackBufferWidth) &&
+		         y >= 0.0f && y <= static_cast<float>(uBackBufferHeight))
+		{
+			if (x < fEdgeMargin || x > (static_cast<float>(uBackBufferWidth) - fEdgeMargin) ||
+			    y < fEdgeMargin || y > (static_cast<float>(uBackBufferHeight) - fEdgeMargin))
+			{
+				++s_iEdge;
+			}
+			else
+			{
+				++s_iOnscreen;
+			}
+		}
+		else
+		{
+			++s_iOffscreen;
+		}
+
 		RenderTextTailBox(pTextTail);
 		pTextTail->pTextInstance->Render();
 		if (pTextTail->pOwnerTextInstance)
@@ -641,19 +947,177 @@ void CPythonTextTail::Render()
 	for (TChatTailMap::iterator itorChat = m_ChatTailMap.begin(); itorChat != m_ChatTailMap.end(); ++itorChat)
 	{
 		if (iRendered >= iRenderLimit)
+		{
+			++s_iLimitThrottled; // M3-TEXTTAIL22.A: Track limit throttling
 			break;
+		}
 
 		TTextTail* pTextTail = itorChat->second;
 		if (m_bOptimizationEnabled && pTextTail->fDistanceFromPlayer > m_fOptimizationMaxDistance)
-			continue;
-		if (pTextTail->pOwner->isShow())
 		{
+			++s_iDistanceCulled; // M3-TEXTTAIL22.A: Track distance culling
+			continue;
+		}
+		const bool bDX11Active =
+			(CGraphicDeviceDX11::GetActiveDevice() && CGraphicDeviceDX11::GetActiveDevice()->IsValid());
+		if (bDX11Active || pTextTail->pOwner->isShow())
+		{
+			// M3-TEXTTAIL-PARITY-25: Categorize screen-space bucket
+			const float x = pTextTail->x;
+			const float y = pTextTail->y;
+			const float alpha = pTextTail->Color.a;
+
+			if (alpha <= 0.01f)
+			{
+				++s_iAlphaZero;
+			}
+			else if (x >= 0.0f && x <= static_cast<float>(uBackBufferWidth) &&
+			         y >= 0.0f && y <= static_cast<float>(uBackBufferHeight))
+			{
+				if (x < fEdgeMargin || x > (static_cast<float>(uBackBufferWidth) - fEdgeMargin) ||
+				    y < fEdgeMargin || y > (static_cast<float>(uBackBufferHeight) - fEdgeMargin))
+				{
+					++s_iEdge;
+				}
+				else
+				{
+					++s_iOnscreen;
+				}
+			}
+			else
+			{
+				++s_iOffscreen;
+			}
+
 			RenderTextTailName(pTextTail);
 			++iRendered;
 		}
 	}
 
 	m_dwLastRenderMS = ELTimer_GetMSec() - dwRenderStart;
+
+	// DX11 Model Sync M3-TEXTTAIL22.A: Enhanced telemetry - visibility funnel breakdown
+	static DWORD s_dwTextTailTelemetryTick = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+	if (0 == s_dwTextTailTelemetryTick || dwNow - s_dwTextTailTelemetryTick >= 2500u)
+	{
+		s_dwTextTailTelemetryTick = dwNow;
+		const int iTotalSubmitted = static_cast<int>(kCharacterRenderList.size() + kItemRenderList.size() + m_ChatTailMap.size());
+		TraceError(
+			"DX11_TEXTTAIL_RENDER submitted=%d distance_culled=%d limit_throttled=%d rendered=%d "
+			"opt=%d range=%.1f limit=%d",
+			iTotalSubmitted,
+			s_iDistanceCulled,
+			s_iLimitThrottled,
+			iRendered,
+			m_bOptimizationEnabled ? 1 : 0,
+			m_fOptimizationMaxDistance,
+			iRenderLimit);
+
+		// M3-TEXTTAIL-PARITY-25: Screen-space placement bucket telemetry
+		TraceError(
+			"DX11_TEXTTAIL_SCREEN_BUCKET onscreen=%d edge=%d offscreen=%d alpha_zero=%d",
+			s_iOnscreen,
+			s_iEdge,
+			s_iOffscreen,
+			s_iAlphaZero);
+
+		// M2-UIPY-40: Enhanced visibility diagnostics
+		TraceError(
+			"DX11_TEXTTAIL_VISIBILITY_DETAIL not_emitted=%d state_blocked=%d offscreen_clip=%d",
+			s_iNotEmitted,
+			g_iStateBlocked,  // Use global counter
+			s_iOffscreenClip);
+
+		// M2-UI-TEXTTAIL-DX11-72: Parity log - expected vs rendered vs rejected
+		//
+		// NOTE:
+		// "Onscreen/edge/offscreen/alpha_zero" are telemetry buckets, not rejection
+		// criteria. A texttail that survives the actual rejection funnel still renders
+		// even if it lands outside the viewport or has zero alpha input data.
+		//
+		// To keep parity aligned with the real runtime path, expected must represent
+		// every submitted tail that was not actually rejected in Render() loops.
+		// Rejections from pre-list visibility filters (not_emitted/state_blocked) are
+		// tracked separately and must not be subtracted from submitted tails.
+		const int iRejectedRaw = s_iDistanceCulled + s_iLimitThrottled + s_iOffscreenClip;
+		const int iRejected = (iRejectedRaw > iTotalSubmitted) ? iTotalSubmitted : iRejectedRaw;
+		const int iExpected = iTotalSubmitted - iRejected;
+		if (iRejectedRaw > iTotalSubmitted)
+		{
+			static DWORD s_dwTextTailParityClampTick = 0u;
+			if (0u == s_dwTextTailParityClampTick || (dwNow - s_dwTextTailParityClampTick) >= 5000u)
+			{
+				s_dwTextTailParityClampTick = dwNow;
+				TraceError(
+					"DX11_TEXTTAIL_PARITY_CLAMP submitted=%d rejected_raw=%d rejected_clamped=%d",
+					iTotalSubmitted,
+					iRejectedRaw,
+					iRejected);
+			}
+		}
+		TraceError(
+			"DX11_TEXTTAIL_PARITY expected=%d rendered=%d rejected=%d accept_rate=%.1f%%",
+			iExpected,
+			iRendered,
+			iRejected,
+			(iExpected > 0) ? (100.0f * iRendered / iExpected) : 0.0f);
+
+		// M3-TEXTTAIL-PARITY-25: Visibility anomaly detection
+		const int iTotalVisible = s_iOnscreen + s_iEdge;
+		if (iRendered > 0 && iTotalVisible == 0)
+		{
+			TraceError(
+				"DX11_TEXTTAIL_VISIBILITY_ANOMALY rendered=%d visible_buckets=0 offscreen=%d alpha_zero=%d",
+				iRendered,
+				s_iOffscreen,
+				s_iAlphaZero);
+		}
+
+		// M2-UIWORLD-33: One-shot cull reason logging when submitted>0 but rendered=0
+		if (iTotalSubmitted > 0 && iRendered == 0)
+		{
+			static bool s_bLoggedZeroRender = false;
+			if (!s_bLoggedZeroRender)
+			{
+				s_bLoggedZeroRender = true;
+				// Determine primary cull reason
+				const char* c_szReason = "unknown";
+				if (s_iDistanceCulled > 0)
+					c_szReason = "distance_cull";
+				else if (s_iAlphaZero > iTotalSubmitted / 2)
+					c_szReason = "alpha_zero";
+				else if (s_iOffscreen > iTotalSubmitted / 2)
+					c_szReason = "offscreen";
+				else if (s_iLimitThrottled > 0)
+					c_szReason = "limit_throttle";
+				else if (s_iOnscreen == 0 && s_iEdge == 0 && s_iOffscreen == 0 && s_iAlphaZero == 0)
+					c_szReason = "all_bucket_unknown";
+
+				TraceError(
+					"DX11_TEXTTAIL_ZERO_RENDER submitted=%d distance_culled=%d limit_throttled=%d "
+					"onscreen=%d edge=%d offscreen=%d alpha_zero=%d reason=%s",
+					iTotalSubmitted,
+					s_iDistanceCulled,
+					s_iLimitThrottled,
+					s_iOnscreen,
+					s_iEdge,
+					s_iOffscreen,
+					s_iAlphaZero,
+					c_szReason);
+			}
+		}
+
+		s_iDistanceCulled = 0;
+		s_iLimitThrottled = 0;
+		s_iOnscreen = 0;
+		s_iEdge = 0;
+		s_iOffscreen = 0;
+		s_iAlphaZero = 0;
+		s_iNotEmitted = 0;
+		g_iStateBlocked = 0;  // Reset global counter
+		s_iOffscreenClip = 0;
+	}
 }
 
 void CPythonTextTail::RenderTextTailBox(TTextTail * pTextTail)
@@ -690,14 +1154,14 @@ void CPythonTextTail::HideAllTextTail()
 
 void CPythonTextTail::UpdateDistance(const TPixelPosition & c_rCenterPosition, TTextTail * pTextTail)
 {
-	const D3DXVECTOR3 & c_rv3Position = pTextTail->pOwner->GetPosition();
-	D3DXVECTOR2 v2Distance(c_rv3Position.x - c_rCenterPosition.x, -c_rv3Position.y - c_rCenterPosition.y);
+	const DirectX::SimpleMath::Vector3 & c_rv3Position = pTextTail->pOwner->GetPosition();
+	DirectX::SimpleMath::Vector2 v2Distance(c_rv3Position.x - c_rCenterPosition.x, -c_rv3Position.y - c_rCenterPosition.y);
 	pTextTail->fDistanceFromPlayer = D3DXVec2Length(&v2Distance);
 }
 
 void CPythonTextTail::ShowAllTextTail()
 {
-	const float fShowDistance = (m_bOptimizationEnabled ? m_fOptimizationMaxDistance : 3500.0f);
+	const float fShowDistance = (m_bOptimizationEnabled ? m_fOptimizationMaxDistance : DX11RuntimeConfig::kTextTailDefaultMaxDistance);
 
 	TTextTailMap::iterator itor;
 	for (itor = m_CharacterTextTailMap.begin(); itor != m_CharacterTextTailMap.end(); ++itor)
@@ -729,20 +1193,94 @@ void CPythonTextTail::ShowCharacterTextTail(DWORD VirtualID)
 		return;
 	}
 
+	// DX11 Model Sync M3-TEXTTAIL22.A + M3-TEXTTAIL-24: Track visibility filter reasons
+	static DWORD s_dwVisibilityTelemetryTick = 0;
+	static int s_iPassedAll = 0;
+	static int s_iFailedOwnerNotShow = 0;
+	static int s_iFailedGuildWall = 0;
+	static int s_iFailedCannotPick = 0;
+	static int s_iFailedNoInstance = 0;
+	const DWORD dwNow = ELTimer_GetMSec();
+
 	// NOTE : ShowAll 시에는 모든 Instance 의 Pointer 를 찾아서 체크하므로 부하가 걸릴 가능성도 있다.
 	//        CInstanceBase 가 TextTail 을 직접 가지고 있는 것이 가장 좋은 형태일 듯..
-	if (!pTextTail->pOwner->isShow())
-		return;
-	
+
+	// DX11 Model Sync M3-TEXTTAIL-24: Removed owner->isShow() check
+	// Previous implementation checked view frustum culling state (m_isVisible set by CullingManager),
+	// which rejected entities slightly off-screen or aggressively culled by DX11.
+	// This caused excessive fail_not_show (7,500-14,000 per 10s) for valid texttails.
+	// Texttails have independent distance culling (m_fOptimizationMaxDistance) and
+	// projection validation (UpdateTextTail lines 217-235), so owner render state is not needed.
+	//
+	// if (!pTextTail->pOwner->isShow())
+	// {
+	//     ++s_iFailedOwnerNotShow;
+	//     return;
+	// }
+
 	CInstanceBase * pInstance = CPythonCharacterManager::Instance().GetInstancePtr(pTextTail->dwVirtualID);
 	if (!pInstance)
+	{
+		++s_iFailedNoInstance;
+		++g_iStateBlocked;  // M2-UIPY-40: Track all state blocks globally
+
+		// M2-UI-PARITY-FILTER-25: Check if ScreenFilter overlay is active when tail blocked
+		static DWORD s_dwLastOverlayBlockLog = 0;
+		const DWORD dwNow = ELTimer_GetMSec();
+		if (dwNow - s_dwLastOverlayBlockLog >= 15000)
+		{
+			s_dwLastOverlayBlockLog = dwNow;
+
+			// Query DX11 device for overlay state
+			CGraphicDeviceDX11* pDX11 = CGraphicDeviceDX11::GetActiveDevice();
+			ID3D11RenderTargetView* pCurrentRTV = nullptr;
+			ID3D11DepthStencilView* pCurrentDSV = nullptr;
+			bool hasRTBound = false;
+
+			if (pDX11 && pDX11->IsValid())
+			{
+				ID3D11DeviceContext* pContext = pDX11->GetContext();
+				if (pContext)
+				{
+					pContext->OMGetRenderTargets(1, &pCurrentRTV, &pCurrentDSV);
+					hasRTBound = (pCurrentRTV != nullptr);
+
+					if (pCurrentRTV) pCurrentRTV->Release();
+					if (pCurrentDSV) pCurrentDSV->Release();
+				}
+			}
+
+			TraceError("DX11_TEXTTAIL_FILTER_PARITY tail_blocked_no_instance has_rt_bound=%d virtual_id=%u",
+				hasRTBound ? 1 : 0, pTextTail->dwVirtualID);
+		}
 		return;
+	}
 
 	if (pInstance->IsGuildWall())
+	{
+		++s_iFailedGuildWall;
+		++g_iStateBlocked;  // M2-UIPY-40: Track all state blocks globally
 		return;
+	}
 
-	if (pInstance->CanPickInstance())
-		m_CharacterTextTailList.push_back(pTextTail);		
+	// M2-UI-TEXTTAIL-PARITY-26: Texttail visibility check passed
+	// Note: Atlas readiness is handled internally by CGraphicTextInstance::Render()
+	// via the startup guard (__IsDX11TextStartupGuardActive) which was extended to 5000ms
+	// and resets on phase changes (CreateDeviceObjects callback).
+	++s_iPassedAll;
+	m_CharacterTextTailList.push_back(pTextTail);
+
+	if (0 == s_dwVisibilityTelemetryTick || dwNow - s_dwVisibilityTelemetryTick >= 10000u)
+	{
+		s_dwVisibilityTelemetryTick = dwNow;
+		TraceError("DX11_TEXTTAIL_VISIBILITY passed=%d fail_not_show=%d fail_no_instance=%d fail_guild_wall=%d fail_cannot_pick=%d",
+			s_iPassedAll, s_iFailedOwnerNotShow, s_iFailedNoInstance, s_iFailedGuildWall, s_iFailedCannotPick);
+		s_iPassedAll = 0;
+		s_iFailedOwnerNotShow = 0;
+		s_iFailedNoInstance = 0;
+		s_iFailedGuildWall = 0;
+		s_iFailedCannotPick = 0;
+	}
 }
 
 void CPythonTextTail::ShowItemTextTail(DWORD VirtualID)
@@ -1318,7 +1856,7 @@ CPythonTextTail::CPythonTextTail()
 	m_dwLastArrangeTime = 0;
 	m_dwArrangeIntervalMS = 100;
 	m_iMaxRenderCount = 80;
-	m_fOptimizationMaxDistance = 3500.0f;
+	m_fOptimizationMaxDistance = DX11RuntimeConfig::kTextTailDefaultMaxDistance;
 	m_dwLastArrangeMS = 0;
 	m_dwLastRenderMS = 0;
 	m_dwLastCollisionChecks = 0;

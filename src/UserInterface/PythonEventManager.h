@@ -140,8 +140,8 @@ class CPythonEventManager : public CSingleton<CPythonEventManager>
 
 			PyObject * poEventHandler;
 
-			SEventSet() {}
-			virtual ~SEventSet() {}
+			SEventSet() = default;
+			virtual ~SEventSet() = default;
 		} TEventSet;
 
 		typedef std::vector<TEventSet*> TEventSetVector;

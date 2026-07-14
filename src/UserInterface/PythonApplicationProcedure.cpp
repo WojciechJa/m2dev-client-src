@@ -7,7 +7,7 @@
 
 static int gs_nMouseCaptureRef = 0;
 static bool gs_bImGuiMouseCapturedPrev = false;
-#ifdef DX11_STRICT_ONLY
+#ifdef BUILD_DEBUG_UI
 static DWORD gs_dwLastInputArbKeyLogMS = 0;
 static DWORD gs_dwLastInputArbMouseLogMS = 0;
 static const DWORD gs_dwInputArbLogThrottleMS = 1000;
@@ -54,7 +54,7 @@ void CPythonApplication::__MinimizeFullScreenWindow(HWND hWnd, DWORD dwWidth, DW
 
 LRESULT CPythonApplication::WindowProcedure(HWND hWnd, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
-#ifdef DX11_STRICT_ONLY
+#ifdef BUILD_DEBUG_UI
 	// DX11 Model Sync: Forward input to ImGui Developer Monitoring Tool
 	if (CImGuiManager::Instance())
 	{

@@ -2,6 +2,7 @@
 #include "PythonApplication.h"
 
 #undef C8
+#include <bit>
 #include <wrl.h>
 #include <wil/com.h>
 #include <WebView2.h>
@@ -12,8 +13,8 @@
 #include <locale>
 #include <codecvt>
 
-static wil::com_ptr<ICoreWebView2> gs_webView;
-static wil::com_ptr<ICoreWebView2Controller> gs_webViewController;
+static wil::com_ptr_nothrow<ICoreWebView2> gs_webView;
+static wil::com_ptr_nothrow<ICoreWebView2Controller> gs_webViewController;
 
 using convert_type = std::codecvt_utf8<wchar_t>;
 static std::wstring_convert<convert_type, wchar_t> converter;
@@ -59,7 +60,7 @@ void CPythonApplication::ShowWebPage(const char* c_szURL, const RECT& c_rcWebPag
 			// Add a few settings for the webview
 			// The demo step is redundant since the values are the default settings
 #ifdef _LIVE
-			wil::com_ptr<ICoreWebView2Settings> baseSettings;
+			wil::com_ptr_nothrow<ICoreWebView2Settings> baseSettings;
 			gs_webView->get_Settings(&baseSettings);
 
 			auto settings = baseSettings.try_query< ICoreWebView2Settings3>();

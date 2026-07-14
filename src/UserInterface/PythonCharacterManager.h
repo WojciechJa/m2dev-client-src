@@ -4,6 +4,8 @@
 #include "InstanceBase.h"
 #include "GameLib/PhysicsObject.h"
 
+class CGraphicThingInstance;
+
 class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, public IAbstractCharacterManager, public IObjectManager
 {
 	public:
@@ -28,7 +30,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 
 		bool OLD_GetPickedInstanceVID(DWORD* pdwPickedActorID);
 		CInstanceBase* OLD_GetPickedInstancePtr();
-		D3DXVECTOR2& OLD_GetPickedInstPosReference();
+		DirectX::SimpleMath::Vector2& OLD_GetPickedInstPosReference();
 
 		CInstanceBase* FindClickableInstancePtr();
 
@@ -59,6 +61,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		void								Update();
 		void								Deform();
 		void								Render();
+		void								CollectVisibleThingInstancesDX11(std::vector<CGraphicThingInstance*>& outInstances);
 		void								SetAnimationLODSettings(bool bEnable, int iProfile);
 		void								RenderShadowMainInstance();
 		void								RenderShadowAllInstances();
@@ -92,6 +95,8 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		// Refresh TextTail
 		void								RefreshAllPCTextTail();
 		void								RefreshAllGuildMark();
+		DWORD								GetAliveInstanceCount() const { return static_cast<DWORD>(m_kAliveInstMap.size()); }
+		DWORD								GetDeadInstanceCount() const { return static_cast<DWORD>(m_kDeadInstList.size()); }
 
 	protected:
 		void								UpdateTransform();
@@ -118,7 +123,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		CInstanceBase *						m_pkInstMain;
 		CInstanceBase *						m_pkInstPick;
 		CInstanceBase *						m_pkInstBind;
-		D3DXVECTOR2							m_v2PickedInstProjPos;
+		DirectX::SimpleMath::Vector2							m_v2PickedInstProjPos;
 
 		TCharacterInstanceMap				m_kAliveInstMap;
 		TCharacterInstanceList				m_kDeadInstList;
@@ -133,7 +138,7 @@ class CPythonCharacterManager : public CSingleton<CPythonCharacterManager>, publ
 		DWORD								m_dwLastDeadSortFrame;
 		DWORD								m_dwLastSortTargetVID;
 		bool								m_bHasLastSortCameraEye;
-		D3DXVECTOR3							m_v3LastSortCameraEye;
+		DirectX::SimpleMath::Vector3							m_v3LastSortCameraEye;
 		bool								m_bAnimLODEnabled;
 		int									m_iAnimLODProfile;
 		DWORD								m_dwAnimLODFrameCounter;

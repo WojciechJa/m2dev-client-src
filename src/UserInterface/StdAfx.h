@@ -18,11 +18,9 @@
 #include "PRTerrainLib/StdAfx.h"
 #include "SpeedTreeLib/StdAfx.h"
 
-#ifndef __D3DRM_H__
-#define __D3DRM_H__
-#endif
+// DIK_* constants and input keycodes are shared with existing UI Python bindings.
+#include "EterLib/Input.h"
 
-#include <dshow.h>
 #include "Locale.h"
 #include "GameType.h"
 

@@ -62,11 +62,11 @@ bool CInstanceBase::NEW_CanMoveToDestPixelPosition(const TPixelPosition& c_rkPPo
 
 float CInstanceBase_GetDegreeFromPosition(float x, float y)
 {
-	D3DXVECTOR3 vtDir(floor(x), floor(y), 0.0f);
-	D3DXVec3Normalize(&vtDir, &vtDir);
+	DirectX::SimpleMath::Vector3 vtDir(floor(x), floor(y), 0.0f);
+	vtDir.Normalize();
 
-	D3DXVECTOR3 vtStan(0, -1, 0);
-	float ret = D3DXToDegree(acosf(D3DXVec3Dot(&vtDir, &vtStan)));
+	DirectX::SimpleMath::Vector3 vtStan(0, -1, 0);
+	float ret = D3DXToDegree(acosf(vtDir.Dot(vtStan)));
 
 	if (vtDir.x < 0.0f)
 		ret = 360.0f - ret;
@@ -316,15 +316,15 @@ void CInstanceBase::NEW_MoveToDirection(float fDirRot)
 	TPixelPosition kPPosCur;
 	NEW_GetPixelPosition(&kPPosCur);
 	
-	D3DXVECTOR3 kD3DVt3Cur(kPPosCur.x, -kPPosCur.y, kPPosCur.z);		
-	D3DXVECTOR3 kD3DVt3Dst;
+	DirectX::SimpleMath::Vector3 kD3DVt3Cur(kPPosCur.x, -kPPosCur.y, kPPosCur.z);		
+	DirectX::SimpleMath::Vector3 kD3DVt3Dst;
 
-	D3DXVECTOR3 kD3DVt3AdvDir(0.0f, -1.0f, 0.0f);
-	D3DXMATRIX kD3DMatAdv;
-	D3DXMatrixRotationZ(&kD3DMatAdv, D3DXToRadian(fDirRot));
-	D3DXVec3TransformCoord(&kD3DVt3AdvDir, &kD3DVt3AdvDir, &kD3DMatAdv);
-	D3DXVec3Scale(&kD3DVt3AdvDir, &kD3DVt3AdvDir, 300.0f);
-	D3DXVec3Add(&kD3DVt3Dst, &kD3DVt3AdvDir, &kD3DVt3Cur);
+		DirectX::SimpleMath::Vector3 kD3DVt3AdvDir(0.0f, -1.0f, 0.0f);
+		DirectX::SimpleMath::Matrix kD3DMatAdv;
+		kD3DMatAdv = DirectX::SimpleMath::Matrix::CreateRotationZ(DirectX::XMConvertToRadians(fDirRot));
+		kD3DVt3AdvDir = DirectX::SimpleMath::Vector3::Transform(kD3DVt3AdvDir, kD3DMatAdv);
+		kD3DVt3AdvDir = kD3DVt3AdvDir * 300.0f;
+		kD3DVt3Dst = kD3DVt3AdvDir + kD3DVt3Cur;
 
 	TPixelPosition kPPosDst;
 	kPPosDst.x = +kD3DVt3Dst.x;

@@ -480,7 +480,7 @@ class CInstanceBase
 		void					RegisterBoundingSphere();
 
 		// Temporary
-		void					GetBoundBox(D3DXVECTOR3 * vtMin, D3DXVECTOR3 * vtMax);
+		void					GetBoundBox(DirectX::SimpleMath::Vector3 * vtMin, DirectX::SimpleMath::Vector3 * vtMax);
 
 		void					SetNameString(const char* c_szName, int len);
 		bool					SetRace(DWORD dwRaceIndex);
@@ -869,7 +869,7 @@ class CInstanceBase
 
 		void					__ComboProcess();
 		void					MovementProcess();
-		void					TodoProcess();
+	void					ProcessDeferredTasks();
 		void					StateProcess();
 		void					AttackProcess();
 

@@ -33,7 +33,7 @@ PyObject * effectCreateEffect(PyObject * poSelf, PyObject * poArgs)
 	CInstanceBase * pInstance = CPythonCharacterManager::Instance().GetSelectedInstancePtr();
 	TPixelPosition PixelPosition;
 	pInstance->NEW_GetPixelPosition(&PixelPosition);
-	int iIndex = CEffectManager::Instance().CreateEffect(szEffectName, PixelPosition, D3DXVECTOR3(0.0f, 0.0f, 0.0f));
+	int iIndex = CEffectManager::Instance().CreateEffect(szEffectName, PixelPosition, DirectX::SimpleMath::Vector3(0.0f, 0.0f, 0.0f));
 
 	return Py_BuildValue("i", iIndex);
 }
@@ -65,7 +65,7 @@ PyObject * effectSetPosition(PyObject * poSelf, PyObject * poArgs)
 		return Py_BuildException();
 
 	CEffectManager::Instance().SelectEffectInstance(iIndex);
-	CEffectManager::Instance().SetEffectInstancePosition(D3DXVECTOR3(fx, fy, fz));
+	CEffectManager::Instance().SetEffectInstancePosition(DirectX::SimpleMath::Vector3(fx, fy, fz));
 
 	return Py_BuildNone();
 }

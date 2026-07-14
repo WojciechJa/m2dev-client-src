@@ -26,9 +26,9 @@ class CGuildMarkDownloader : public CNetworkStream, public CSingleton<CGuildMark
 
 		enum
 		{
-			TODO_RECV_NONE,
-			TODO_RECV_MARK,
-			TODO_RECV_SYMBOL,
+			RECV_PLAN_NONE,
+			RECV_PLAN_MARK,
+			RECV_PLAN_SYMBOL,
 		};
 
 	private:
@@ -60,7 +60,7 @@ class CGuildMarkDownloader : public CNetworkStream, public CSingleton<CGuildMark
 	private:
 		DWORD m_dwHandle;
 		DWORD m_dwRandomKey;
-		DWORD m_dwTodo;
+		DWORD m_dwRecvPlan;
 
 		std::vector<DWORD> m_kVec_dwGuildID;
 
@@ -76,3 +76,4 @@ class CGuildMarkDownloader : public CNetworkStream, public CSingleton<CGuildMark
 
 		std::set<DWORD> m_setUpdatedImageIndices;
 };
+

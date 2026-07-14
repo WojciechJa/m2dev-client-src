@@ -8,7 +8,7 @@
 #include "AbstractApplication.h"
 #include "packet.h"
 
-#include "EterLib/StateManager.h"
+#include "EterLib/GrpDeviceDX11.h"
 #include "GameLib/ItemManager.h"
 
 BOOL HAIR_COLOR_ENABLE=FALSE;
@@ -308,8 +308,8 @@ bool __ArmorVnumToShape(int iVnum, DWORD * pdwShape)
 class CActorInstanceBackground : public IBackground
 {
 	public:
-		CActorInstanceBackground() {}
-		virtual ~CActorInstanceBackground() {}
+		CActorInstanceBackground() = default;
+		virtual ~CActorInstanceBackground() = default;
 		bool IsBlock(int x, int y)
 		{
 			CPythonBackground& rkBG=CPythonBackground::Instance();
@@ -388,10 +388,9 @@ CDynamicPool<CInstanceBase> CInstanceBase::ms_kPool;
 
 bool CInstanceBase::__IsInDustRange()
 {
-	if (!__IsExistMainInstance())
-		return false;
-
 	CInstanceBase* pkInstMain=__GetMainInstancePtr();
+	if (!pkInstMain)
+		return false;
 
 	float fDistance=NEW_GetDistanceFromDestInstance(*pkInstMain);
 
@@ -1569,7 +1568,7 @@ void CInstanceBase::MovementProcess()
 
 	TPixelPosition kPPosNext;
 	{
-		const D3DXVECTOR3 & c_rkV3Mov = m_GraphicThingInstance.GetMovementVectorRef();
+		const DirectX::SimpleMath::Vector3 & c_rkV3Mov = m_GraphicThingInstance.GetMovementVectorRef();
 
 		kPPosNext.x = kPPosCur.x + (+c_rkV3Mov.x);
 		kPPosNext.y = kPPosCur.y + (-c_rkV3Mov.y);
@@ -1935,7 +1934,7 @@ void CInstanceBase::Transform()
 	{
 		if (IsWalking() || m_GraphicThingInstance.IsUsingMovingSkill())
 		{
-			const D3DXVECTOR3& c_rv3Movment=m_GraphicThingInstance.GetMovementVectorRef();
+			const DirectX::SimpleMath::Vector3& c_rv3Movment=m_GraphicThingInstance.GetMovementVectorRef();
 
 			float len=(c_rv3Movment.x*c_rv3Movment.x)+(c_rv3Movment.y*c_rv3Movment.y);
 			if (len>1.0f)
@@ -2017,28 +2016,27 @@ void CInstanceBase::Render()
 		{
 			static CScreen s_kScreen;
 
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_COLORARG1,	D3DTA_DIFFUSE);
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_COLOROP,	D3DTOP_SELECTARG1);
-			STATEMANAGER.SetTextureStageState(0, D3DTSS_ALPHAOP,	D3DTOP_DISABLE);	
-			STATEMANAGER.SaveRenderState(D3DRS_ZENABLE, FALSE);
-			STATEMANAGER.SetRenderState(D3DRS_FOGENABLE, FALSE);
-			STATEMANAGER.SetRenderState(D3DRS_LIGHTING, FALSE);
-			
 			TPixelPosition px;
 			m_GraphicThingInstance.GetPixelPosition(&px);
-			D3DXVECTOR3 kD3DVt3Cur(px.x, px.y, px.z);
-			//D3DXVECTOR3 kD3DVt3Cur(NEW_GetSrcPixelPositionRef().x, -NEW_GetSrcPixelPositionRef().y, NEW_GetSrcPixelPositionRef().z);
-			D3DXVECTOR3 kD3DVt3Dest(NEW_GetDstPixelPositionRef().x, -NEW_GetDstPixelPositionRef().y, NEW_GetDstPixelPositionRef().z);
+			DirectX::SimpleMath::Vector3 kD3DVt3Cur(px.x, px.y, px.z);
+			DirectX::SimpleMath::Vector3 kD3DVt3Dest(NEW_GetDstPixelPositionRef().x, -NEW_GetDstPixelPositionRef().y, NEW_GetDstPixelPositionRef().z);
 
-			//printf("%s %f\n", GetNameString(), kD3DVt3Cur.y - kD3DVt3Dest.y);
-			//float fdx = NEW_GetDstPixelPositionRef().x - NEW_GetSrcPixelPositionRef().x;
-			//float fdy = NEW_GetDstPixelPositionRef().y - NEW_GetSrcPixelPositionRef().y;
-
-			s_kScreen.SetDiffuseColor(0.0f, 0.0f, 1.0f);
-			s_kScreen.RenderLine3d(kD3DVt3Cur.x, kD3DVt3Cur.y, px.z, kD3DVt3Dest.x, kD3DVt3Dest.y, px.z);
-			STATEMANAGER.RestoreRenderState(D3DRS_ZENABLE);
-			STATEMANAGER.SetRenderState(D3DRS_FOGENABLE, TRUE);
-			STATEMANAGER.SetRenderState(D3DRS_LIGHTING, TRUE);
+			CGraphicDeviceDX11* pDX11Device = CGraphicDeviceDX11::GetActiveDevice();
+			if (pDX11Device && pDX11Device->IsValid())
+			{
+				// Strict path: render debug line through native DX11 screen path only.
+				s_kScreen.SetDiffuseColor(0.0f, 0.0f, 1.0f);
+				s_kScreen.RenderLine3d(kD3DVt3Cur.x, kD3DVt3Cur.y, px.z, kD3DVt3Dest.x, kD3DVt3Dest.y, px.z);
+			}
+			else
+			{
+				static bool s_bLoggedDX11DirLineSkip = false;
+				if (!s_bLoggedDX11DirLineSkip)
+				{
+					s_bLoggedDX11DirLineSkip = true;
+					TraceError("DX11_DIRLINE_SKIP reason=no_dx11_device");
+				}
+			}
 		}
 	}	
 }
@@ -2054,10 +2052,9 @@ void CInstanceBase::RenderToShadowMap()
 	if (!__CanRender())
 		return;
 
-	if (!__IsExistMainInstance())
-		return;
-
 	CInstanceBase* pkInstMain=__GetMainInstancePtr();
+	if (!pkInstMain)
+		return;
 
 	const float SHADOW_APPLY_DISTANCE = 2500.0f;
 
@@ -3156,7 +3153,7 @@ CInstanceBase::~CInstanceBase()
 }
 
 
-void CInstanceBase::GetBoundBox(D3DXVECTOR3 * vtMin, D3DXVECTOR3 * vtMax)
+void CInstanceBase::GetBoundBox(DirectX::SimpleMath::Vector3 * vtMin, DirectX::SimpleMath::Vector3 * vtMax)
 {
 	m_GraphicThingInstance.GetBoundBox(vtMin, vtMax);
 }

@@ -1,6 +1,8 @@
 #pragma once
 
-// Legacy DirectShow/qedit dependency shim.
-// DX11 runtime does not use D3DRM; this header exists only to satisfy
-// old SDK include chains (dxtrans.h -> d3drm.h) during migration.
-#include "directx9_old_notused/d3drm.h"
+// DirectShow's legacy dxtrans.h still includes d3drm.h, but the classic DX11
+// client does not use retained-mode Direct3D.  Keep the SDK include chain
+// satisfied without depending on the removed d3drmobj.h header.
+#ifndef __D3DRM_H__
+#define __D3DRM_H__
+#endif

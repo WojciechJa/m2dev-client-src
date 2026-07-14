@@ -5,6 +5,51 @@
 #define DEFAULT_VALUE_ALWAYS_SHOW_NAME		true
 
 namespace {
+	int NormalizeRenderAPI(int iRenderAPI)
+	{
+#if defined(DX11_STRICT_ONLY)
+		(void)iRenderAPI;
+		return 11;
+#else
+		switch (iRenderAPI)
+		{
+			case 9:
+			case 11:
+				return iRenderAPI;
+			default:
+				return 9;
+		}
+#endif
+	}
+
+	int ParseRenderAPI(const char* c_szValue)
+	{
+		if (!c_szValue || !c_szValue[0])
+			return 9;
+
+		if (!stricmp(c_szValue, "DX11"))
+			return 11;
+		if (!stricmp(c_szValue, "DX9"))
+			return 9;
+
+		return NormalizeRenderAPI(atoi(c_szValue));
+	}
+
+	const char* RenderAPIToString(int iRenderAPI)
+	{
+		return NormalizeRenderAPI(iRenderAPI) == 11 ? "DX11" : "DX9";
+	}
+
+	int NormalizeShaderCacheVersion(int iVersion)
+	{
+		if (iVersion < 1)
+			return 1;
+		if (iVersion > 1024)
+			return 1024;
+
+		return iVersion;
+	}
+
 	int NormalizeRenderFPSLimit(int iFPSLimit)
 	{
 		switch (iFPSLimit)
@@ -16,6 +61,48 @@ namespace {
 				return iFPSLimit;
 			default:
 				return 60;
+		}
+	}
+
+	int NormalizeDX11TexturePipelineMode(int iMode)
+	{
+		switch (iMode)
+		{
+		case 0:
+		case 1:
+		case 2:
+			return iMode;
+		default:
+			return 0;
+		}
+	}
+
+	int ParseDX11TexturePipelineMode(const char* c_szValue)
+	{
+		if (!c_szValue || !c_szValue[0])
+			return 0;
+
+		if (!stricmp(c_szValue, "NATIVE"))
+			return 0;
+		if (!stricmp(c_szValue, "HYBRID"))
+			return 1;
+		if (!stricmp(c_szValue, "LEGACY"))
+			return 2;
+
+		return NormalizeDX11TexturePipelineMode(atoi(c_szValue));
+	}
+
+	const char* DX11TexturePipelineModeToString(int iMode)
+	{
+		switch (NormalizeDX11TexturePipelineMode(iMode))
+		{
+		case 0:
+			return "NATIVE";
+		case 2:
+			return "LEGACY";
+		case 1:
+		default:
+			return "HYBRID";
 		}
 	}
 
@@ -91,8 +178,8 @@ namespace {
 
 void CPythonSystem::SetInterfaceHandler(PyObject * poHandler)
 {
-// NOTE : 레퍼런스 카운트는 바꾸지 않는다. 레퍼런스가 남아 있어 Python에서 완전히 지워지지 않기 때문.
-//        대신에 __del__때 Destroy를 호출해 Handler를 NULL로 셋팅한다. - [levites]
+// NOTE : ???????????? ???????????? ????????? ?????????. ??????????????? ?????? ?????? Python?????? ????????? ???????????? ?????? ??????.
+//        ????????? __del__??? Destroy??? ????????? Handler??? NULL??? ????????????. - [levites]
 //	if (m_poInterfaceHandler)
 //		Py_DECREF(m_poInterfaceHandler);
 
@@ -121,78 +208,74 @@ void CPythonSystem::GetDisplaySettings()
 	memset(m_ResolutionList, 0, sizeof(TResolution) * RESOLUTION_MAX_NUM);
 	m_ResolutionCount = 0;
 
-	LPDIRECT3D9EX lpD3D = CPythonGraphic::Instance().GetD3D();
-
-	D3DADAPTER_IDENTIFIER9 d3dAdapterIdentifier;
-	D3DDISPLAYMODE d3ddmDesktop;
-
-	lpD3D->GetAdapterIdentifier(0, 0, &d3dAdapterIdentifier);
-	lpD3D->GetAdapterDisplayMode(0, &d3ddmDesktop);
-
-	// 이 어뎁터가 가지고 있는 디스플래이 모드갯수를 나열한다..
-	DWORD dwNumAdapterModes = lpD3D->GetAdapterModeCount(0, d3ddmDesktop.Format);
-
-	for (UINT iMode = 0; iMode < dwNumAdapterModes; iMode++)
+	auto AddDisplayMode = [&](DWORD width, DWORD height, DWORD bpp, DWORD refreshRate)
 	{
-		D3DDISPLAYMODE DisplayMode;
-		lpD3D->EnumAdapterModes(0, d3ddmDesktop.Format, iMode, &DisplayMode);
-		DWORD bpp = 0;
+		if (width < 800 || height < 600)
+			return;
 
-		// 800 600 이상만 걸러낸다.
-		if (DisplayMode.Width < 800 || DisplayMode.Height < 600)
-			continue;
+		if (bpp != 16 && bpp != 32)
+			return;
 
-		// 일단 16bbp 와 32bbp만 취급하자.
-		// 16bbp만 처리하게끔 했음 - [levites]
-		if (DisplayMode.Format == D3DFMT_R5G6B5)
-			bpp = 16;
-		else if (DisplayMode.Format == D3DFMT_X8R8G8B8)
-			bpp = 32;
-		else
-			continue;
+		if (refreshRate < 30u || refreshRate > 1000u)
+			refreshRate = 60u;
 
-		int check_res = false;
-
-		for (int i = 0; !check_res && i < m_ResolutionCount; ++i)
+		int iResolutionIndex = -1;
+		for (int i = 0; i < m_ResolutionCount; ++i)
 		{
-			if (m_ResolutionList[i].bpp != bpp ||
-				m_ResolutionList[i].width != DisplayMode.Width ||
-				m_ResolutionList[i].height != DisplayMode.Height)
-				continue;
-
-			int check_fre = false;
-
-			// 프리퀀시만 다르므로 프리퀀시만 셋팅해준다.
-			for (int j = 0; j < m_ResolutionList[i].frequency_count; ++j)
+			if (m_ResolutionList[i].bpp == bpp &&
+				m_ResolutionList[i].width == width &&
+				m_ResolutionList[i].height == height)
 			{
-				if (m_ResolutionList[i].frequency[j] == DisplayMode.RefreshRate)
-				{
-					check_fre = true;
-					break;
-				}
-			}
-
-			if (!check_fre)
-				if (m_ResolutionList[i].frequency_count < FREQUENCY_MAX_NUM)
-					m_ResolutionList[i].frequency[m_ResolutionList[i].frequency_count++] = DisplayMode.RefreshRate;
-
-			check_res = true;
-		}
-
-		if (!check_res)
-		{
-			// 새로운 거니까 추가해주자.
-			if (m_ResolutionCount < RESOLUTION_MAX_NUM)
-			{
-				m_ResolutionList[m_ResolutionCount].width			= DisplayMode.Width;
-				m_ResolutionList[m_ResolutionCount].height			= DisplayMode.Height;
-				m_ResolutionList[m_ResolutionCount].bpp				= bpp;
-				m_ResolutionList[m_ResolutionCount].frequency[0]	= DisplayMode.RefreshRate;
-				m_ResolutionList[m_ResolutionCount].frequency_count	= 1;
-
-				++m_ResolutionCount;
+				iResolutionIndex = i;
+				break;
 			}
 		}
+
+		if (iResolutionIndex < 0)
+		{
+			if (m_ResolutionCount >= RESOLUTION_MAX_NUM)
+				return;
+
+			iResolutionIndex = m_ResolutionCount++;
+			m_ResolutionList[iResolutionIndex].width = width;
+			m_ResolutionList[iResolutionIndex].height = height;
+			m_ResolutionList[iResolutionIndex].bpp = bpp;
+			m_ResolutionList[iResolutionIndex].frequency_count = 0;
+		}
+
+		TResolution& rkResolution = m_ResolutionList[iResolutionIndex];
+		for (int j = 0; j < rkResolution.frequency_count; ++j)
+		{
+			if (rkResolution.frequency[j] == refreshRate)
+				return;
+		}
+
+		int iFrequencyCap = static_cast<int>(sizeof(rkResolution.frequency) / sizeof(rkResolution.frequency[0]));
+		if (iFrequencyCap > FREQUENCY_MAX_NUM)
+			iFrequencyCap = FREQUENCY_MAX_NUM;
+		if (rkResolution.frequency_count < iFrequencyCap)
+			rkResolution.frequency[rkResolution.frequency_count++] = refreshRate;
+	};
+
+	static bool s_bLoggedDisplayEnumerationPath = false;
+	if (!s_bLoggedDisplayEnumerationPath)
+	{
+		s_bLoggedDisplayEnumerationPath = true;
+		TraceError("DX11_DISPLAY_ENUM path=EnumDisplaySettingsA reason=dx11_single_path");
+	}
+
+	DEVMODEA kMode;
+	ZeroMemory(&kMode, sizeof(kMode));
+	kMode.dmSize = sizeof(kMode);
+
+	for (DWORD dwModeNum = 0; EnumDisplaySettingsA(NULL, dwModeNum, &kMode); ++dwModeNum)
+	{
+		AddDisplayMode(kMode.dmPelsWidth, kMode.dmPelsHeight, kMode.dmBitsPerPel, kMode.dmDisplayFrequency);
+	}
+
+	if (m_ResolutionCount == 0)
+	{
+		AddDisplayMode(m_Config.width, m_Config.height, m_Config.bpp, m_Config.frequency);
 	}
 }
 
@@ -283,6 +366,26 @@ DWORD CPythonSystem::GetFrequency()
 	return m_Config.frequency;
 }
 
+int CPythonSystem::GetRenderAPI()
+{
+	return NormalizeRenderAPI(m_Config.iRenderAPI);
+}
+
+void CPythonSystem::SetRenderAPI(int iRenderAPI)
+{
+	m_Config.iRenderAPI = NormalizeRenderAPI(iRenderAPI);
+}
+
+int CPythonSystem::GetShaderCacheVersion()
+{
+	return NormalizeShaderCacheVersion(m_Config.iShaderCacheVersion);
+}
+
+void CPythonSystem::SetShaderCacheVersion(int iVersion)
+{
+	m_Config.iShaderCacheVersion = NormalizeShaderCacheVersion(iVersion);
+}
+
 int CPythonSystem::GetRenderFPSLimit()
 {
 	return NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit);
@@ -301,6 +404,346 @@ bool CPythonSystem::IsVSyncEnabled()
 void CPythonSystem::SetVSyncEnabled(bool isEnabled)
 {
 	m_Config.bVSync = isEnabled;
+}
+
+bool CPythonSystem::IsDX11ExperimentalPresentEnabled()
+{
+	return m_Config.bDX11ExperimentalPresent;
+}
+
+void CPythonSystem::SetDX11ExperimentalPresentEnabled(bool isEnabled)
+{
+	m_Config.bDX11ExperimentalPresent = isEnabled;
+}
+
+bool CPythonSystem::IsDX11FirstPassActiveEnabled()
+{
+	return m_Config.bDX11FirstPassActive;
+}
+
+void CPythonSystem::SetDX11FirstPassActiveEnabled(bool isEnabled)
+{
+	m_Config.bDX11FirstPassActive = isEnabled;
+}
+
+bool CPythonSystem::IsDX11NativeVisibleEnabled()
+{
+	return m_Config.bDX11NativeVisible;
+}
+
+void CPythonSystem::SetDX11NativeVisibleEnabled(bool isEnabled)
+{
+	m_Config.bDX11NativeVisible = isEnabled;
+}
+
+bool CPythonSystem::IsDX11NativeUIMinimalEnabled()
+{
+	return m_Config.bDX11NativeUIMinimal;
+}
+
+void CPythonSystem::SetDX11NativeUIMinimalEnabled(bool isEnabled)
+{
+	m_Config.bDX11NativeUIMinimal = isEnabled;
+}
+
+bool CPythonSystem::IsDX11NativeWorldMinimalEnabled()
+{
+	return m_Config.bDX11NativeWorldMinimal;
+}
+
+void CPythonSystem::SetDX11NativeWorldMinimalEnabled(bool isEnabled)
+{
+	m_Config.bDX11NativeWorldMinimal = isEnabled;
+}
+
+bool CPythonSystem::IsDX11NativeWorldForceVisibleEnabled()
+{
+	return m_Config.bDX11NativeWorldForceVisible;
+}
+
+void CPythonSystem::SetDX11NativeWorldForceVisibleEnabled(bool isEnabled)
+{
+	m_Config.bDX11NativeWorldForceVisible = isEnabled;
+}
+
+bool CPythonSystem::IsDX11NativeWorldAutoGateEnabled()
+{
+	return m_Config.bDX11NativeWorldAutoGate;
+}
+
+void CPythonSystem::SetDX11NativeWorldAutoGateEnabled(bool isEnabled)
+{
+	m_Config.bDX11NativeWorldAutoGate = isEnabled;
+}
+
+bool CPythonSystem::IsDX11StrictNativeOnlyEnabled()
+{
+	return m_Config.bDX11StrictNativeOnly;
+}
+
+void CPythonSystem::SetDX11StrictNativeOnlyEnabled(bool isEnabled)
+{
+	m_Config.bDX11StrictNativeOnly = isEnabled;
+}
+
+bool CPythonSystem::IsDX11DisableDX9CompatDeviceEnabled()
+{
+	return m_Config.bDX11DisableDX9CompatDevice;
+}
+
+void CPythonSystem::SetDX11DisableDX9CompatDeviceEnabled(bool isEnabled)
+{
+	m_Config.bDX11DisableDX9CompatDevice = isEnabled;
+}
+
+bool CPythonSystem::IsDX11TerrainStabilizationModeEnabled()
+{
+	return m_Config.bDX11TerrainStabilizationMode;
+}
+
+void CPythonSystem::SetDX11TerrainStabilizationModeEnabled(bool isEnabled)
+{
+	m_Config.bDX11TerrainStabilizationMode = isEnabled;
+}
+
+int CPythonSystem::GetDX11TexturePipelineMode()
+{
+	return NormalizeDX11TexturePipelineMode(m_Config.iDX11TexturePipelineMode);
+}
+
+void CPythonSystem::SetDX11TexturePipelineMode(int iMode)
+{
+	m_Config.iDX11TexturePipelineMode = NormalizeDX11TexturePipelineMode(iMode);
+}
+
+bool CPythonSystem::IsDX11VisibleBootstrapEnabled()
+{
+	return m_Config.bDX11VisibleBootstrap;
+}
+
+void CPythonSystem::SetDX11VisibleBootstrapEnabled(bool isEnabled)
+{
+	m_Config.bDX11VisibleBootstrap = isEnabled;
+}
+
+bool CPythonSystem::IsDX11UIPassOnlyEnabled()
+{
+	return m_Config.bDX11UIPassOnly;
+}
+
+void CPythonSystem::SetDX11UIPassOnlyEnabled(bool isEnabled)
+{
+	m_Config.bDX11UIPassOnly = isEnabled;
+}
+
+bool CPythonSystem::IsDX11UINativeTestEnabled()
+{
+	return m_Config.bDX11UINativeTest;
+}
+
+void CPythonSystem::SetDX11UINativeTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11UINativeTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11UITextureTestEnabled()
+{
+	return m_Config.bDX11UITextureTest;
+}
+
+void CPythonSystem::SetDX11UITextureTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11UITextureTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldDepthTestEnabled()
+{
+	return m_Config.bDX11WorldDepthTest;
+}
+
+void CPythonSystem::SetDX11WorldDepthTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldDepthTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldBatchTestEnabled()
+{
+	return m_Config.bDX11WorldBatchTest;
+}
+
+void CPythonSystem::SetDX11WorldBatchTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldBatchTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldSpriteTestEnabled()
+{
+	return m_Config.bDX11WorldSpriteTest;
+}
+
+void CPythonSystem::SetDX11WorldSpriteTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldSpriteTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldStateTestEnabled()
+{
+	return m_Config.bDX11WorldStateTest;
+}
+
+void CPythonSystem::SetDX11WorldStateTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldStateTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldPassesTestEnabled()
+{
+	return m_Config.bDX11WorldPassesTest;
+}
+
+void CPythonSystem::SetDX11WorldPassesTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldPassesTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldBridgeTestEnabled()
+{
+	return m_Config.bDX11WorldBridgeTest;
+}
+
+void CPythonSystem::SetDX11WorldBridgeTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldBridgeTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldSubsystemTestEnabled()
+{
+	return m_Config.bDX11WorldSubsystemTest;
+}
+
+void CPythonSystem::SetDX11WorldSubsystemTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldSubsystemTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldRealtimeTestEnabled()
+{
+	return m_Config.bDX11WorldRealtimeTest;
+}
+
+void CPythonSystem::SetDX11WorldRealtimeTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldRealtimeTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldMetricsTestEnabled()
+{
+	return m_Config.bDX11WorldMetricsTest;
+}
+
+void CPythonSystem::SetDX11WorldMetricsTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldMetricsTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldInstanceFeedTestEnabled()
+{
+	return m_Config.bDX11WorldInstanceFeedTest;
+}
+
+void CPythonSystem::SetDX11WorldInstanceFeedTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldInstanceFeedTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldFinalcheckTestEnabled()
+{
+	return m_Config.bDX11WorldFinalcheckTest;
+}
+
+void CPythonSystem::SetDX11WorldFinalcheckTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldFinalcheckTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldHandoffTestEnabled()
+{
+	return m_Config.bDX11WorldHandoffTest;
+}
+
+void CPythonSystem::SetDX11WorldHandoffTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldHandoffTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldSwapchainTestEnabled()
+{
+	return m_Config.bDX11WorldSwapchainTest;
+}
+
+void CPythonSystem::SetDX11WorldSwapchainTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldSwapchainTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldPresentPathTestEnabled()
+{
+	return m_Config.bDX11WorldPresentPathTest;
+}
+
+void CPythonSystem::SetDX11WorldPresentPathTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldPresentPathTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldVisiblePass1TestEnabled()
+{
+	return m_Config.bDX11WorldVisiblePass1Test;
+}
+
+void CPythonSystem::SetDX11WorldVisiblePass1TestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldVisiblePass1Test = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldComposerTestEnabled()
+{
+	return m_Config.bDX11WorldComposerTest;
+}
+
+void CPythonSystem::SetDX11WorldComposerTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldComposerTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldScenegraphTestEnabled()
+{
+	return m_Config.bDX11WorldScenegraphTest;
+}
+
+void CPythonSystem::SetDX11WorldScenegraphTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldScenegraphTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldPipelineTestEnabled()
+{
+	return m_Config.bDX11WorldPipelineTest;
+}
+
+void CPythonSystem::SetDX11WorldPipelineTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldPipelineTest = isEnabled;
+}
+
+bool CPythonSystem::IsDX11WorldFramegraphTestEnabled()
+{
+	return m_Config.bDX11WorldFramegraphTest;
+}
+
+void CPythonSystem::SetDX11WorldFramegraphTestEnabled(bool isEnabled)
+{
+	m_Config.bDX11WorldFramegraphTest = isEnabled;
 }
 
 int CPythonSystem::GetPerfProfile()
@@ -483,6 +926,7 @@ CPythonSystem::TConfig * CPythonSystem::GetConfig()
 void CPythonSystem::SetConfig(TConfig * pNewConfig)
 {
 	m_Config = *pNewConfig;
+	m_Config.iDX11TexturePipelineMode = NormalizeDX11TexturePipelineMode(m_Config.iDX11TexturePipelineMode);
 }
 
 void CPythonSystem::SetDefaultConfig()
@@ -494,8 +938,46 @@ void CPythonSystem::SetDefaultConfig()
 	m_Config.bpp				= 32;
 
 	m_Config.bWindowed			= false;
+	// Full DX11 policy: default runtime boots with DX11 renderer.
+	m_Config.iRenderAPI			= 11;
+	m_Config.iShaderCacheVersion = 1;
 	m_Config.iRenderFPSLimit	= 60;
 	m_Config.bVSync				= true;
+	m_Config.bDX11ExperimentalPresent = false;
+	m_Config.bDX11FirstPassActive = false;
+	m_Config.bDX11NativeVisible = false;
+	m_Config.bDX11NativeUIMinimal = false;
+	m_Config.bDX11NativeWorldMinimal = false;
+	m_Config.bDX11NativeWorldForceVisible = false;
+	m_Config.bDX11NativeWorldAutoGate = true;
+	// Full DX11 policy: default runtime uses strict native-only path.
+	m_Config.bDX11StrictNativeOnly = true;
+	m_Config.bDX11DisableDX9CompatDevice = false;
+	m_Config.bDX11TerrainStabilizationMode = false;
+	m_Config.iDX11TexturePipelineMode = 0;
+	m_Config.bDX11VisibleBootstrap = false;
+	m_Config.bDX11UIPassOnly = false;
+	m_Config.bDX11UINativeTest = false;
+	m_Config.bDX11UITextureTest = false;
+	m_Config.bDX11WorldDepthTest = false;
+	m_Config.bDX11WorldBatchTest = false;
+	m_Config.bDX11WorldSpriteTest = false;
+	m_Config.bDX11WorldStateTest = false;
+	m_Config.bDX11WorldPassesTest = false;
+	m_Config.bDX11WorldBridgeTest = false;
+	m_Config.bDX11WorldSubsystemTest = false;
+	m_Config.bDX11WorldRealtimeTest = false;
+	m_Config.bDX11WorldMetricsTest = false;
+	m_Config.bDX11WorldInstanceFeedTest = false;
+	m_Config.bDX11WorldFinalcheckTest = false;
+	m_Config.bDX11WorldHandoffTest = false;
+	m_Config.bDX11WorldSwapchainTest = false;
+	m_Config.bDX11WorldPresentPathTest = false;
+	m_Config.bDX11WorldVisiblePass1Test = true;
+	m_Config.bDX11WorldComposerTest = false;
+	m_Config.bDX11WorldScenegraphTest = false;
+	m_Config.bDX11WorldPipelineTest = false;
+	m_Config.bDX11WorldFramegraphTest = false;
 	m_Config.iPerfProfile		= 1;
 	m_Config.bFXAdaptive		= true;
 	m_Config.bAnimLOD			= true;
@@ -610,6 +1092,11 @@ bool CPythonSystem::LoadConfig()
 	char buf[256];
 	char command[256];
 	char value[256];
+	bool bSeenDX11NativeWorldAutoGate = false;
+	bool bSeenDX11StrictNativeOnly = false;
+	bool bSeenDX11DisableDX9CompatDevice = false;
+	bool bSeenDX11TerrainStabilizationMode = false;
+	bool bSeenDX11TexturePipelineMode = false;
 
 	while (fgets(buf, 256, fp))
 	{
@@ -668,10 +1155,97 @@ bool CPythonSystem::LoadConfig()
 			m_Config.bShowDamage = atoi(value) == 1 ? true : false;
 		else if (!stricmp(command, "SHOW_SALESTEXT"))
 			m_Config.bShowSalesText = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "RENDER_API"))
+			m_Config.iRenderAPI = ParseRenderAPI(value);
+		else if (!stricmp(command, "SHADER_CACHE_VERSION"))
+			m_Config.iShaderCacheVersion = NormalizeShaderCacheVersion(atoi(value));
 		else if (!stricmp(command, "RENDER_FPS_LIMIT"))
 			m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(atoi(value));
 		else if (!stricmp(command, "VSYNC"))
 			m_Config.bVSync = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_EXPERIMENTAL_PRESENT"))
+			m_Config.bDX11ExperimentalPresent = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_FIRST_PASS_ACTIVE"))
+			m_Config.bDX11FirstPassActive = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_NATIVE_VISIBLE"))
+			m_Config.bDX11NativeVisible = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_NATIVE_UI_MINIMAL"))
+			m_Config.bDX11NativeUIMinimal = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_NATIVE_WORLD_MINIMAL"))
+			m_Config.bDX11NativeWorldMinimal = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_NATIVE_WORLD_FORCE_VISIBLE"))
+			m_Config.bDX11NativeWorldForceVisible = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_NATIVE_WORLD_AUTOGATE"))
+		{
+			bSeenDX11NativeWorldAutoGate = true;
+			m_Config.bDX11NativeWorldAutoGate = atoi(value) == 1 ? true : false;
+		}
+		else if (!stricmp(command, "DX11_STRICT_NATIVE_ONLY"))
+		{
+			bSeenDX11StrictNativeOnly = true;
+			m_Config.bDX11StrictNativeOnly = atoi(value) == 1 ? true : false;
+		}
+		else if (!stricmp(command, "DX11_DISABLE_DX9_COMPAT_DEVICE"))
+		{
+			bSeenDX11DisableDX9CompatDevice = true;
+			m_Config.bDX11DisableDX9CompatDevice = atoi(value) == 1 ? true : false;
+		}
+		else if (!stricmp(command, "DX11_TERRAIN_STABILIZATION_MODE"))
+		{
+			bSeenDX11TerrainStabilizationMode = true;
+			m_Config.bDX11TerrainStabilizationMode = atoi(value) == 1 ? true : false;
+		}
+		else if (!stricmp(command, "DX11_TEXTURE_PIPELINE_MODE"))
+		{
+			bSeenDX11TexturePipelineMode = true;
+			m_Config.iDX11TexturePipelineMode = ParseDX11TexturePipelineMode(value);
+		}
+		else if (!stricmp(command, "DX11_VISIBLE_BOOTSTRAP"))
+			m_Config.bDX11VisibleBootstrap = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_UI_PASS_ONLY"))
+			m_Config.bDX11UIPassOnly = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_UI_NATIVE_TEST"))
+			m_Config.bDX11UINativeTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_UI_TEXTURE_TEST"))
+			m_Config.bDX11UITextureTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_DEPTH_TEST"))
+			m_Config.bDX11WorldDepthTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_BATCH_TEST"))
+			m_Config.bDX11WorldBatchTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_SPRITE_TEST"))
+			m_Config.bDX11WorldSpriteTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_STATE_TEST"))
+			m_Config.bDX11WorldStateTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_PASSES_TEST"))
+			m_Config.bDX11WorldPassesTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_BRIDGE_TEST"))
+			m_Config.bDX11WorldBridgeTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_SUBSYSTEM_TEST"))
+			m_Config.bDX11WorldSubsystemTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_REALTIME_TEST"))
+			m_Config.bDX11WorldRealtimeTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_METRICS_TEST"))
+			m_Config.bDX11WorldMetricsTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_INSTANCE_FEED_TEST"))
+			m_Config.bDX11WorldInstanceFeedTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_FINALCHECK_TEST"))
+			m_Config.bDX11WorldFinalcheckTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_HANDOFF_TEST"))
+			m_Config.bDX11WorldHandoffTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_SWAPCHAIN_TEST"))
+			m_Config.bDX11WorldSwapchainTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_PRESENTPATH_TEST"))
+			m_Config.bDX11WorldPresentPathTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_VISIBLE_PASS1_TEST"))
+			m_Config.bDX11WorldVisiblePass1Test = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_COMPOSER_TEST"))
+			m_Config.bDX11WorldComposerTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_SCENEGRAPH_TEST"))
+			m_Config.bDX11WorldScenegraphTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_PIPELINE_TEST"))
+			m_Config.bDX11WorldPipelineTest = atoi(value) == 1 ? true : false;
+		else if (!stricmp(command, "DX11_WORLD_FRAMEGRAPH_TEST"))
+			m_Config.bDX11WorldFramegraphTest = atoi(value) == 1 ? true : false;
 		else if (!stricmp(command, "PERF_PROFILE"))
 			m_Config.iPerfProfile = ParsePerfProfile(value);
 		else if (!stricmp(command, "FX_ADAPTIVE"))
@@ -693,10 +1267,159 @@ bool CPythonSystem::LoadConfig()
 	}
 
 	m_Config.iRenderFPSLimit = NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit);
+	m_Config.iRenderAPI = NormalizeRenderAPI(m_Config.iRenderAPI);
+	m_Config.iShaderCacheVersion = NormalizeShaderCacheVersion(m_Config.iShaderCacheVersion);
 	m_Config.iPerfProfile = NormalizePerfProfile(m_Config.iPerfProfile);
 	m_Config.iShadowCadence = NormalizeShadowCadence(m_Config.iShadowCadence);
 	m_Config.iFXStrideBias = NormalizeFXStrideBias(m_Config.iFXStrideBias);
 	m_Config.iTextTailOptRange = NormalizeTextTailOptRange(m_Config.iTextTailOptRange);
+	m_Config.iDX11TexturePipelineMode = NormalizeDX11TexturePipelineMode(m_Config.iDX11TexturePipelineMode);
+
+	// Runtime strict policy also enforces DX11-only render API.
+	// Keep this independent from build-time strict so config-only mode works too.
+	if (m_Config.bDX11StrictNativeOnly && 11 != m_Config.iRenderAPI)
+	{
+		const int iOldRenderAPI = m_Config.iRenderAPI;
+		m_Config.iRenderAPI = 11;
+		TraceError("DX11_CONFIG_OVERRIDE key=RENDER_API old=%d new=11 reason=strict_native_only_policy", iOldRenderAPI);
+	}
+
+#if defined(DX11_STRICT_ONLY)
+	// Compile-time strict build must never boot in DX9 mode, even with stale config.
+	if (11 != m_Config.iRenderAPI)
+	{
+		const int iOldRenderAPI = m_Config.iRenderAPI;
+		m_Config.iRenderAPI = 11;
+		TraceError("DX11_CONFIG_OVERRIDE key=RENDER_API old=%d new=11 reason=dx11_strict_only_build", iOldRenderAPI);
+	}
+	if (!m_Config.bDX11StrictNativeOnly)
+	{
+		m_Config.bDX11StrictNativeOnly = true;
+		TraceError("DX11_CONFIG_OVERRIDE key=DX11_STRICT_NATIVE_ONLY old=0 new=1 reason=dx11_strict_only_build");
+	}
+	if (!m_Config.bDX11DisableDX9CompatDevice)
+	{
+		m_Config.bDX11DisableDX9CompatDevice = true;
+		TraceError("DX11_CONFIG_OVERRIDE key=DX11_DISABLE_DX9_COMPAT_DEVICE old=0 new=1 reason=dx11_strict_only_build");
+	}
+#endif
+
+	if (11 == m_Config.iRenderAPI)
+	{
+		if (!bSeenDX11NativeWorldAutoGate)
+		{
+			m_Config.bDX11NativeWorldAutoGate = true;
+			TraceError("DX11_CONFIG_MIGRATION key=DX11_NATIVE_WORLD_AUTOGATE value=1 reason=missing_cfg_key");
+		}
+		if (!bSeenDX11StrictNativeOnly)
+		{
+			m_Config.bDX11StrictNativeOnly = true;
+			TraceError("DX11_CONFIG_MIGRATION key=DX11_STRICT_NATIVE_ONLY value=1 reason=full_dx11_policy_missing_cfg_key");
+		}
+		if (!bSeenDX11DisableDX9CompatDevice)
+		{
+			m_Config.bDX11DisableDX9CompatDevice = true;
+			TraceError("DX11_CONFIG_MIGRATION key=DX11_DISABLE_DX9_COMPAT_DEVICE value=1 reason=missing_cfg_key");
+		}
+		if (!bSeenDX11TerrainStabilizationMode)
+		{
+			m_Config.bDX11TerrainStabilizationMode = false;
+			TraceError("DX11_CONFIG_MIGRATION key=DX11_TERRAIN_STABILIZATION_MODE value=0 reason=missing_cfg_key");
+		}
+		if (!bSeenDX11TexturePipelineMode)
+		{
+			m_Config.iDX11TexturePipelineMode = 0;
+			TraceError("DX11_CONFIG_MIGRATION key=DX11_TEXTURE_PIPELINE_MODE value=NATIVE reason=missing_cfg_key");
+		}
+
+		// Full DX11 migration policy: when renderer is DX11, keep strict native-only enabled.
+		// This avoids drifting back to bridge/copy path due stale config.
+		if (!m_Config.bDX11StrictNativeOnly)
+		{
+			m_Config.bDX11StrictNativeOnly = true;
+			TraceError("DX11_CONFIG_OVERRIDE key=DX11_STRICT_NATIVE_ONLY old=0 new=1 reason=full_dx11_native_policy");
+		}
+
+		// Stabilization mode may keep native-present blocked intentionally.
+		if (m_Config.bDX11TerrainStabilizationMode && m_Config.bDX11NativeWorldAutoGate)
+		{
+			TraceError("DX11_CONFIG_NOTE key=DX11_NATIVE_WORLD_AUTOGATE value=1 note=terrain_stabilization_mode_will_block_auto_present");
+		}
+
+		// Strict DX11-only runtime policy: no bridge/copy cutover mode.
+		// Enforced by full DX11 policy for DX11 renderer sessions.
+		if (m_Config.bDX11StrictNativeOnly)
+		{
+			if (!m_Config.bDX11NativeVisible)
+			{
+				m_Config.bDX11NativeVisible = true;
+				TraceError("DX11_CONFIG_CONFLICT key=DX11_NATIVE_VISIBLE old=0 new=1 reason=strict_native_only_requires_native_visible");
+			}
+			if (!m_Config.bDX11NativeWorldAutoGate)
+			{
+				m_Config.bDX11NativeWorldAutoGate = true;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_NATIVE_WORLD_AUTOGATE old=0 new=1 reason=strict_native_only_policy");
+			}
+			if (!m_Config.bDX11DisableDX9CompatDevice)
+			{
+				m_Config.bDX11DisableDX9CompatDevice = true;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_DISABLE_DX9_COMPAT_DEVICE old=0 new=1 reason=strict_native_only_policy");
+			}
+			if (m_Config.bDX11TerrainStabilizationMode)
+			{
+				m_Config.bDX11TerrainStabilizationMode = false;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_TERRAIN_STABILIZATION_MODE old=1 new=0 reason=strict_native_only_policy");
+			}
+		}
+
+		// Full DX11 strict-native policy:
+		// UI/world minimal toggles are debug bring-up knobs and can hide content
+		// (e.g. terrain/UI) in normal gameplay sessions. Force them OFF here.
+		if (m_Config.bDX11StrictNativeOnly)
+		{
+			if (m_Config.bDX11NativeUIMinimal)
+			{
+				m_Config.bDX11NativeUIMinimal = false;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_NATIVE_UI_MINIMAL old=1 new=0 reason=strict_native_only_policy");
+			}
+			if (m_Config.bDX11NativeWorldMinimal)
+			{
+				m_Config.bDX11NativeWorldMinimal = false;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_NATIVE_WORLD_MINIMAL old=1 new=0 reason=strict_native_only_policy");
+			}
+			if (m_Config.bDX11UIPassOnly)
+			{
+				m_Config.bDX11UIPassOnly = false;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_UI_PASS_ONLY old=1 new=0 reason=strict_native_only_policy");
+			}
+			if (m_Config.bDX11FirstPassActive)
+			{
+				m_Config.bDX11FirstPassActive = false;
+				TraceError("DX11_CONFIG_OVERRIDE key=DX11_FIRST_PASS_ACTIVE old=1 new=0 reason=strict_native_only_policy");
+			}
+		}
+
+		// Respect explicit user/system configuration for native world autogate.
+		// Do not force-enable it here; terrain stabilization and runtime bring-up
+		// may intentionally keep autogate disabled.
+
+		// Keep full native texture path on DX11 runtime.
+		if (0 != m_Config.iDX11TexturePipelineMode)
+		{
+			const int iOldMode = m_Config.iDX11TexturePipelineMode;
+			m_Config.iDX11TexturePipelineMode = 0;
+			TraceError("DX11_CONFIG_OVERRIDE key=DX11_TEXTURE_PIPELINE_MODE old=%d new=%d reason=full_dx11_native_texture_policy", iOldMode, m_Config.iDX11TexturePipelineMode);
+		}
+
+		TraceError(
+			"DX11_CONFIG_STATE render_api=%d native_world_autogate=%d strict_native_only=%d disable_dx9_compat_device=%d terrain_stabilization=%d texture_pipeline_mode=%d",
+			m_Config.iRenderAPI,
+			m_Config.bDX11NativeWorldAutoGate ? 1 : 0,
+			m_Config.bDX11StrictNativeOnly ? 1 : 0,
+			m_Config.bDX11DisableDX9CompatDevice ? 1 : 0,
+			m_Config.bDX11TerrainStabilizationMode ? 1 : 0,
+			m_Config.iDX11TexturePipelineMode);
+	}
 
 	if (m_Config.bWindowed)
 	{
@@ -789,8 +1512,44 @@ bool CPythonSystem::SaveConfig()
 	// MR-14: Fog update by Alaric
 	fprintf(fp, "FOG_LEVEL				%d\n", m_Config.iFogLevel);
 	// MR-14: -- END OF -- Fog update by Alaric
+	fprintf(fp, "RENDER_API				%s\n", RenderAPIToString(m_Config.iRenderAPI));
+	fprintf(fp, "SHADER_CACHE_VERSION		%d\n", NormalizeShaderCacheVersion(m_Config.iShaderCacheVersion));
 	fprintf(fp, "RENDER_FPS_LIMIT		%d\n", NormalizeRenderFPSLimit(m_Config.iRenderFPSLimit));
 	fprintf(fp, "VSYNC					%d\n", m_Config.bVSync ? 1 : 0);
+	fprintf(fp, "DX11_EXPERIMENTAL_PRESENT	%d\n", m_Config.bDX11ExperimentalPresent ? 1 : 0);
+	fprintf(fp, "DX11_FIRST_PASS_ACTIVE		%d\n", m_Config.bDX11FirstPassActive ? 1 : 0);
+	fprintf(fp, "DX11_NATIVE_VISIBLE		%d\n", m_Config.bDX11NativeVisible ? 1 : 0);
+	fprintf(fp, "DX11_NATIVE_UI_MINIMAL		%d\n", m_Config.bDX11NativeUIMinimal ? 1 : 0);
+	fprintf(fp, "DX11_NATIVE_WORLD_MINIMAL	%d\n", m_Config.bDX11NativeWorldMinimal ? 1 : 0);
+	fprintf(fp, "DX11_NATIVE_WORLD_FORCE_VISIBLE	%d\n", m_Config.bDX11NativeWorldForceVisible ? 1 : 0);
+	fprintf(fp, "DX11_NATIVE_WORLD_AUTOGATE	%d\n", m_Config.bDX11NativeWorldAutoGate ? 1 : 0);
+	fprintf(fp, "DX11_STRICT_NATIVE_ONLY	%d\n", m_Config.bDX11StrictNativeOnly ? 1 : 0);
+	fprintf(fp, "DX11_DISABLE_DX9_COMPAT_DEVICE	%d\n", m_Config.bDX11DisableDX9CompatDevice ? 1 : 0);
+	fprintf(fp, "DX11_TERRAIN_STABILIZATION_MODE	%d\n", m_Config.bDX11TerrainStabilizationMode ? 1 : 0);
+	fprintf(fp, "DX11_TEXTURE_PIPELINE_MODE	%s\n", DX11TexturePipelineModeToString(m_Config.iDX11TexturePipelineMode));
+	fprintf(fp, "DX11_VISIBLE_BOOTSTRAP		%d\n", m_Config.bDX11VisibleBootstrap ? 1 : 0);
+	fprintf(fp, "DX11_UI_PASS_ONLY		%d\n", m_Config.bDX11UIPassOnly ? 1 : 0);
+	fprintf(fp, "DX11_UI_NATIVE_TEST		%d\n", m_Config.bDX11UINativeTest ? 1 : 0);
+	fprintf(fp, "DX11_UI_TEXTURE_TEST		%d\n", m_Config.bDX11UITextureTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_DEPTH_TEST		%d\n", m_Config.bDX11WorldDepthTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_BATCH_TEST		%d\n", m_Config.bDX11WorldBatchTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_SPRITE_TEST		%d\n", m_Config.bDX11WorldSpriteTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_STATE_TEST		%d\n", m_Config.bDX11WorldStateTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_PASSES_TEST		%d\n", m_Config.bDX11WorldPassesTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_BRIDGE_TEST		%d\n", m_Config.bDX11WorldBridgeTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_SUBSYSTEM_TEST	%d\n", m_Config.bDX11WorldSubsystemTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_REALTIME_TEST	%d\n", m_Config.bDX11WorldRealtimeTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_METRICS_TEST	%d\n", m_Config.bDX11WorldMetricsTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_INSTANCE_FEED_TEST	%d\n", m_Config.bDX11WorldInstanceFeedTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_FINALCHECK_TEST	%d\n", m_Config.bDX11WorldFinalcheckTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_HANDOFF_TEST	%d\n", m_Config.bDX11WorldHandoffTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_SWAPCHAIN_TEST	%d\n", m_Config.bDX11WorldSwapchainTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_PRESENTPATH_TEST	%d\n", m_Config.bDX11WorldPresentPathTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_VISIBLE_PASS1_TEST	%d\n", m_Config.bDX11WorldVisiblePass1Test ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_COMPOSER_TEST	%d\n", m_Config.bDX11WorldComposerTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_SCENEGRAPH_TEST	%d\n", m_Config.bDX11WorldScenegraphTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_PIPELINE_TEST	%d\n", m_Config.bDX11WorldPipelineTest ? 1 : 0);
+	fprintf(fp, "DX11_WORLD_FRAMEGRAPH_TEST	%d\n", m_Config.bDX11WorldFramegraphTest ? 1 : 0);
 	fprintf(fp, "PERF_PROFILE			%s\n", PerfProfileToString(m_Config.iPerfProfile));
 	fprintf(fp, "FX_ADAPTIVE			%d\n", m_Config.bFXAdaptive ? 1 : 0);
 	fprintf(fp, "ANIM_LOD				%d\n", m_Config.bAnimLOD ? 1 : 0);
@@ -850,7 +1609,7 @@ const CPythonSystem::TWindowStatus & CPythonSystem::GetWindowStatusReference(int
 	return m_WindowStatus[iIndex];
 }
 
-void CPythonSystem::ApplyConfig() // 이전 설정과 현재 설정을 비교해서 바뀐 설정을 적용 한다.
+void CPythonSystem::ApplyConfig() // ?????? ????????? ?????? ????????? ???????????? ?????? ????????? ?????? ??????.
 {
 	if (m_OldConfig.gamma != m_Config.gamma)
 	{
@@ -881,6 +1640,19 @@ void CPythonSystem::ApplyConfig() // 이전 설정과 현재 설정을 비교해
 
 	if (m_OldConfig.bVSync != m_Config.bVSync)
 		CPythonApplication::Instance().SetVSync(m_Config.bVSync);
+
+	if (m_OldConfig.bDX11ExperimentalPresent != m_Config.bDX11ExperimentalPresent)
+		CPythonApplication::Instance().SetDX11ExperimentalPresent(m_Config.bDX11ExperimentalPresent);
+
+	if (m_OldConfig.iRenderAPI != m_Config.iRenderAPI)
+		TraceError("RENDER_API changed from %s to %s. Restart client to apply render backend switch.",
+			RenderAPIToString(m_OldConfig.iRenderAPI),
+			RenderAPIToString(m_Config.iRenderAPI));
+
+	if (m_OldConfig.iShaderCacheVersion != m_Config.iShaderCacheVersion)
+		TraceError("SHADER_CACHE_VERSION changed from %d to %d.",
+			NormalizeShaderCacheVersion(m_OldConfig.iShaderCacheVersion),
+			NormalizeShaderCacheVersion(m_Config.iShaderCacheVersion));
 
 	if (m_OldConfig.iPerfProfile != m_Config.iPerfProfile ||
 		m_OldConfig.bFXAdaptive != m_Config.bFXAdaptive ||
@@ -966,3 +1738,4 @@ CPythonSystem::~CPythonSystem()
 {
 	assert(m_poInterfaceHandler==NULL && "CPythonSystem MUST CLEAR!");
 }
+

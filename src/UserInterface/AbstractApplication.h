@@ -16,7 +16,7 @@ class IAbstractApplication : public TAbstractSingleton<IAbstractApplication>
 
 		struct SCameraSetting
 		{
-			D3DXVECTOR3				v3CenterPosition;
+			DirectX::SimpleMath::Vector3				v3CenterPosition;
 			SCameraPos				kCmrPos;
 			float					fRotation;
 			float					fPitch;
@@ -29,8 +29,8 @@ class IAbstractApplication : public TAbstractSingleton<IAbstractApplication>
 		};
 
 	public:
-		IAbstractApplication() {}
-		virtual ~IAbstractApplication() {}
+		IAbstractApplication() = default;
+		virtual ~IAbstractApplication() = default;
 
 		virtual void GetMousePosition(POINT* ppt) = 0;
 		virtual float GetGlobalTime() = 0;
