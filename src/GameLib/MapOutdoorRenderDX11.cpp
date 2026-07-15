@@ -1530,7 +1530,9 @@ void CMapOutdoor::RenderTerrainDX11(
 	}
 
 	m_PatchVector.clear();
-	__RenderTerrain_RecurseRenderQuadTree(m_pRootNode, true);
+	__RenderTerrain_RecurseRenderQuadTree(
+		m_pRootNode,
+		!DX11RuntimeConfig::kForceFullTerrainCoverage);
 
 	std::sort(m_PatchVector.begin(), m_PatchVector.end());
 	SetPatchDrawVector();

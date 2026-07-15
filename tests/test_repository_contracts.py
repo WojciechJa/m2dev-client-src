@@ -18,6 +18,18 @@ def git(*args: str) -> str:
 
 
 class RepositoryContractsTest(unittest.TestCase):
+    def test_terrain_coverage_setting_controls_quadtree_culling(self) -> None:
+        renderer = (
+            REPO_ROOT / "src" / "GameLib" / "MapOutdoorRenderDX11.cpp"
+        ).read_text(encoding="utf-8")
+        normalized = "".join(renderer.split())
+
+        self.assertIn(
+            "__RenderTerrain_RecurseRenderQuadTree("
+            "m_pRootNode,!DX11RuntimeConfig::kForceFullTerrainCoverage);",
+            normalized,
+        )
+
     def test_ci_covers_active_development_branch_and_pull_requests(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "main.yml").read_text(
             encoding="utf-8"
