@@ -122,18 +122,18 @@ bool CStormEnvironment::RunWeatherRestoreDiagnostic()
 
 	const DWORD dwExpectedParticleCount = m_pRainEnvironment->GetParticleCount();
 	const DirectX::SimpleMath::Vector3 v3ExpectedWind = m_pRainEnvironment->GetWindVector();
-	const bool bSavedAutoLightning = m_bAutoLightning;
-	const float fSavedWindGustChance = m_fWindGustChance;
-
-	m_bAutoLightning = false;
-	m_fWindGustChance = 0.0f;
 	Enable();
-	Update(m_fStormRampUpTime);
-	const DWORD dwStormParticleCount = m_pRainEnvironment->GetParticleCount();
-	Disable();
 
-	m_bAutoLightning = bSavedAutoLightning;
-	m_fWindGustChance = fSavedWindGustChance;
+	const DWORD dwDiagnosticParticleCount = dwExpectedParticleCount == 4321u ? 8765u : 4321u;
+	const DirectX::SimpleMath::Vector3 v3DiagnosticWind(
+		v3ExpectedWind.x + 137.0f,
+		v3ExpectedWind.y - 251.0f,
+		v3ExpectedWind.z + 389.0f);
+	m_pRainEnvironment->SetParticleCount(dwDiagnosticParticleCount);
+	m_pRainEnvironment->SetWindVector(v3DiagnosticWind);
+	const DWORD dwStormParticleCount = m_pRainEnvironment->GetParticleCount();
+	const DirectX::SimpleMath::Vector3 v3StormWind = m_pRainEnvironment->GetWindVector();
+	Disable();
 
 	const DWORD dwRestoredParticleCount = m_pRainEnvironment->GetParticleCount();
 	const DirectX::SimpleMath::Vector3 v3RestoredWind = m_pRainEnvironment->GetWindVector();
@@ -145,12 +145,13 @@ bool CStormEnvironment::RunWeatherRestoreDiagnostic()
 
 	TraceError(
 		"STORM_RESTORE_DIAGNOSTIC result=%s particles_before=%u particles_storm=%u particles_after=%u "
-		"wind_before=(%.3f,%.3f,%.3f) wind_after=(%.3f,%.3f,%.3f)",
+		"wind_before=(%.3f,%.3f,%.3f) wind_storm=(%.3f,%.3f,%.3f) wind_after=(%.3f,%.3f,%.3f)",
 		bPassed ? "pass" : "fail",
 		dwExpectedParticleCount,
 		dwStormParticleCount,
 		dwRestoredParticleCount,
 		v3ExpectedWind.x, v3ExpectedWind.y, v3ExpectedWind.z,
+		v3StormWind.x, v3StormWind.y, v3StormWind.z,
 		v3RestoredWind.x, v3RestoredWind.y, v3RestoredWind.z);
 	return bPassed;
 }
